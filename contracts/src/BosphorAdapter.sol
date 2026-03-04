@@ -5,8 +5,8 @@ contract BosphorAdapter {
     // --- Types ---
     struct Intent {
         address sender;
-        uint64 targetChainId; // Sui chain identifier
-        bytes payload;        // arbitrary data to store on Walrus
+        uint64 targetChainId;
+        bytes payload;
         uint256 nonce;
         uint256 deadline;
     }
@@ -23,21 +23,24 @@ contract BosphorAdapter {
 
     event IntentExecuted(bytes32 indexed intentId, bytes proof);
 
+    event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+
     // --- State ---
     address public owner;
     address public trustedRelayer;
-    mapping(bytes32 => bool) public intents;     // intentId => submitted
-    mapping(bytes32 => bool) public executed;     // intentId => executed
+    mapping(bytes32 => bool) public intents;
+    mapping(bytes32 => bool) public executed;
+    mapping(bytes32 => uint256) public intentDeadlines;
     mapping(address => uint256) public nonces;
 
     // --- Errors ---
     error DeadlineExpired();
-    error InvalidNonce();
     error IntentAlreadyExists();
     error IntentNotFound();
     error AlreadyExecuted();
     error OnlyRelayer();
     error OnlyOwner();
+    error ZeroAddress();
 
     // --- Modifiers ---
     modifier onlyOwner() {
@@ -52,6 +55,7 @@ contract BosphorAdapter {
 
     // --- Constructor ---
     constructor(address _trustedRelayer) {
+        if (_trustedRelayer == address(0)) revert ZeroAddress();
         owner = msg.sender;
         trustedRelayer = _trustedRelayer;
     }
@@ -72,6 +76,7 @@ contract BosphorAdapter {
 
         if (intents[intentId]) revert IntentAlreadyExists();
         intents[intentId] = true;
+        intentDeadlines[intentId] = _deadline;
 
         emit IntentSubmitted(
             intentId,
@@ -89,6 +94,7 @@ contract BosphorAdapter {
     ) external onlyRelayer {
         if (!intents[_intentId]) revert IntentNotFound();
         if (executed[_intentId]) revert AlreadyExecuted();
+        if (block.timestamp > intentDeadlines[_intentId]) revert DeadlineExpired();
 
         executed[_intentId] = true;
 
@@ -97,7 +103,10 @@ contract BosphorAdapter {
 
     // --- Admin ---
     function setRelayer(address _relayer) external onlyOwner {
+        if (_relayer == address(0)) revert ZeroAddress();
+        address old = trustedRelayer;
         trustedRelayer = _relayer;
+        emit RelayerUpdated(old, _relayer);
     }
 
     // --- View ---
