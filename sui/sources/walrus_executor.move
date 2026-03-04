@@ -1,23 +1,28 @@
 module bosphor::walrus_executor {
     use sui::event;
+    use sui::table::{Self, Table};
+    use sui::clock::Clock;
     use walrus::blob::Blob;
 
     // --- Errors ---
     const ENotRelayer: u64 = 0;
     const EBlobNotCertified: u64 = 1;
+    const EIntentAlreadyExecuted: u64 = 2;
+    const EDeadlineExpired: u64 = 3;
 
     // --- Types ---
     public struct ExecutorConfig has key {
         id: UID,
         relayer: address,
+        executed_intents: Table<vector<u8>, bool>,
     }
 
     public struct StorageReceipt has key, store {
         id: UID,
-        intent_id: vector<u8>,    // EVM intent hash (32 bytes)
-        walrus_blob_id: u256,     // real Walrus blob ID from certified Blob object
-        end_epoch: u32,           // Walrus storage end epoch
-        sender: address,          // original EVM sender (mapped)
+        intent_id: vector<u8>,
+        walrus_blob_id: u256,
+        end_epoch: u32,
+        sender: address,
     }
 
     // --- Events ---
@@ -38,6 +43,7 @@ module bosphor::walrus_executor {
         let config = ExecutorConfig {
             id: object::new(ctx),
             relayer: ctx.sender(),
+            executed_intents: table::new(ctx),
         };
         let config_addr = config.id.to_address();
         transfer::share_object(config);
@@ -48,19 +54,21 @@ module bosphor::walrus_executor {
     }
 
     // --- Core ---
-    /// Called by the relayer after storing blob via Walrus.
-    /// Accepts the real Walrus Blob object, reads blob_id from it,
-    /// records on-chain, and transfers Blob to the original sender.
     public fun execute_store(
-        config: &ExecutorConfig,
+        config: &mut ExecutorConfig,
         intent_id: vector<u8>,
         blob: Blob,
+        deadline_ms: u64,
+        clock: &Clock,
         original_sender: address,
         ctx: &mut TxContext,
     ) {
         assert!(ctx.sender() == config.relayer, ENotRelayer);
-        // Blob must be certified (has availability proof)
         assert!(blob.certified_epoch().is_some(), EBlobNotCertified);
+        assert!(!config.executed_intents.contains(intent_id), EIntentAlreadyExecuted);
+        assert!(clock.timestamp_ms() <= deadline_ms, EDeadlineExpired);
+
+        config.executed_intents.add(intent_id, true);
 
         let walrus_blob_id = blob.blob_id();
         let end_epoch = blob.end_epoch();
@@ -80,9 +88,13 @@ module bosphor::walrus_executor {
             sender: original_sender,
         };
 
-        // Transfer Blob to original sender (they own their data)
         transfer::public_transfer(blob, original_sender);
         transfer::transfer(receipt, original_sender);
+    }
+
+    // --- View ---
+    public fun is_executed(config: &ExecutorConfig, intent_id: vector<u8>): bool {
+        config.executed_intents.contains(intent_id)
     }
 
     // --- Admin ---
@@ -93,5 +105,11 @@ module bosphor::walrus_executor {
     ) {
         assert!(ctx.sender() == config.relayer, ENotRelayer);
         config.relayer = new_relayer;
+    }
+
+    // --- Testing ---
+    #[test_only]
+    public fun init_for_testing(ctx: &mut TxContext) {
+        init(ctx);
     }
 }
