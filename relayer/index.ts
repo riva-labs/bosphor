@@ -41,6 +41,8 @@ const ADAPTER_ABI = [
   "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
   "function confirmExecution(bytes32 intentId, bytes proof) external",
   "function executed(bytes32) view returns (bool)",
+  "function quote(uint32 dstEid, bytes payload, uint256 deadline, bytes options) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+  "function submitIntent(uint32 dstEid, bytes payload, uint256 deadline, bytes options) payable returns (bytes32)",
 ];
 
 // --- Providers & Signers ---
