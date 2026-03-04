@@ -40,6 +40,7 @@ const evmRelayerKey = requireEnv("EVM_RELAYER_KEY", EVM_RELAYER_KEY);
 const ADAPTER_ABI = [
   "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
   "function confirmExecution(bytes32 intentId, bytes proof) external",
+  "function executed(bytes32) view returns (bool)",
 ];
 
 // --- Providers & Signers ---
@@ -61,10 +62,16 @@ const suiKeypair = suiRelayerKey.startsWith("suipriv")
 
 const relayerSuiAddress = suiKeypair.toSuiAddress();
 
+// Sui Clock shared object (0x6 is the well-known Clock object ID)
+const SUI_CLOCK_OBJECT = "0x6";
+
+// --- Intent deduplication ---
+const processedIntents = new Set<string>();
+
 // --- Walrus Publisher upload ---
 interface WalrusBlobInfo {
-  blobId: string;       // base64url encoded blob ID
-  suiObjectId: string;  // Blob Sui object ID (owned by relayer)
+  blobId: string;
+  suiObjectId: string;
   endEpoch: number;
 }
 
@@ -94,7 +101,7 @@ async function uploadToWalrus(payload: Uint8Array): Promise<WalrusBlobInfo> {
   if (data.alreadyCertified) {
     return {
       blobId: data.alreadyCertified.blobId,
-      suiObjectId: "", // already certified — no new Blob object created
+      suiObjectId: "",
       endEpoch: data.alreadyCertified.endEpoch ?? 0,
     };
   }
@@ -104,7 +111,6 @@ async function uploadToWalrus(payload: Uint8Array): Promise<WalrusBlobInfo> {
 
 // --- Find Blob object owned by relayer ---
 async function findBlobObject(blobId: string): Promise<string> {
-  // Query owned objects of type Blob
   const objects = await suiClient.getOwnedObjects({
     owner: relayerSuiAddress,
     filter: { StructType: `${walrusPackageId()}::blob::Blob` },
@@ -125,7 +131,6 @@ async function findBlobObject(blobId: string): Promise<string> {
 }
 
 function walrusPackageId(): string {
-  // Original Walrus package ID on testnet (the type is defined at original publish)
   return "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66";
 }
 
@@ -134,6 +139,7 @@ async function executeOnSui(
   intentId: string,
   sender: string,
   blobObjectId: string,
+  deadlineMs: bigint,
 ): Promise<string> {
   const tx = new Transaction();
   tx.moveCall({
@@ -142,6 +148,8 @@ async function executeOnSui(
       tx.object(suiConfigId),
       tx.pure.vector("u8", Array.from(ethers.getBytes(intentId))),
       tx.object(blobObjectId),
+      tx.pure.u64(deadlineMs),
+      tx.object(SUI_CLOCK_OBJECT),
       tx.pure.address(sender),
     ],
   });
@@ -151,6 +159,11 @@ async function executeOnSui(
     transaction: tx,
     options: { showEffects: true },
   });
+
+  const status = result.effects?.status?.status;
+  if (status !== "success") {
+    throw new Error(`Sui tx failed: ${JSON.stringify(result.effects?.status)}`);
+  }
 
   console.log(`  Sui tx digest: ${result.digest}`);
   return result.digest;
@@ -181,12 +194,27 @@ async function pollEvents(fromBlock: number): Promise<number> {
     });
     if (!parsed) continue;
 
-    const { intentId, sender, targetChainId, payload, nonce } = parsed.args;
+    const { intentId, sender, targetChainId, payload, nonce, deadline } = parsed.args;
+
+    // Dedup: skip if already processed
+    if (processedIntents.has(intentId)) {
+      console.log(`[Skip] ${intentId} — already processed`);
+      continue;
+    }
+
+    // Deadline check: skip expired intents (deadline is in seconds, convert to ms)
+    const deadlineMs = BigInt(deadline) * 1000n;
+    if (Date.now() > Number(deadlineMs)) {
+      console.log(`[Skip] ${intentId} — deadline expired`);
+      processedIntents.add(intentId);
+      continue;
+    }
+
     console.log(`[Intent] ${intentId}`);
     console.log(`  from: ${sender}, chain: ${targetChainId}, nonce: ${nonce}`);
 
     try {
-      // 1. Upload payload to Walrus via Publisher
+      // 1. Upload payload to Walrus
       console.log(`  Uploading to Walrus...`);
       const payloadBytes = ethers.getBytes(payload);
       const walrus = await uploadToWalrus(payloadBytes);
@@ -203,15 +231,17 @@ async function pollEvents(fromBlock: number): Promise<number> {
         console.log(`  Found: ${blobObjectId}`);
       }
 
-      // 3. Record on Sui — pass real Walrus Blob object
-      const suiDigest = await executeOnSui(intentId, sender, blobObjectId);
+      // 3. Record on Sui — pass real Walrus Blob object + deadline
+      const suiDigest = await executeOnSui(intentId, sender, blobObjectId, deadlineMs);
 
-      // 4. Confirm on EVM with Walrus blobId as proof
+      // 4. Confirm on EVM only if Sui succeeded
       await confirmOnEvm(intentId, walrus.blobId, suiDigest);
 
+      processedIntents.add(intentId);
       console.log(`  [OK] Intent ${intentId} fulfilled\n`);
     } catch (err) {
       console.error(`  [ERR] Intent ${intentId} failed:`, err);
+      // Do NOT mark as processed — allow retry on next poll
     }
   }
 
