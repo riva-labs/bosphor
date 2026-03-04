@@ -1,0 +1,17 @@
+# env
+.env
+
+# contracts
+contracts/out/
+contracts/cache/
+contracts/lib/
+
+# sui
+sui/build/
+
+# relayer
+relayer/node_modules/
+relayer/dist/
+
+# misc
+.DS_Store
