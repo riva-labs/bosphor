@@ -5,6 +5,7 @@
 contracts/out/
 contracts/cache/
 contracts/lib/
+contracts/broadcast/
 
 # sui
 sui/build/

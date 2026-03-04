@@ -1,9 +1,11 @@
-import "dotenv/config";
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(import.meta.dirname, "../.env") });
 import { ethers } from "ethers";
 import { SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { fromBase64 } from "@mysten/sui/utils";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 
 // --- Config ---
 const {
@@ -14,6 +16,9 @@ const {
   SUI_CONFIG_ID,
   SUI_RELAYER_KEY,
   EVM_RELAYER_KEY,
+  WALRUS_PUBLISHER_URL = "https://publisher.walrus-testnet.walrus.space",
+  WALRUS_AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space",
+  WALRUS_STORE_EPOCHS = "5",
 } = process.env;
 
 function requireEnv(name: string, value?: string): string {
@@ -31,38 +36,113 @@ const suiConfigId = requireEnv("SUI_CONFIG_ID", SUI_CONFIG_ID);
 const suiRelayerKey = requireEnv("SUI_RELAYER_KEY", SUI_RELAYER_KEY);
 const evmRelayerKey = requireEnv("EVM_RELAYER_KEY", EVM_RELAYER_KEY);
 
-// --- ABI (only what we need) ---
+// --- ABI ---
 const ADAPTER_ABI = [
   "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
   "function confirmExecution(bytes32 intentId, bytes proof) external",
 ];
 
 // --- Providers & Signers ---
-const evmProvider = new ethers.JsonRpcProvider(evmRpc);
+const evmProvider = new ethers.JsonRpcProvider(evmRpc, undefined, {
+  staticNetwork: true,
+  polling: true,
+});
 const evmWallet = new ethers.Wallet(evmRelayerKey, evmProvider);
 const adapter = new ethers.Contract(adapterAddr, ADAPTER_ABI, evmWallet);
 
 const suiClient = new SuiClient({ url: SUI_RPC_URL! });
-const suiKeypair = Ed25519Keypair.fromSecretKey(fromBase64(suiRelayerKey));
+const suiKeypair = suiRelayerKey.startsWith("suipriv")
+  ? (() => {
+      const { schema, secretKey } = decodeSuiPrivateKey(suiRelayerKey);
+      if (schema !== "ED25519") throw new Error(`Unsupported key schema: ${schema}`);
+      return Ed25519Keypair.fromSecretKey(secretKey);
+    })()
+  : Ed25519Keypair.fromSecretKey(Uint8Array.from(Buffer.from(suiRelayerKey, "base64")));
+
+const relayerSuiAddress = suiKeypair.toSuiAddress();
+
+// --- Walrus Publisher upload ---
+interface WalrusBlobInfo {
+  blobId: string;       // base64url encoded blob ID
+  suiObjectId: string;  // Blob Sui object ID (owned by relayer)
+  endEpoch: number;
+}
+
+async function uploadToWalrus(payload: Uint8Array): Promise<WalrusBlobInfo> {
+  const url = `${WALRUS_PUBLISHER_URL}/v1/blobs?epochs=${WALRUS_STORE_EPOCHS}&send_object_to=${relayerSuiAddress}`;
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: Buffer.from(payload),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Walrus upload failed (${res.status}): ${body}`);
+  }
+
+  const data = await res.json() as Record<string, any>;
+
+  if (data.newlyCreated) {
+    const blob = data.newlyCreated.blobObject;
+    return {
+      blobId: blob.blobId,
+      suiObjectId: blob.id,
+      endEpoch: blob.storage?.endEpoch ?? 0,
+    };
+  }
+  if (data.alreadyCertified) {
+    return {
+      blobId: data.alreadyCertified.blobId,
+      suiObjectId: "", // already certified — no new Blob object created
+      endEpoch: data.alreadyCertified.endEpoch ?? 0,
+    };
+  }
+
+  throw new Error(`Unexpected Walrus response: ${JSON.stringify(data)}`);
+}
+
+// --- Find Blob object owned by relayer ---
+async function findBlobObject(blobId: string): Promise<string> {
+  // Query owned objects of type Blob
+  const objects = await suiClient.getOwnedObjects({
+    owner: relayerSuiAddress,
+    filter: { StructType: `${walrusPackageId()}::blob::Blob` },
+    options: { showContent: true },
+  });
+
+  for (const obj of objects.data) {
+    const content = obj.data?.content;
+    if (content && content.dataType === "moveObject") {
+      const fields = content.fields as Record<string, any>;
+      if (fields.blob_id === blobId) {
+        return obj.data!.objectId;
+      }
+    }
+  }
+
+  throw new Error(`Blob object not found for blobId: ${blobId}`);
+}
+
+function walrusPackageId(): string {
+  // Original Walrus package ID on testnet (the type is defined at original publish)
+  return "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66";
+}
 
 // --- Sui execution ---
 async function executeOnSui(
   intentId: string,
   sender: string,
-  payload: Uint8Array
+  blobObjectId: string,
 ): Promise<string> {
-  // Simulate Walrus blob store — in production this calls the Walrus HTTP API
-  // For POC we store the payload hash as blob_id
-  const blobId = ethers.keccak256(payload);
-
   const tx = new Transaction();
   tx.moveCall({
     target: `${suiPkgId}::walrus_executor::execute_store`,
     arguments: [
       tx.object(suiConfigId),
       tx.pure.vector("u8", Array.from(ethers.getBytes(intentId))),
-      tx.pure.vector("u8", Array.from(ethers.getBytes(blobId))),
-      tx.pure.address(sender), // original EVM sender mapped — for POC, use relayer addr
+      tx.object(blobObjectId),
+      tx.pure.address(sender),
     ],
   });
 
@@ -77,50 +157,89 @@ async function executeOnSui(
 }
 
 // --- EVM confirmation ---
-async function confirmOnEvm(intentId: string, suiDigest: string) {
-  const proof = ethers.toUtf8Bytes(suiDigest);
-  const tx = await adapter.confirmExecution(intentId, proof);
+async function confirmOnEvm(intentId: string, walrusBlobId: string, suiDigest: string) {
+  const proof = JSON.stringify({ blobId: walrusBlobId, suiDigest });
+  const tx = await adapter.confirmExecution(intentId, ethers.toUtf8Bytes(proof));
   const receipt = await tx.wait();
   console.log(`  EVM confirm tx: ${receipt.hash}`);
 }
 
-// --- Listener ---
+// --- Polling-based listener ---
+const POLL_INTERVAL = 5_000;
+const intentFilter = adapter.filters.IntentSubmitted();
+
+async function pollEvents(fromBlock: number): Promise<number> {
+  const latestBlock = await evmProvider.getBlockNumber();
+  if (fromBlock > latestBlock) return fromBlock;
+
+  const logs = await adapter.queryFilter(intentFilter, fromBlock, latestBlock);
+
+  for (const log of logs) {
+    const parsed = adapter.interface.parseLog({
+      topics: log.topics as string[],
+      data: log.data,
+    });
+    if (!parsed) continue;
+
+    const { intentId, sender, targetChainId, payload, nonce } = parsed.args;
+    console.log(`[Intent] ${intentId}`);
+    console.log(`  from: ${sender}, chain: ${targetChainId}, nonce: ${nonce}`);
+
+    try {
+      // 1. Upload payload to Walrus via Publisher
+      console.log(`  Uploading to Walrus...`);
+      const payloadBytes = ethers.getBytes(payload);
+      const walrus = await uploadToWalrus(payloadBytes);
+      console.log(`  Walrus blobId: ${walrus.blobId}`);
+      console.log(`  Walrus object: ${walrus.suiObjectId}`);
+      console.log(`  Expires epoch: ${walrus.endEpoch}`);
+      console.log(`  Verify: ${WALRUS_AGGREGATOR_URL}/v1/blobs/${walrus.blobId}`);
+
+      // 2. Find blob object if not returned directly
+      let blobObjectId = walrus.suiObjectId;
+      if (!blobObjectId) {
+        console.log(`  Looking up Blob object...`);
+        blobObjectId = await findBlobObject(walrus.blobId);
+        console.log(`  Found: ${blobObjectId}`);
+      }
+
+      // 3. Record on Sui — pass real Walrus Blob object
+      const suiDigest = await executeOnSui(intentId, sender, blobObjectId);
+
+      // 4. Confirm on EVM with Walrus blobId as proof
+      await confirmOnEvm(intentId, walrus.blobId, suiDigest);
+
+      console.log(`  [OK] Intent ${intentId} fulfilled\n`);
+    } catch (err) {
+      console.error(`  [ERR] Intent ${intentId} failed:`, err);
+    }
+  }
+
+  return latestBlock + 1;
+}
+
 async function main() {
   console.log("Bosphor Relayer starting...");
-  console.log(`  EVM adapter: ${adapterAddr}`);
+  console.log(`  EVM adapter:  ${adapterAddr}`);
   console.log(`  Sui package:  ${suiPkgId}`);
-  console.log(`  Listening for IntentSubmitted events...\n`);
+  console.log(`  Sui relayer:  ${relayerSuiAddress}`);
+  console.log(`  Walrus pub:   ${WALRUS_PUBLISHER_URL}`);
+  console.log(`  Walrus agg:   ${WALRUS_AGGREGATOR_URL}`);
 
-  adapter.on(
-    "IntentSubmitted",
-    async (
-      intentId: string,
-      sender: string,
-      targetChainId: bigint,
-      payload: string,
-      nonce: bigint,
-      deadline: bigint
-    ) => {
-      console.log(`[Intent] ${intentId}`);
-      console.log(`  from: ${sender}, chain: ${targetChainId}, nonce: ${nonce}`);
+  let fromBlock = await evmProvider.getBlockNumber();
+  console.log(`  Starting from block: ${fromBlock}`);
+  console.log(`  Polling every ${POLL_INTERVAL / 1000}s for IntentSubmitted events...\n`);
 
-      try {
-        // 1. Execute on Sui (store blob)
-        const suiDigest = await executeOnSui(
-          intentId,
-          sender,
-          ethers.getBytes(payload)
-        );
-
-        // 2. Confirm back on EVM
-        await confirmOnEvm(intentId, suiDigest);
-
-        console.log(`  [OK] Intent ${intentId} fulfilled\n`);
-      } catch (err) {
-        console.error(`  [ERR] Intent ${intentId} failed:`, err);
-      }
+  const poll = async () => {
+    try {
+      fromBlock = await pollEvents(fromBlock);
+    } catch (err) {
+      console.error("[Poll error]", err);
     }
-  );
+    setTimeout(poll, POLL_INTERVAL);
+  };
+
+  poll();
 }
 
 main().catch((err) => {
