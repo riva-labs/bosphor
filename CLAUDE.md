@@ -10,8 +10,8 @@ Cross-chain intent execution protocol: EVM → LayerZero v2 → Sui/Walrus blob 
 - [x] ptb_builder.move — executor PTB builder (lz_receive_info, build_lz_receive_ptb)
 - [x] Unit tests (3/3 passing)
 - [x] Relayer: Sui IntentReceived event polling eklendi
-- [ ] Testnet deploy + register_oapp + set_peer
-- [ ] EVM setPeer güncelle (Sui OApp adresi)
+- [x] Testnet deploy + register_oapp + set_peer
+- [x] EVM setPeer güncelle (Sui OApp adresi)
 - [ ] E2E test: LZ Explorer DELIVERED + relayer Sui event → Walrus → execute_store → EVM confirm
 
 ## Phase 1 — LayerZero OApp + Hybrid Relayer ✅ TAMAMLANDI
@@ -34,6 +34,11 @@ Cross-chain intent execution protocol: EVM → LayerZero v2 → Sui/Walrus blob 
 - **Sui Config**: `0xec22f6fe13e1cb7bc88c8d2716f3f42853c9a417e6a00e7f7566fc5322821403`
 - **LZ Endpoint (Sepolia)**: `0x6EDCE65403992e310A62460808c4b910D972f10f` (EID 40161)
 - **Sui Testnet EID**: 40327
+- **Sui LZ OApp**: bosphor_lz `0xdd97dc32a0fc3e289a0de5c7c48ed493f3e62487f0a0abfbec41f98beb731dda`
+- **Sui LzReceiverConfig**: `0x391aa189868fcc04b0b3dfcf0cdcce7f808b0f48ac51c500a1f8fd0e42b5cb64`
+- **Sui OApp Object**: `0xb975710761fcf31ad55785b34cbdb71f821f6666aeb048f0e3e3480842921852`
+- **Sui MessagingChannel**: `0xd0f352c1aca23539be0740b10c379508fb7dbc28cd5afb07162f3f36237e77b0`
+- **Sui EndpointV2 Object**: `0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a`
 
 ### Sui LZ OApp Package
 - **Package**: `sui/lz-receiver/` (bosphor_lz)
