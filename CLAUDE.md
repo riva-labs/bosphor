@@ -2,7 +2,9 @@
 
 Cross-chain intent execution protocol: EVM → LayerZero v2 → Sui/Walrus blob storage → proof back to EVM.
 
-## Current Phase: Phase 2 — Sui LZ OApp Receiver (IN PROGRESS)
+## Current Phase: Phase 3 — TBD
+
+## Phase 2 — Sui LZ OApp Receiver ✅ TAMAMLANDI
 
 ### Phase 2 Checklist
 - [x] bosphor_lz package scaffold (Move.toml + LZ git deps)
@@ -11,8 +13,8 @@ Cross-chain intent execution protocol: EVM → LayerZero v2 → Sui/Walrus blob 
 - [x] Unit tests (3/3 passing)
 - [x] Relayer: Sui IntentReceived event polling eklendi
 - [x] Testnet deploy + register_oapp + set_peer
-- [x] EVM setPeer güncelle (Sui OApp adresi)
-- [ ] E2E test: LZ Explorer DELIVERED + relayer Sui event → Walrus → execute_store → EVM confirm
+- [x] EVM setPeer güncelle (Sui OApp adresi, EID 40378)
+- [x] E2E test: LZ Explorer DELIVERED + relayer Sui event → Walrus → execute_store → EVM confirm
 
 ## Phase 1 — LayerZero OApp + Hybrid Relayer ✅ TAMAMLANDI
 
