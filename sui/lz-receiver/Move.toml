@@ -1,0 +1,10 @@
+[package]
+name = "bosphor_lz"
+edition = "2024.beta"
+
+[dependencies]
+OApp = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/oapps/oapp", rev = "main" }
+PtbMoveCall = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/ptb-builders/ptb-move-call", rev = "main" }
+
+[addresses]
+bosphor_lz = "0x0"
