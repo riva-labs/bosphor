@@ -14,6 +14,7 @@ const {
   SUI_RPC_URL = "https://fullnode.testnet.sui.io:443",
   SUI_PACKAGE_ID,
   SUI_CONFIG_ID,
+  SUI_LZ_PACKAGE_ID,
   SUI_RELAYER_KEY,
   EVM_RELAYER_KEY,
   WALRUS_PUBLISHER_URL = "https://publisher.walrus-testnet.walrus.space",
@@ -33,6 +34,7 @@ const evmRpc = requireEnv("EVM_RPC_URL", EVM_RPC_URL);
 const adapterAddr = requireEnv("EVM_ADAPTER_ADDRESS", EVM_ADAPTER_ADDRESS);
 const suiPkgId = requireEnv("SUI_PACKAGE_ID", SUI_PACKAGE_ID);
 const suiConfigId = requireEnv("SUI_CONFIG_ID", SUI_CONFIG_ID);
+const suiLzPkgId = SUI_LZ_PACKAGE_ID ?? "";
 const suiRelayerKey = requireEnv("SUI_RELAYER_KEY", SUI_RELAYER_KEY);
 const evmRelayerKey = requireEnv("EVM_RELAYER_KEY", EVM_RELAYER_KEY);
 
@@ -250,20 +252,118 @@ async function pollEvents(fromBlock: number): Promise<number> {
   return latestBlock + 1;
 }
 
+// --- Sui LZ event polling ---
+interface SuiEventCursor {
+  txDigest: string;
+  eventSeq: string;
+}
+
+let suiEventCursor: SuiEventCursor | null = null;
+
+async function pollSuiEvents(): Promise<void> {
+  if (!suiLzPkgId) return;
+
+  const eventType = `${suiLzPkgId}::lz_receiver::IntentReceived`;
+  const result = await suiClient.queryEvents({
+    query: { MoveEventType: eventType },
+    cursor: suiEventCursor ?? undefined,
+    order: "ascending",
+    limit: 50,
+  });
+
+  for (const event of result.data) {
+    const fields = event.parsedJson as Record<string, any>;
+    const intentIdBytes: number[] = fields.intent_id;
+    const intentId = "0x" + intentIdBytes.map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    const payload: number[] = fields.payload;
+
+    if (processedIntents.has(intentId)) {
+      continue;
+    }
+
+    // Decode ABI-encoded message: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
+    const payloadHex = "0x" + payload.map((b: number) => b.toString(16).padStart(2, "0")).join("");
+    let sender: string;
+    let userPayload: string;
+    let deadlineMs: bigint;
+    try {
+      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+        ["bytes32", "address", "bytes", "uint256"],
+        payloadHex,
+      );
+      sender = decoded[1];
+      userPayload = decoded[2];
+      deadlineMs = BigInt(decoded[3]) * 1000n;
+    } catch {
+      console.error(`  [ERR] Failed to decode ABI payload for ${intentId}`);
+      processedIntents.add(intentId);
+      continue;
+    }
+
+    if (Date.now() > Number(deadlineMs)) {
+      console.log(`[Skip] ${intentId} — deadline expired (via Sui LZ)`);
+      processedIntents.add(intentId);
+      continue;
+    }
+
+    console.log(`[Intent/LZ] ${intentId}`);
+    console.log(`  from: ${sender}, src_eid: ${fields.src_eid}, nonce: ${fields.nonce}`);
+
+    try {
+      // 1. Upload user payload to Walrus
+      console.log(`  Uploading to Walrus...`);
+      const payloadBytes = ethers.getBytes(userPayload);
+      const walrus = await uploadToWalrus(payloadBytes);
+      console.log(`  Walrus blobId: ${walrus.blobId}`);
+      console.log(`  Walrus object: ${walrus.suiObjectId}`);
+
+      // 2. Find blob object if not returned directly
+      let blobObjectId = walrus.suiObjectId;
+      if (!blobObjectId) {
+        console.log(`  Looking up Blob object...`);
+        blobObjectId = await findBlobObject(walrus.blobId);
+        console.log(`  Found: ${blobObjectId}`);
+      }
+
+      // 3. Record on Sui — pass real Walrus Blob object + deadline
+      const suiDigest = await executeOnSui(intentId, sender, blobObjectId, deadlineMs);
+
+      // 4. Confirm on EVM
+      await confirmOnEvm(intentId, walrus.blobId, suiDigest);
+
+      processedIntents.add(intentId);
+      console.log(`  [OK] Intent ${intentId} fulfilled (via Sui LZ)\n`);
+    } catch (err) {
+      console.error(`  [ERR] Intent ${intentId} failed:`, err);
+    }
+  }
+
+  if (result.hasNextPage && result.nextCursor) {
+    suiEventCursor = result.nextCursor as SuiEventCursor;
+  } else if (result.data.length > 0) {
+    const last = result.data[result.data.length - 1];
+    suiEventCursor = { txDigest: last.id.txDigest, eventSeq: last.id.eventSeq };
+  }
+}
+
 async function main() {
   console.log("Bosphor Relayer starting...");
   console.log(`  EVM adapter:  ${adapterAddr}`);
   console.log(`  Sui package:  ${suiPkgId}`);
+  console.log(`  Sui LZ pkg:   ${suiLzPkgId || "(not configured — EVM-only mode)"}`);
   console.log(`  Sui relayer:  ${relayerSuiAddress}`);
   console.log(`  Walrus pub:   ${WALRUS_PUBLISHER_URL}`);
   console.log(`  Walrus agg:   ${WALRUS_AGGREGATOR_URL}`);
 
   let fromBlock = await evmProvider.getBlockNumber();
   console.log(`  Starting from block: ${fromBlock}`);
-  console.log(`  Polling every ${POLL_INTERVAL / 1000}s for IntentSubmitted events...\n`);
+  console.log(`  Polling every ${POLL_INTERVAL / 1000}s for events...\n`);
 
   const poll = async () => {
     try {
+      // Poll Sui LZ events (primary path when configured)
+      await pollSuiEvents();
+      // Poll EVM events (fallback / backward-compatible)
       fromBlock = await pollEvents(fromBlock);
     } catch (err) {
       console.error("[Poll error]", err);

@@ -8,6 +8,7 @@ contracts/broadcast/
 
 # sui
 sui/build/
+sui/lz-receiver/build/
 
 # relayer
 relayer/node_modules/
