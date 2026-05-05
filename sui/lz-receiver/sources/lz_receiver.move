@@ -7,6 +7,7 @@ module bosphor_lz::lz_receiver;
 
 use call::call::{Call, Void};
 use call::call_cap::CallCap;
+use endpoint_v2::endpoint_v2;
 use endpoint_v2::lz_receive::LzReceiveParam;
 use oapp::oapp::{Self, OApp};
 use sui::event;
@@ -123,6 +124,19 @@ public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
 /// Get the OApp object address (for PTB builder)
 public fun oapp_cap_id(config: &LzReceiverConfig): address {
     config.oapp_cap.id()
+}
+
+// === Admin ===
+
+/// Register OApp with LZ EndpointV2. Uses internal CallCap.
+entry fun register_oapp(
+    config: &LzReceiverConfig,
+    _oapp: &OApp,
+    endpoint: &mut endpoint_v2::EndpointV2,
+    lz_receive_info: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
 }
 
 // === Internal ===
