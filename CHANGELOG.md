@@ -1,27 +1,41 @@
 # Changelog
 
-## [0.1.0] — 2026-02-28
+## [v0.1.0] — 2026-03-05
+
+### Summary
+First working proof-of-concept of Bosphor cross-chain storage intent routing.
+Full E2E flow verified on testnet: EVM → LayerZero → Sui → Walrus → EVM.
 
 ### Added
 - **BosphorAdapter.sol** — EVM OApp contract (LayerZero v2)
-  - `submitIntent` sends cross-chain messages via `_lzSend`
-  - `_lzReceive` accepts proofs from remote chains
-  - `confirmExecution` hybrid relayer path (backward-compatible)
-  - `quote()` LZ fee estimation
-- **walrus_executor.move** — Sui Move module
-  - `execute_store` accepts real Walrus `Blob` object
-  - On-chain blob_id/certified_epoch verification
+  - `submitIntent` — sends storage intent via LayerZero
+  - `_lzReceive` — accepts proof from Sui
+  - `confirmExecution` — relayer hybrid path
+  - `quote()` — LZ fee estimation
 - **lz_receiver.move** — Sui LZ OApp receiver
-  - `lz_receive` processes incoming LZ messages
-  - `IntentReceived` event for relayer polling
-- **ptb_builder.move** — PTB builder for LZ executor
-- **Relayer** (TypeScript)
-  - Dual polling: Sui events (LZ) + EVM events (fallback)
-  - Walrus upload → Sui execute_store → EVM confirmExecution
-- **EndpointV2Mock** — minimal LZ endpoint mock for Forge tests
+  - `lz_receive` — processes incoming LZ messages
+  - `IntentReceived` event for relayer
+  - `register_oapp` — OAppInfoV1-compatible endpoint registration
+- **walrus_executor.move** — Sui Walrus executor
+  - `execute_store` — stores blob on Walrus
+- **ptb_builder.move** — PTB builder with OAppInfoV1 format
+- **Relayer** (Node.js/TypeScript) — event-driven, Docker-ready
+- **Deployment scripts** — automated deploy + wire + e2e test
+
+### Key Fix
+LZ executor requires `oapp_info_v1` format for OApp registration.
+`ptb_builder::lz_receive_info` updated to use `oapp_info_v1::create().encode()`.
+
+### Testnet Evidence
+
+| Step | TX |
+|------|----|
+| EVM Intent | [0x223d...](https://sepolia.etherscan.io/tx/0x223d075c73facfa48bddce0e4316548924b40a0fd362ad3628b0a59ae5c1c40c) |
+| LZ DELIVERED (1m 11s) | [LZ Explorer](https://testnet.layerzeroscan.com/tx/0x223d075c73facfa48bddce0e4316548924b40a0fd362ad3628b0a59ae5c1c40c) |
+| Sui execute_store | [3MmJ1nk...](https://suiscan.xyz/testnet/tx/3MmJ1nkJEzzmBV9uFFBKdgqJM9sZi3xajJQrZw91WVNW) |
+| Walrus blob | [rfj52maH...](https://aggregator.walrus-testnet.walrus.space/v1/blobs/rfj52maH_ZyCqaMVIfMOJLUtNnu8ZQ_y-8ZW3pUa63s) |
+| EVM Confirmation | [0x13243e...](https://sepolia.etherscan.io/tx/0x13243e35227e6f2a421381bd1b48191e8fee67a0169861b688861337d7a774f6) |
 
 ### Testnet Deployments
-- **EVM (Sepolia)**: `0xd3aea854899938D48024a73E3289C3d29D6e2981`
-- **EVM (Sepolia, old v0.1.0)**: `0x3EdcF291ade81640a079069a4d16f1dE4eAbfb74`
-- **Sui walrus_executor**: `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596`
-- **Sui LZ OApp (v1)**: `0xdd97dc32a0fc3e289a0de5c7c48ed493f3e62487f0a0abfbec41f98beb731dda`
+- EVM (Sepolia): `0xbC7EF2F021F517d871282C2bb512C741ad2958c3`
+- Sui LZ OApp: `0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656`
