@@ -72,6 +72,7 @@ async function suiExec(tx: Transaction, label: string) {
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${result.digest}`);
+  await suiClient.waitForTransaction({ digest: result.digest });
 }
 
 async function main() {
