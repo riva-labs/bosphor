@@ -1,4 +1,13 @@
-/// E2E test: send intent, wait for LZ delivery, verify execution
+/**
+ * e2e-test.ts
+ *
+ * Sends a test storage intent on Sepolia via BosphorAdapter, then polls
+ * the LayerZero Scan API for up to 15 minutes waiting for DELIVERED status.
+ * Reports the full TX chain (EVM submit → LZ delivery → Sui execution).
+ *
+ * Usage: npm run test:e2e
+ * Required env: EVM_RPC_URL, EVM_ADAPTER_ADDRESS, EVM_RELAYER_KEY
+ */
 import { config } from "dotenv";
 import { resolve } from "path";
 config({ path: resolve(import.meta.dirname, "../.env") });

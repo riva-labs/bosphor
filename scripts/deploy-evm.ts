@@ -1,4 +1,14 @@
-/// Deploy EVM BosphorAdapter + setPeer for Sui
+/**
+ * deploy-evm.ts
+ *
+ * Builds and deploys the BosphorAdapter contract to Sepolia, then
+ * configures setPeer for the Sui LZ OApp if SUI_LZ_PACKAGE_ID is set.
+ * Updates .env with the deployed EVM_ADAPTER_ADDRESS.
+ *
+ * Usage: npm run deploy:evm
+ * Required env: EVM_RPC_URL, EVM_RELAYER_KEY
+ * Optional env: SUI_LZ_PACKAGE_ID (for automatic peer setup)
+ */
 import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";

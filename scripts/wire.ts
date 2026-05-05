@@ -1,5 +1,15 @@
-/// Wire peers: EVM setPeer + Sui set_peer
-/// Run after both Sui and EVM are deployed
+/**
+ * wire.ts
+ *
+ * Connects EVM and Sui deployments by setting peers on both sides.
+ * EVM setPeer uses the Sui PACKAGE ID (not OApp object ID).
+ * Run after both deploy:sui and deploy:evm have completed.
+ *
+ * Usage: npm run wire
+ * Required env: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS,
+ *               SUI_LZ_PACKAGE_ID, SUI_LZ_OAPP_ID, SUI_LZ_ADMIN_CAP_ID,
+ *               SUI_LZ_MESSAGING_CHANNEL, SUI_DEPLOYER_KEY
+ */
 import { config } from "dotenv";
 import { resolve } from "path";
 import { readFileSync } from "fs";

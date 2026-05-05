@@ -1,5 +1,15 @@
-/// Deploy Sui LZ OApp: publish + register_oapp + LZ config
-/// If EVM_ADAPTER_ADDRESS is set, also configures set_peer
+/**
+ * deploy-sui.ts
+ *
+ * Publishes the Bosphor LZ OApp package to Sui testnet, registers it with
+ * the LayerZero endpoint (OAppInfoV1 format), configures send/receive
+ * libraries, DVN, and executor. If EVM_ADAPTER_ADDRESS is set in .env,
+ * also configures set_peer.
+ *
+ * Usage: npm run deploy:sui
+ * Required env: SUI_DEPLOYER_KEY, SUI_RPC_URL
+ * Optional env: EVM_ADAPTER_ADDRESS (for automatic peer setup)
+ */
 import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
