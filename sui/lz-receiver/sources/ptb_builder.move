@@ -14,14 +14,18 @@ use ptb_move_call::{argument, move_call::{Self, MoveCall}, move_calls_builder};
 use sui::bcs;
 use utils::{buffer_writer, package};
 
-/// Struct for package address resolution after upgrades.
-/// If upgrading, create a new struct and update bosphor_package().
+/// Marker struct for package address resolution after upgrades.
+/// If upgrading, create a new struct with the same pattern and update `bosphor_package()`.
 public struct BosphorPtbBuilder has drop {}
 
-/// Generates execution metadata for OApp registration with LayerZero endpoint.
+/// Generates OAppInfoV1-encoded execution metadata for OApp registration with
+/// the LayerZero endpoint.
 ///
-/// Returns OAppInfoV1-encoded bytes that the executor uses to build PTBs for delivery.
-/// Called once during registration (register_oapp).
+/// The returned bytes tell the LZ executor how to construct PTBs for delivering
+/// messages to this OApp. Called once during `register_oapp`.
+///
+/// * `config` - Shared LzReceiverConfig (provides object ID for the MoveCall argument).
+/// * `oapp` - The OApp shared object.
 public fun lz_receive_info(
     config: &LzReceiverConfig,
     oapp: &OApp,
@@ -57,7 +61,12 @@ public fun lz_receive_info(
 
 /// Dynamically builds a PTB for processing incoming LayerZero messages.
 ///
-/// Called by executor in simulate mode. Returns MoveCall(s) for actual lz_receive execution.
+/// Called by the executor in simulate mode. Returns a vector of `MoveCall`
+/// entries that the executor replays in the actual lz_receive transaction.
+///
+/// * `config` - Shared LzReceiverConfig (provides object ID for the MoveCall argument).
+/// * `oapp` - The OApp shared object.
+/// * `_call` - Reference to the hot-potato Call (consumed by `lz_receive`, not here).
 public fun build_lz_receive_ptb(
     config: &LzReceiverConfig,
     oapp: &OApp,
