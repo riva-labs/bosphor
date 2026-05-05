@@ -7,14 +7,12 @@ module bosphor_lz::ptb_builder;
 use call::call::{Call, Void};
 use endpoint_v2::lz_receive::LzReceiveParam;
 use oapp::oapp::OApp;
+use oapp::oapp_info_v1;
 use oapp::ptb_builder_helper;
 use bosphor_lz::lz_receiver::LzReceiverConfig;
 use ptb_move_call::{argument, move_call::{Self, MoveCall}, move_calls_builder};
 use sui::bcs;
 use utils::{buffer_writer, package};
-
-/// Version identifier for lz_receive_info format
-const LZ_RECEIVE_INFO_VERSION_1: u16 = 1;
 
 /// Struct for package address resolution after upgrades.
 /// If upgrading, create a new struct and update bosphor_package().
@@ -22,7 +20,7 @@ public struct BosphorPtbBuilder has drop {}
 
 /// Generates execution metadata for OApp registration with LayerZero endpoint.
 ///
-/// Returns serialized info that tells the executor how to build PTBs for this OApp.
+/// Returns OAppInfoV1-encoded bytes that the executor uses to build PTBs for delivery.
 /// Called once during registration (register_oapp).
 public fun lz_receive_info(
     config: &LzReceiverConfig,
@@ -43,10 +41,18 @@ public fun lz_receive_info(
             vector[],
         ),
     ];
-    let move_calls_bytes = bcs::to_bytes(&lz_receive_move_calls);
-    let mut writer = buffer_writer::new();
-    writer.write_u16(LZ_RECEIVE_INFO_VERSION_1).write_bytes(move_calls_bytes);
-    writer.to_bytes()
+    let lz_receive_bytes = bcs::to_bytes(&lz_receive_move_calls);
+    let mut lz_writer = buffer_writer::new();
+    lz_writer.write_u16(1).write_bytes(lz_receive_bytes);
+    let lz_receive_info = lz_writer.to_bytes();
+
+    let oapp_info = oapp_info_v1::create(
+        object::id_address(oapp),
+        vector::empty<u8>(), // next_nonce_info (not used)
+        lz_receive_info,
+        vector::empty<u8>(), // extra_info
+    );
+    oapp_info.encode()
 }
 
 /// Dynamically builds a PTB for processing incoming LayerZero messages.
