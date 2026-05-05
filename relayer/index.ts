@@ -80,7 +80,7 @@ interface WalrusBlobInfo {
 }
 
 async function uploadToWalrus(payload: Uint8Array): Promise<WalrusBlobInfo> {
-  const url = `${WALRUS_PUBLISHER_URL}/v1/blobs?epochs=${WALRUS_STORE_EPOCHS}&send_object_to=${relayerSuiAddress}`;
+  const url = `${WALRUS_PUBLISHER_URL}/v1/blobs?epochs=${WALRUS_STORE_EPOCHS}&deletable=true&send_object_to=${relayerSuiAddress}`;
   const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/octet-stream" },

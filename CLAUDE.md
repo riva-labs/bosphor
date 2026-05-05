@@ -33,7 +33,7 @@ EVM submitIntent → LZ → Sui lz_receive → IntentReceived event
 - OApp = OAppSender + OAppReceiver + OAppCore(Ownable)
 - LZ-v2 uses OpenZeppelin v4.9.6 (NOT v5 — OAppCore msg.sender-based Ownable)
 - Sui testnet EID: 40378
-- LZ TestHelper too complex → minimal EndpointV2Mock kullanılıyor
+- LZ TestHelper too complex → minimal EndpointV2Mock used instead
 - Sui LZ packages: OApp `0x04c440985f5deab2fb7f821b3288d93225a3e637cf22dda476809836f0533751`, EndpointV2 `0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a`
 - EVM setPeer for Sui: Must use PACKAGE ID (not OApp Object ID)
 - OAppInfoV1 format: lz_receive_info MUST be wrapped in OAppInfoV1::encode()
@@ -46,10 +46,10 @@ EVM submitIntent → LZ → Sui lz_receive → IntentReceived event
 - Upgrade via sui client upgrade --upgrade-capability <cap_id>
 
 ### Runtime
-- Node 22 required (.nvmrc pinned) — tsx + @mysten/sui Node 24 ile uyumsuz
+- Node 22 required (.nvmrc pinned) — tsx + @mysten/sui incompatible with Node 24
 - Relayer: ethers v6 + @mysten/sui v1 + tsx
 
 ### Conventions
 - Conventional commits: type(scope): description
 - No Co-authored-by or AI references in commits
-- Turkish communication preferred
+- English communication preferred
