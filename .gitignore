@@ -17,5 +17,10 @@ node_modules/
 relayer/node_modules/
 relayer/dist/
 
+# website
+website/node_modules/
+website/build/
+website/.docusaurus/
+
 # misc
 .DS_Store
