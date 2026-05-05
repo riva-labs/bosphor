@@ -1,0 +1,6 @@
+version: '3.8'
+services:
+  relayer:
+    build: ./relayer
+    env_file: .env
+    restart: unless-stopped
