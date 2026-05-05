@@ -76,6 +76,8 @@ async function exec(tx: Transaction, label: string) {
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${result.digest}`);
+  // Wait for transaction finality to avoid object version conflicts
+  await suiClient.waitForTransaction({ digest: result.digest });
   return result;
 }
 
@@ -118,7 +120,7 @@ interface PublishResult {
   upgradeCapId: string;
 }
 
-function publish(): PublishResult {
+async function publish(): Promise<PublishResult> {
   console.log("\n=== Step 1: Publish bosphor_lz package ===");
   const suiLzPath = resolve(import.meta.dirname, "../sui/lz-receiver");
 
@@ -143,6 +145,8 @@ function publish(): PublishResult {
     throw new Error(`Publish failed: ${JSON.stringify(result.effects?.status)}`);
   }
   console.log(`[OK] Published: ${result.digest}`);
+  // Wait for package to be indexed
+  await suiClient.waitForTransaction({ digest: result.digest });
 
   const changes: any[] = result.objectChanges || [];
   let packageId = "";
@@ -334,7 +338,7 @@ async function main() {
   }
 
   // Step 1: Publish
-  const { packageId, configId, oappId, adminCapId, upgradeCapId } = publish();
+  const { packageId, configId, oappId, adminCapId, upgradeCapId } = await publish();
 
   // Step 2: Register OApp
   const messagingChannelId = await registerOApp(packageId, configId, oappId);
