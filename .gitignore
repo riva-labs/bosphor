@@ -10,6 +10,7 @@ contracts/foundry.lock
 # sui
 sui/build/
 sui/lz-receiver/build/
+sui/lz-receiver/Published.toml
 
 # dependencies
 node_modules/
