@@ -87,7 +87,7 @@ Receives cross-chain messages from EVM via LayerZero v2 executor.
 Executes storage operations on Walrus.
 
 - `execute_store(config, intent_id, blob, deadline_ms, clock, sender, ctx)`: Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, transfers blob and receipt to original sender.
-- All blobs are stored as **deletable** per grant requirement.
+- All blobs are stored as **deletable** per project policy.
 
 ### ptb_builder.move
 
