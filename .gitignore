@@ -5,12 +5,14 @@
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+contracts/foundry.lock
 
 # sui
 sui/build/
 sui/lz-receiver/build/
 
-# relayer
+# dependencies
+node_modules/
 relayer/node_modules/
 relayer/dist/
 
