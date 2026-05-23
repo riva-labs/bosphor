@@ -49,21 +49,15 @@ contract BosphorAdapter is OApp {
     error IntentAlreadyExists();
     error IntentNotFound();
     error AlreadyExecuted();
-    error OnlyRelayer();
     error ZeroAddress();
-
-    // --- Modifiers ---
-    modifier onlyRelayer() {
-        if (msg.sender != trustedRelayer) revert OnlyRelayer();
-        _;
-    }
+    error UnknownMessageType();
 
     // --- Constructor ---
     /// @notice Deploys the adapter and registers it with the LayerZero endpoint.
     /// @dev The delegate is forwarded to OApp and becomes the LayerZero config admin.
     /// @param _endpoint Address of the LayerZero EndpointV2 on this chain.
     /// @param _delegate Address granted administrative rights over the OApp config.
-    /// @param _trustedRelayer Address authorised to call `confirmExecution`. Must not be zero.
+    /// @param _trustedRelayer Address of the trusted relayer for off-chain identification. Must not be zero.
     constructor(
         address _endpoint,
         address _delegate,
@@ -117,9 +111,12 @@ contract BosphorAdapter is OApp {
     }
 
     // --- LayerZero Receive (proof from remote chain) ---
-    /// @notice Handles incoming LayerZero messages containing execution proofs from Sui.
-    /// @dev Decodes the message as `(bytes32 intentId, bytes proof)` and marks the intent
-    ///      as executed. Only called by the LayerZero endpoint (enforced by OApp).
+    /// @notice Handles incoming LayerZero messages from the remote chain.
+    /// @dev The first byte is a message type discriminator:
+    ///      - Type 1: Execution proof from Sui. Remaining bytes are ABI-encoded as
+    ///        `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The intent is
+    ///        marked as executed and `IntentExecuted` is emitted with the proof.
+    ///      - All other types revert with `UnknownMessageType`.
     function _lzReceive(
         Origin calldata /*_origin*/,
         bytes32 /*_guid*/,
@@ -127,20 +124,27 @@ contract BosphorAdapter is OApp {
         address /*_executor*/,
         bytes calldata /*_extraData*/
     ) internal override {
-        (bytes32 intentId, bytes memory proof) = abi.decode(_message, (bytes32, bytes));
-        _markExecuted(intentId, proof);
+        if (_message.length == 0) revert UnknownMessageType();
+        uint8 msgType = uint8(_message[0]);
+        if (msgType == 1) {
+            (bytes32 intentId, bytes32 blobId, uint256 endEpoch) =
+                abi.decode(_message[1:], (bytes32, bytes32, uint256));
+            _markExecuted(intentId, abi.encode(blobId, endEpoch));
+        } else {
+            revert UnknownMessageType();
+        }
     }
 
     // --- Hybrid relayer path (backward-compatible) ---
-    /// @notice Allows the trusted relayer to confirm off-chain execution of an intent.
-    /// @dev This is the hybrid path: a trusted relayer watches for Walrus storage completion
-    ///      off-chain and submits the proof directly, bypassing the LayerZero return message.
+    /// @notice Emergency fallback: allows the owner to manually confirm execution of an intent.
+    /// @dev The primary path for proof receipt is `_lzReceive` with a type 1 message from Sui.
+    ///      This function is retained for disaster recovery only.
     /// @param _intentId The deterministic identifier of the intent to confirm.
     /// @param _proof Opaque proof data attesting that the storage was executed on Walrus.
     function confirmExecution(
         bytes32 _intentId,
         bytes calldata _proof
-    ) external onlyRelayer {
+    ) external onlyOwner {
         _markExecuted(_intentId, _proof);
     }
 
@@ -182,7 +186,7 @@ contract BosphorAdapter is OApp {
     // --- Admin ---
     /// @notice Updates the trusted relayer address. Only callable by the contract owner.
     /// @dev Reverts with `ZeroAddress` if `_relayer` is the zero address.
-    /// @param _relayer The new relayer address to authorise for `confirmExecution`.
+    /// @param _relayer The new relayer address for off-chain identification.
     function setRelayer(address _relayer) external onlyOwner {
         if (_relayer == address(0)) revert ZeroAddress();
         address old = trustedRelayer;
