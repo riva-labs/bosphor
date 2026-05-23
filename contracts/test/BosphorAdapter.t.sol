@@ -69,13 +69,13 @@ contract BosphorAdapterTest is Test {
         assertTrue(id1 != id2);
     }
 
-    // --- confirmExecution (hybrid relayer path) ---
+    // --- confirmExecution (owner-only emergency fallback) ---
 
     function test_confirmExecution_success() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
-        vm.prank(relayer);
+        // Test contract is the owner
         adapter.confirmExecution(intentId, "proof");
 
         assertTrue(adapter.executed(intentId));
@@ -86,7 +86,7 @@ contract BosphorAdapterTest is Test {
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
         vm.prank(attacker);
-        vm.expectRevert(BosphorAdapter.OnlyRelayer.selector);
+        vm.expectRevert("Ownable: caller is not the owner");
         adapter.confirmExecution(intentId, "proof");
     }
 
@@ -94,16 +94,14 @@ contract BosphorAdapterTest is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
-        vm.startPrank(relayer);
+        // Owner calls twice
         adapter.confirmExecution(intentId, "proof");
 
         vm.expectRevert(BosphorAdapter.AlreadyExecuted.selector);
         adapter.confirmExecution(intentId, "proof");
-        vm.stopPrank();
     }
 
     function test_confirmExecution_nonExistentIntent_reverts() public {
-        vm.prank(relayer);
         vm.expectRevert(BosphorAdapter.IntentNotFound.selector);
         adapter.confirmExecution(bytes32(uint256(999)), "proof");
     }
@@ -114,8 +112,16 @@ contract BosphorAdapterTest is Test {
 
         vm.warp(deadline + 1);
 
-        vm.prank(relayer);
         vm.expectRevert(BosphorAdapter.DeadlineExpired.selector);
+        adapter.confirmExecution(intentId, "proof");
+    }
+
+    function test_confirmExecution_relayer_reverts() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 intentId = _submitIntent(user, "hello", deadline);
+
+        vm.prank(relayer);
+        vm.expectRevert("Ownable: caller is not the owner");
         adapter.confirmExecution(intentId, "proof");
     }
 
@@ -153,15 +159,15 @@ contract BosphorAdapterTest is Test {
         assertEq(submitted, computed);
     }
 
-    // --- LayerZero receive (proof via LZ) ---
+    // --- LayerZero receive (proof via LZ, legacy tests updated to type 1) ---
 
     function test_lzReceive_marks_executed() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
-        // Simulate LZ message with proof
-        bytes memory proof = abi.encodePacked("lz-proof-data");
-        bytes memory message = abi.encode(intentId, proof);
+        bytes32 blobId = keccak256("lz-proof-data");
+        uint256 endEpoch = 10;
+        bytes memory message = _buildType1Message(intentId, blobId, endEpoch);
 
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
 
@@ -172,14 +178,106 @@ contract BosphorAdapterTest is Test {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
-        bytes memory proof = abi.encodePacked("lz-proof");
-        bytes memory message = abi.encode(intentId, proof);
+        bytes32 blobId = keccak256("lz-proof");
+        uint256 endEpoch = 10;
+        bytes memory message = _buildType1Message(intentId, blobId, endEpoch);
 
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
 
         // Second attempt should revert
         vm.expectRevert();
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+    }
+
+    // --- LayerZero receive: type 1 proof (new format) ---
+
+    function _buildType1Message(
+        bytes32 intentId,
+        bytes32 blobId,
+        uint256 endEpoch
+    ) internal pure returns (bytes memory) {
+        return bytes.concat(bytes1(0x01), abi.encode(intentId, blobId, endEpoch));
+    }
+
+    function test_lzReceive_type1_marks_executed() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 intentId = _submitIntent(user, "hello", deadline);
+
+        bytes32 blobId = keccak256("walrus-blob-123");
+        uint256 endEpoch = 42;
+        bytes memory message = _buildType1Message(intentId, blobId, endEpoch);
+
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+
+        assertTrue(adapter.executed(intentId));
+    }
+
+    function test_lzReceive_type1_duplicate_reverts() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 intentId = _submitIntent(user, "hello", deadline);
+
+        bytes32 blobId = keccak256("walrus-blob-123");
+        uint256 endEpoch = 42;
+        bytes memory message = _buildType1Message(intentId, blobId, endEpoch);
+
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+
+        vm.expectRevert(BosphorAdapter.AlreadyExecuted.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+    }
+
+    function test_lzReceive_type1_nonExistent_reverts() public {
+        bytes32 fakeId = bytes32(uint256(999));
+        bytes memory message = _buildType1Message(fakeId, bytes32(0), 1);
+
+        vm.expectRevert(BosphorAdapter.IntentNotFound.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+    }
+
+    function test_lzReceive_type1_expired_reverts() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 intentId = _submitIntent(user, "hello", deadline);
+
+        vm.warp(deadline + 1);
+
+        bytes32 blobId = keccak256("walrus-blob-123");
+        bytes memory message = _buildType1Message(intentId, blobId, 42);
+
+        vm.expectRevert(BosphorAdapter.DeadlineExpired.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+    }
+
+    function test_lzReceive_emptyMessage_reverts() public {
+        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, "");
+    }
+
+    function test_lzReceive_unknownType_reverts() public {
+        // Type 0
+        bytes memory msgType0 = bytes.concat(bytes1(0x00), abi.encode(bytes32(0), bytes32(0), uint256(0)));
+        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, msgType0);
+
+        // Type 2
+        bytes memory msgType2 = bytes.concat(bytes1(0x02), abi.encode(bytes32(0), bytes32(0), uint256(0)));
+        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, msgType2);
+    }
+
+    function test_lzReceive_type1_emits_event() public {
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes32 intentId = _submitIntent(user, "hello", deadline);
+
+        bytes32 blobId = keccak256("walrus-blob-123");
+        uint256 endEpoch = 42;
+
+        vm.expectEmit(true, false, false, true);
+        emit BosphorAdapter.IntentExecuted(intentId, abi.encode(blobId, endEpoch));
+
+        endpoint.simulateLzReceive(
+            address(adapter), DST_EID, PEER,
+            _buildType1Message(intentId, blobId, endEpoch)
+        );
     }
 
     // --- quote ---

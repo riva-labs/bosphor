@@ -23,8 +23,10 @@
                │                  │                   │  (deletable)     │
                │                  │                   └────────┬─────────┘
                │                  │                            │ Relayer
-               │ confirmExecution │◄───────────────────────────┘
-               │ IntentExecuted   │   proof = {blobId, suiDigest}
+               │                  │                   ┌────────┴─────────┐
+               │                  │                   │ lz_send_proof()  │
+               │ _lzReceive()  ◄──┼───────────────────┤ LZ type 1 msg   │
+               │ IntentExecuted   │   {blobId,endEpoch}└──────────────────┘
                └──────────────────┘
 ```
 
@@ -33,7 +35,7 @@
 1. **EVM -> Sui** (LayerZero): `submitIntent` encodes `(intentId, sender, payload, deadline)` via `abi.encode` and sends through LayerZero v2 OApp messaging.
 2. **Sui lz_receive**: LZ executor builds a PTB using `ptb_builder::build_lz_receive_ptb`, calls `lz_receiver::lz_receive` which validates peer + endpoint and emits `IntentReceived`.
 3. **Relayer**: Polls `IntentReceived` events on Sui, uploads payload to Walrus, calls `execute_store`.
-4. **Sui -> EVM** (Relayer): Relayer calls `confirmExecution(intentId, proof)` on EVM with Walrus blob ID and Sui TX digest as proof.
+4. **Sui -> EVM** (LayerZero): Relayer calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero back to EVM. The EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks the intent as executed.
 
 ## EVM Adapter Contract (BosphorAdapter.sol)
 
@@ -43,8 +45,8 @@
 |----------|--------|-------------|
 | `submitIntent(dstEid, payload, deadline, options)` | external payable | Submit storage intent via LayerZero |
 | `quote(dstEid, payload, deadline, options)` | view | Estimate LayerZero fee |
-| `confirmExecution(intentId, proof)` | onlyRelayer | Confirm execution with proof |
-| `_lzReceive(origin, guid, message, executor, extraData)` | internal (LZ) | Receive proof via LayerZero |
+| `confirmExecution(intentId, proof)` | onlyOwner | Emergency fallback to confirm execution |
+| `_lzReceive(origin, guid, message, executor, extraData)` | internal (LZ) | Primary proof path: type 1 message with (intentId, blobId, endEpoch) |
 | `setRelayer(relayer)` | onlyOwner | Update trusted relayer |
 | `getIntentId(sender, chainId, payload, nonce, deadline)` | pure | Compute intent ID |
 
@@ -65,7 +67,7 @@ Nonce is per-sender, auto-incremented. Deadline is a Unix timestamp; expired int
 ### Trust Boundary
 
 - **Trustless**: Intent registration, nonce enforcement, deadline checks, LZ message delivery (DVN-verified)
-- **Trusted**: `confirmExecution` requires trusted relayer signature. Future milestones will replace with permissionless proof verification.
+- **Trusted**: Relayer triggers `lz_send_proof` on Sui, but proof delivery is DVN-verified via LayerZero. `confirmExecution` is owner-only emergency fallback.
 
 ## Sui Walrus Executor
 
@@ -104,13 +106,16 @@ Generates PTB metadata for the LZ executor.
 
 ### Sui -> EVM (Return Path)
 
-Currently uses the relayer hybrid path:
+Bidirectional LZ proof path:
 1. Relayer observes `IntentReceived` event on Sui
 2. Uploads payload to Walrus (deletable blob)
 3. Calls `execute_store` on Sui
-4. Calls `confirmExecution` on EVM with proof
+4. Calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero
+5. EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks intent as executed
 
-Future: Bidirectional LZ proof path via `_lzReceive` on EVM.
+Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
+
+Emergency fallback: owner can call `confirmExecution` directly on EVM.
 
 ### OAppInfoV1 Registration
 
@@ -138,4 +143,4 @@ Where `lz_receive_info` itself contains:
 | No origin-chain payment flow | Medium | Escrow-based payment (Milestone 4) |
 | Sui testnet only | Low | Mainnet after Milestone 2 |
 | Single DVN (LZ Labs) | Low | Multi-DVN in hardening phase |
-| Return path uses relayer, not LZ | Low | Bidirectional LZ in Milestone 2+ |
+| Relayer triggers return path | Low | Permissionless relayer auction (Milestone 4) |

@@ -43,16 +43,25 @@ function quote(
 
 ### confirmExecution
 
-Confirm that an intent has been executed. Called by the trusted relayer.
+Emergency fallback to manually confirm intent execution. Owner-only, for disaster recovery.
+The primary proof path is `_lzReceive` with a type 1 message from Sui.
 
 ```solidity
 function confirmExecution(
     bytes32 _intentId,
     bytes calldata _proof
-) external; // onlyRelayer
+) external; // onlyOwner
 ```
 
 **Emits**: `IntentExecuted(intentId, proof)`
+
+### _lzReceive (internal)
+
+Handles incoming LayerZero messages from the remote chain. The first byte is a message type discriminator.
+
+**Type 1 (execution proof):** Remaining bytes are ABI-encoded as `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The intent is marked as executed and `IntentExecuted` is emitted with `abi.encode(blobId, endEpoch)` as proof.
+
+Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
 
 ### executed
 
