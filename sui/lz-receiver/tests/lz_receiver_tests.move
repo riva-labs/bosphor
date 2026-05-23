@@ -5,6 +5,7 @@ use bosphor_lz::lz_receiver;
 use sui::test_scenario;
 
 const ADMIN: address = @0xA;
+const RELAYER: address = @0xB;
 
 #[test]
 fun test_init_creates_shared_config() {
@@ -52,4 +53,66 @@ fun test_admin_cap_transferred_to_sender() {
         scenario.return_to_sender(admin_cap);
     };
     scenario.end();
+}
+
+// === build_proof_message tests ===
+
+#[test]
+fun test_build_proof_message_encoding() {
+    // intent_id: 32 bytes, first byte 0xAA, rest zeros
+    let mut intent_id = vector::empty<u8>();
+    intent_id.push_back(0xAA);
+    let mut i = 1;
+    while (i < 32) { intent_id.push_back(0); i = i + 1; };
+
+    // blob_id: 32 bytes, first byte 0xBB, rest zeros
+    let mut blob_id = vector::empty<u8>();
+    blob_id.push_back(0xBB);
+    i = 1;
+    while (i < 32) { blob_id.push_back(0); i = i + 1; };
+
+    let end_epoch: u64 = 42;
+
+    let msg = lz_receiver::build_proof_message(intent_id, blob_id, end_epoch);
+
+    // Total length: 1 (type prefix) + 32 (intentId) + 32 (blobId) + 32 (endEpoch) = 97
+    assert!(msg.length() == 97, 0);
+
+    // First byte is type 1 prefix
+    assert!(*msg.borrow(0) == 1, 1);
+
+    // Bytes 1..33 are intent_id
+    assert!(*msg.borrow(1) == 0xAA, 2);
+    assert!(*msg.borrow(2) == 0, 3);
+
+    // Bytes 33..65 are blob_id
+    assert!(*msg.borrow(33) == 0xBB, 4);
+    assert!(*msg.borrow(34) == 0, 5);
+
+    // Bytes 65..97 are end_epoch as uint256 (big-endian, left-padded)
+    // 42 = 0x2A, should be at the last byte (index 96)
+    assert!(*msg.borrow(96) == 42, 6);
+    // All padding bytes should be zero
+    assert!(*msg.borrow(65) == 0, 7);
+    assert!(*msg.borrow(88) == 0, 8);
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EInvalidIntentIdLength)]
+fun test_build_proof_message_rejects_short_intent_id() {
+    let intent_id = x"AABB"; // only 2 bytes
+    let mut blob_id = vector::empty<u8>();
+    let mut i = 0;
+    while (i < 32) { blob_id.push_back(0); i = i + 1; };
+    lz_receiver::build_proof_message(intent_id, blob_id, 1);
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EInvalidBlobIdLength)]
+fun test_build_proof_message_rejects_short_blob_id() {
+    let mut intent_id = vector::empty<u8>();
+    let mut i = 0;
+    while (i < 32) { intent_id.push_back(0); i = i + 1; };
+    let blob_id = x"CCDD"; // only 2 bytes
+    lz_receiver::build_proof_message(intent_id, blob_id, 1);
 }

@@ -1,18 +1,25 @@
-/// Bosphor LayerZero OApp Receiver
+/// Bosphor LayerZero OApp: Receiver + Sender
 ///
-/// Receives cross-chain intent messages from EVM via LayerZero v2.
-/// The executor delivers messages through PTB, OApp validates peer + endpoint.
+/// Receives cross-chain intent messages from EVM via LayerZero v2 and sends
+/// execution proofs back to EVM via the LZ return path.
 #[allow(lint(self_transfer))]
 module bosphor_lz::lz_receiver;
 
 use call::call::{Call, Void};
 use call::call_cap::CallCap;
+use endpoint_v2::endpoint_quote::QuoteParam;
+use endpoint_v2::endpoint_send::SendParam;
 use endpoint_v2::endpoint_v2;
 use endpoint_v2::lz_receive::LzReceiveParam;
-use oapp::oapp::{Self, OApp};
+use endpoint_v2::messaging_fee::MessagingFee;
+use endpoint_v2::messaging_receipt::MessagingReceipt;
+use oapp::oapp::{Self, OApp, AdminCap};
+use sui::coin::Coin;
 use sui::event;
+use sui::sui::SUI;
 use sui::table::{Self, Table};
 use utils::bytes32::Bytes32;
+use zro::zro::ZRO;
 
 // === Errors ===
 
@@ -20,6 +27,16 @@ use utils::bytes32::Bytes32;
 const EIntentAlreadyReceived: u64 = 0;
 /// Message payload is shorter than the minimum 32 bytes (missing intent_id).
 const EInvalidMessageLength: u64 = 1;
+/// Caller is not the authorized relayer.
+const EUnauthorizedRelayer: u64 = 2;
+/// intent_id must be exactly 32 bytes.
+const EInvalidIntentIdLength: u64 = 3;
+/// blob_id must be exactly 32 bytes.
+const EInvalidBlobIdLength: u64 = 4;
+/// Relayer address must not be zero.
+const EZeroAddress: u64 = 5;
+/// Intent must exist before sending proof.
+const EIntentNotReceived: u64 = 6;
 
 // === OTW ===
 
@@ -28,11 +45,12 @@ public struct LZ_RECEIVER has drop {}
 
 // === Structs ===
 
-/// Shared config holding the OApp call capability and received intents
+/// Shared config holding the OApp call capability, received intents, and relayer address
 public struct LzReceiverConfig has key {
     id: UID,
     oapp_cap: CallCap,
     received_intents: Table<vector<u8>, IntentRecord>,
+    relayer: address,
 }
 
 /// Record of a received intent
@@ -53,6 +71,16 @@ public struct IntentReceived has copy, drop {
     guid: Bytes32,
 }
 
+/// Emitted when a proof is sent back to EVM via LayerZero
+public struct ProofSent has copy, drop {
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    nonce: u64,
+    guid: Bytes32,
+}
+
 // === Init ===
 
 /// Module initializer. Creates the OApp, shares the LzReceiverConfig, and
@@ -63,6 +91,7 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
         id: object::new(ctx),
         oapp_cap,
         received_intents: table::new(ctx),
+        relayer: ctx.sender(),
     };
     transfer::share_object(config);
     transfer::public_transfer(admin_cap, ctx.sender());
@@ -169,6 +198,132 @@ entry fun register_oapp(
     endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
 }
 
+/// Sets the authorized relayer address. Only the OApp admin can call this.
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+) {
+    oapp.assert_admin(admin_cap);
+    assert!(new_relayer != @0x0, EZeroAddress);
+    config.relayer = new_relayer;
+}
+
+// === Send (Return Path) ===
+
+/// Initiates an LZ send of the execution proof back to EVM.
+///
+/// Builds the type-1 proof message and calls `oapp::lz_send()`. Returns the
+/// hot-potato `Call` that must be routed through the LZ endpoint in the same PTB,
+/// then finalized via `confirm_lz_send_proof`.
+///
+/// Only the authorized relayer can call this function.
+public fun lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    options: vector<u8>,
+    native_fee: Coin<SUI>,
+    ctx: &mut TxContext,
+): Call<SendParam, MessagingReceipt> {
+    assert!(ctx.sender() == config.relayer, EUnauthorizedRelayer);
+    assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
+
+    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    oapp.lz_send(
+        &config.oapp_cap,
+        dst_eid,
+        message,
+        options,
+        native_fee,
+        option::none<Coin<ZRO>>(),
+        option::some(ctx.sender()),
+        ctx,
+    )
+}
+
+/// Finalizes the LZ send and handles coin refunds.
+///
+/// Must be called after the `Call` from `lz_send_proof` has been executed by the
+/// LZ endpoint. Extracts the receipt, refunds remaining SUI to the sender, and
+/// emits a `ProofSent` event.
+public fun confirm_lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    call: Call<SendParam, MessagingReceipt>,
+    ctx: &mut TxContext,
+) {
+    let (send_param, receipt) = oapp.confirm_lz_send(&config.oapp_cap, call);
+
+    // Extract proof details from the message before destroying SendParam
+    let message = *send_param.message();
+    let dst_eid = send_param.dst_eid();
+    let intent_id = slice(&message, 1, 32);
+    let blob_id = slice(&message, 33, 32);
+    let end_epoch = decode_u64_from_u256(&message, 65);
+
+    // Destroy SendParam, handle coin refunds
+    let (sui_refund, zro_refund) = send_param.destroy();
+    if (sui_refund.value() > 0) {
+        transfer::public_transfer(sui_refund, ctx.sender());
+    } else {
+        sui_refund.destroy_zero();
+    };
+    if (zro_refund.is_some()) {
+        transfer::public_transfer(zro_refund.destroy_some(), ctx.sender());
+    } else {
+        zro_refund.destroy_none();
+    };
+
+    event::emit(ProofSent {
+        intent_id,
+        blob_id,
+        end_epoch,
+        dst_eid,
+        nonce: receipt.nonce(),
+        guid: receipt.guid(),
+    });
+}
+
+/// Estimates the LZ fee for sending a proof message.
+///
+/// Returns a hot-potato `Call` that must be routed through the LZ endpoint for
+/// quote processing, then finalized via `confirm_quote_proof`.
+public fun quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    options: vector<u8>,
+    ctx: &mut TxContext,
+): Call<QuoteParam, MessagingFee> {
+    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    oapp.quote(
+        &config.oapp_cap,
+        dst_eid,
+        message,
+        options,
+        false,
+        ctx,
+    )
+}
+
+/// Finalizes a quote and returns the estimated messaging fee.
+public fun confirm_quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<QuoteParam, MessagingFee>,
+): MessagingFee {
+    let (_param, fee) = oapp.confirm_quote(&config.oapp_cap, call);
+    fee
+}
+
 // === Internal ===
 
 /// Extracts a contiguous byte slice from `data` starting at `start` with length `len`.
@@ -180,6 +335,73 @@ fun slice(data: &vector<u8>, start: u64, len: u64): vector<u8> {
         i = i + 1;
     };
     result
+}
+
+/// Decodes a u64 from a 32-byte big-endian uint256 at the given offset.
+/// Reads the last 8 bytes (offset+24..offset+32) as big-endian u64.
+fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
+    let base = offset + 24;
+    ((*data.borrow(base) as u64) << 56)
+        | ((*data.borrow(base + 1) as u64) << 48)
+        | ((*data.borrow(base + 2) as u64) << 40)
+        | ((*data.borrow(base + 3) as u64) << 32)
+        | ((*data.borrow(base + 4) as u64) << 24)
+        | ((*data.borrow(base + 5) as u64) << 16)
+        | ((*data.borrow(base + 6) as u64) << 8)
+        | (*data.borrow(base + 7) as u64)
+}
+
+// === Message Encoding ===
+
+/// Builds the proof message with type 1 prefix and ABI-encoded payload.
+///
+/// Format: [0x01] [intentId(32)] [blobId(32)] [endEpoch(32, left-padded u256)]
+/// Total: 97 bytes. Matches the EVM `_lzReceive` decoder for message type 1.
+public(package) fun build_proof_message(
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+): vector<u8> {
+    assert!(intent_id.length() == 32, EInvalidIntentIdLength);
+    assert!(blob_id.length() == 32, EInvalidBlobIdLength);
+
+    let mut msg = vector::empty<u8>();
+
+    // Type 1 prefix
+    msg.push_back(1u8);
+
+    // intentId (32 bytes)
+    let mut i = 0u64;
+    while (i < 32) {
+        msg.push_back(*intent_id.borrow(i));
+        i = i + 1;
+    };
+
+    // blobId (32 bytes)
+    i = 0;
+    while (i < 32) {
+        msg.push_back(*blob_id.borrow(i));
+        i = i + 1;
+    };
+
+    // endEpoch as uint256 (big-endian, left-padded to 32 bytes)
+    // First 24 zero-padding bytes
+    i = 0;
+    while (i < 24) {
+        msg.push_back(0u8);
+        i = i + 1;
+    };
+    // Then 8 bytes of u64 in big-endian
+    msg.push_back(((end_epoch >> 56) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 48) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 40) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 32) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 24) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 16) & 0xFF) as u8);
+    msg.push_back(((end_epoch >> 8) & 0xFF) as u8);
+    msg.push_back((end_epoch & 0xFF) as u8);
+
+    msg
 }
 
 // === Test Helpers ===
