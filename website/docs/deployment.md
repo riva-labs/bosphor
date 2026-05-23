@@ -92,7 +92,7 @@ The relayer container:
 - Polls Sui `IntentReceived` events (LZ path)
 - Uploads payloads to Walrus (deletable blobs)
 - Calls `execute_store` on Sui
-- Calls `confirmExecution` on EVM
+- Sends proof back to EVM via LayerZero (`lz_send_proof` on Sui)
 
 ## Verification
 
