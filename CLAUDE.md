@@ -53,3 +53,74 @@ EVM submitIntent → LZ → Sui lz_receive → IntentReceived event
 - Conventional commits: type(scope): description
 - No Co-authored-by or AI references in commits
 - English communication preferred
+
+---
+
+# Naming
+
+- The product name is **Bosphor** (PascalCase). Never write "BOSPHOR" or "bosphor" in UI copy, docs, comments, prompts, or any generated text. Only lowercase `bosphor` is acceptable in file paths, CLI commands, and package names where convention requires it.
+
+# Branch Strategy
+
+Claude must enforce this rule continuously, without being asked.
+
+**Rule:** Any work that introduces a new feature, touches 3+ files, spans multiple tasks, or takes more than one commit MUST go on a dedicated branch. Never push this kind of work directly to main.
+
+**Exceptions:** Hotfixes and urgent single-file fixes (typos, one-line config changes, documentation updates) may go directly on main.
+
+**How Claude enforces this:**
+- When starting a feature or multi-task implementation, create the branch before writing any code: `git checkout -b <type>/<short-description>`
+- Branch prefix follows `.claude/rules/git-standards.md`: `feature/`, `fix/`, `refactor/`, `chore/`
+- Run `/clear` after creating the branch to start clean in the new context
+- Finish all work with `/ship`, which opens a PR via `gh pr create`. Never merge by pushing directly.
+- If work is already started on main and should have been on a branch, stop and say so before continuing
+
+**Branch naming:** `<type>/<short-description>` (e.g. `feature/batch-intents`, `fix/relayer-reconnect`, `refactor/extract-lz-config`)
+
+# Task tracking
+
+- NEVER create, update, or interact with Linear issues. We do NOT use Linear for task tracking. All issues and task tracking happen on GitHub Issues exclusively.
+
+# Commit message rules
+
+- NEVER add `Co-Authored-By` trailers to commit messages.
+- Follow the Conventional Commits format defined in `.claude/rules/git-standards.md`.
+- NEVER commit changes immediately after making them. Always wait for explicit instruction from the user to commit.
+
+# Writing rules
+
+- NEVER use em dashes (---, &mdash;, or the character). Not in UI copy, comments, docs, prompts, or any generated text. Use a period or comma instead.
+- ALWAYS write the product name as "Bosphor" (PascalCase). This applies everywhere: UI copy, comments, docs, prompts, and any generated text.
+
+# Build verification
+
+Before committing or shipping, Claude MUST run the full build and test gate:
+
+```bash
+# From the project root:
+(cd contracts && forge build && forge test -vvv)
+(cd sui/lz-receiver && sui move test --build-env testnet)
+(cd relayer && npm run build)
+npm run test:e2e
+```
+
+All steps must pass. A passing build alone is not sufficient. If any step fails, fix the issue before proceeding. This applies to `/review`, `/ship`, and any commit workflow.
+
+# Docs rule
+
+After every development task, check whether `docs/` or `website/docs/` has a page that covers the changed or added feature. If it does, update it. If the feature is new and user-facing (contract interface, relayer behavior, deployment flow, protocol change), create the relevant page. Write in plain language for developers integrating with Bosphor. Do not write docs for internal implementation details.
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming: invoke /office-hours
+- Strategy/scope: invoke /plan-ceo-review
+- Architecture: invoke /plan-eng-review
+- Full review pipeline: invoke /autoplan
+- Bugs/errors: invoke /investigate
+- Code review/diff check: invoke /review
+- Ship/deploy/PR: invoke /ship or /land-and-deploy
+- Save progress: invoke /context-save
+- Resume context: invoke /context-restore
