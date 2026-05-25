@@ -6,6 +6,7 @@ export const configValidationSchema = Joi.object({
   // Private key for the EVM relayer wallet (EVM_PRIVATE_KEY)
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
+  EVM_DST_EID: Joi.number().integer().default(40161),
 
   // Sui
   SUI_RPC_URL: Joi.string()

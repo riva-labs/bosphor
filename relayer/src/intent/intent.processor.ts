@@ -4,6 +4,7 @@ import {
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
@@ -11,13 +12,12 @@ import { SuiService, SuiEventCursor } from '../chain/sui/sui.service';
 import { WalrusService } from '../walrus/walrus.service';
 
 const POLL_INTERVAL = 5_000;
-// Sepolia EID for the return path (Sui -> EVM)
-const EVM_DST_EID = 40161;
 
 @Injectable()
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
   private readonly processedIntents = new Set<string>();
+  private readonly evmDstEid: number;
   private evmFromBlock = 0;
   private suiEventCursor: SuiEventCursor | null = null;
   private processing = false;
@@ -27,7 +27,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly evm: EvmService,
     private readonly sui: SuiService,
     private readonly walrus: WalrusService,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
+  }
 
   async onModuleInit() {
     this.evmFromBlock = await this.evm.getBlockNumber();
@@ -212,13 +215,29 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Wait for TX finality to avoid object version conflicts on the next TX
     await this.sui.getClient().waitForTransaction({ digest: storeDigest });
 
-    // 4. Send proof back to EVM via LayerZero
-    this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${EVM_DST_EID})...`);
+    // 4. Quote LZ fee, then send proof back to EVM via LayerZero
+    let feeAmount: bigint | undefined;
+    try {
+      const quotedFee = await this.sui.quoteLzFee(
+        intentId,
+        walrusInfo.blobId,
+        walrusInfo.endEpoch,
+        this.evmDstEid,
+      );
+      // Add 10% buffer to the quoted fee
+      feeAmount = (quotedFee * 11n) / 10n;
+      this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`);
+    } catch (err) {
+      this.logger.warn(`[${intentId}] LZ fee quote failed, using default: ${err}`);
+    }
+
+    this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
     const lzDigest = await this.sui.lzSendProof(
       intentId,
       walrusInfo.blobId,
       walrusInfo.endEpoch,
-      EVM_DST_EID,
+      this.evmDstEid,
+      ...(feeAmount !== undefined ? [feeAmount] : []),
     );
     this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
   }
