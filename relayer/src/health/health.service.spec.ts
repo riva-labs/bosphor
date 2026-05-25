@@ -23,7 +23,9 @@ describe('HealthService', () => {
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
       ],
-    }).compile();
+    })
+      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .compile();
 
     service = module.get<HealthService>(HealthService);
   });

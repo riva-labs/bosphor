@@ -31,7 +31,9 @@ describe('EvmService', () => {
           useValue: { getOrThrow: jest.fn() },
         },
       ],
-    }).compile();
+    })
+      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .compile();
 
     service = module.get<EvmService>(EvmService);
     // Skip onModuleInit, set internal dependencies directly
