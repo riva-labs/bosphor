@@ -22,8 +22,33 @@ jobs:
         run: forge test -vvv
         working-directory: contracts
 
-  relayer-build:
-    name: Relayer Build
+  move-tests:
+    name: Move Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Sui CLI
+        id: cache-sui
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/sui
+          key: sui-cli-${{ runner.os }}-testnet-v1.72.2
+
+      - name: Install Sui CLI
+        if: steps.cache-sui.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/sui-install
+          curl -fsSL "https://github.com/MystenLabs/sui/releases/download/testnet-v1.72.2/sui-testnet-v1.72.2-ubuntu-x86_64.tgz" -o /tmp/sui-install/sui.tgz
+          tar -xzf /tmp/sui-install/sui.tgz -C /tmp/sui-install ./sui
+          sudo mv /tmp/sui-install/sui /usr/local/bin/sui
+
+      - name: Run Move tests
+        run: sui move test --build-env testnet
+        working-directory: sui/lz-receiver
+
+  relayer-build-and-test:
+    name: Relayer Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +64,10 @@ jobs:
         run: npm ci
         working-directory: relayer
 
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+        working-directory: relayer
+
+      - name: Test
+        run: npm test
         working-directory: relayer

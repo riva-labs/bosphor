@@ -33,7 +33,9 @@ describe('WalrusService', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .compile();
 
     service = module.get<WalrusService>(WalrusService);
     service.onModuleInit();
