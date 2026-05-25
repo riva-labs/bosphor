@@ -213,6 +213,201 @@ export class SuiService implements OnModuleInit {
   }
 
   /**
+   * Quote the LZ messaging fee for sending a proof back to EVM.
+   *
+   * Builds a 16-step quote PTB (mirrors the send PTB but with quote functions),
+   * runs it via devInspectTransactionBlock, and parses the MessagingFee BCS return.
+   *
+   * PTB structure:
+   * [0]  APP::quote_proof → quoteCall
+   * [1]  endpoint_v2::quote → msglibQuoteCall
+   * [2]  uln_302::quote → (execGetFeeCall, dvnGetFeeMultiCall)
+   * [3]  executor_worker::get_fee → execFlCall
+   * [4]  exec_fee_lib::get_fee → execPfCall
+   * [5]  price_feed::estimate_fee_by_eid (executor)
+   * [6]  exec_fee_lib::confirm_get_fee
+   * [7]  executor_worker::confirm_get_fee
+   * [8]  dvn::get_fee → dvnFlCall
+   * [9]  dvn_fee_lib::get_fee → dvnPfCall
+   * [10] price_feed::estimate_fee_by_eid (dvn)
+   * [11] dvn_fee_lib::confirm_get_fee
+   * [12] dvn::confirm_get_fee
+   * [13] uln_302::confirm_quote
+   * [14] endpoint_v2::confirm_quote
+   * [15] APP::confirm_quote_proof → MessagingFee
+   */
+  async quoteLzFee(
+    intentId: string,
+    blobId: string,
+    endEpoch: number,
+    dstEid: number,
+  ): Promise<bigint> {
+    if (!this.lzConfigId || !this.lzOappId || !this.lzMessagingChannel) {
+      throw new Error(
+        'LZ quote requires SUI_LZ_CONFIG_ID, SUI_LZ_OAPP_ID, and SUI_LZ_MESSAGING_CHANNEL',
+      );
+    }
+    if (!this.lzInfra.endpointV2 || !this.lzInfra.uln302Obj) {
+      throw new Error(
+        'LZ infrastructure not configured. Set all SUI_LZ_* env vars.',
+      );
+    }
+
+    const tx = new Transaction();
+    const infra = this.lzInfra;
+
+    const intentIdBytes = Array.from(ethers.getBytes(intentId));
+    const blobIdBytes = Array.from(Buffer.from(blobId, 'base64url'));
+    const optionsBytes = Array.from(ethers.getBytes(DEFAULT_LZ_OPTIONS));
+
+    // [0] APP::quote_proof (no fee coin needed)
+    const [quoteCall] = tx.moveCall({
+      target: `${this.lzPackageId}::lz_receiver::quote_proof`,
+      arguments: [
+        tx.object(this.lzConfigId),
+        tx.object(this.lzOappId),
+        tx.pure.vector('u8', intentIdBytes),
+        tx.pure.vector('u8', blobIdBytes),
+        tx.pure.u64(endEpoch),
+        tx.pure.u32(dstEid),
+        tx.pure.vector('u8', optionsBytes),
+      ],
+    });
+
+    // [1] endpoint_v2::quote
+    const [msglibQuoteCall] = tx.moveCall({
+      target: `${infra.endpointV2}::endpoint_v2::quote`,
+      arguments: [
+        tx.object(infra.endpointV2Obj),
+        tx.object(this.lzMessagingChannel),
+        quoteCall,
+      ],
+    });
+
+    // [2] uln_302::quote
+    const [execGetFeeCall, dvnGetFeeMultiCall] = tx.moveCall({
+      target: `${infra.uln302}::uln_302::quote`,
+      arguments: [tx.object(infra.uln302Obj), msglibQuoteCall],
+    });
+
+    // [3] executor_worker::get_fee
+    const [execFlCall] = tx.moveCall({
+      target: `${infra.executorPkg}::executor_worker::get_fee`,
+      arguments: [tx.object(infra.executorObj), execGetFeeCall],
+    });
+
+    // [4] exec_fee_lib::get_fee
+    const [execPfCall] = tx.moveCall({
+      target: `${infra.execFeeLib}::executor_fee_lib::get_fee`,
+      arguments: [tx.object(infra.execFeeLibObj), execFlCall],
+    });
+
+    // [5] price_feed::estimate_fee_by_eid (executor)
+    tx.moveCall({
+      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+      arguments: [tx.object(infra.priceFeedObj), execPfCall],
+    });
+
+    // [6] exec_fee_lib::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.execFeeLib}::executor_fee_lib::confirm_get_fee`,
+      arguments: [tx.object(infra.execFeeLibObj), execFlCall, execPfCall],
+    });
+
+    // [7] executor_worker::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.executorPkg}::executor_worker::confirm_get_fee`,
+      arguments: [tx.object(infra.executorObj), execGetFeeCall, execFlCall],
+    });
+
+    // [8] dvn::get_fee
+    const [dvnFlCall] = tx.moveCall({
+      target: `${infra.dvnPkg}::dvn::get_fee`,
+      arguments: [tx.object(infra.dvnObj), dvnGetFeeMultiCall],
+    });
+
+    // [9] dvn_fee_lib::get_fee
+    const [dvnPfCall] = tx.moveCall({
+      target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
+      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
+    });
+
+    // [10] price_feed::estimate_fee_by_eid (dvn)
+    tx.moveCall({
+      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+      arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
+    });
+
+    // [11] dvn_fee_lib::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
+      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
+    });
+
+    // [12] dvn::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.dvnPkg}::dvn::confirm_get_fee`,
+      arguments: [tx.object(infra.dvnObj), dvnGetFeeMultiCall, dvnFlCall],
+    });
+
+    // [13] uln_302::confirm_quote
+    tx.moveCall({
+      target: `${infra.uln302}::uln_302::confirm_quote`,
+      arguments: [
+        tx.object(infra.uln302Obj),
+        tx.object(infra.treasuryObj),
+        msglibQuoteCall,
+        execGetFeeCall,
+        dvnGetFeeMultiCall,
+      ],
+    });
+
+    // [14] endpoint_v2::confirm_quote
+    tx.moveCall({
+      target: `${infra.endpointV2}::endpoint_v2::confirm_quote`,
+      arguments: [
+        tx.object(infra.endpointV2Obj),
+        quoteCall,
+        msglibQuoteCall,
+      ],
+    });
+
+    // [15] APP::confirm_quote_proof → returns MessagingFee
+    tx.moveCall({
+      target: `${this.lzPackageId}::lz_receiver::confirm_quote_proof`,
+      arguments: [
+        tx.object(this.lzConfigId),
+        tx.object(this.lzOappId),
+        quoteCall,
+      ],
+    });
+
+    const result = await this.client.devInspectTransactionBlock({
+      sender: this.getAddress(),
+      transactionBlock: tx,
+    });
+
+    const status = result.effects?.status?.status;
+    if (status !== 'success') {
+      throw new Error(
+        `LZ fee quote simulation failed: ${JSON.stringify(result.effects?.status)}`,
+      );
+    }
+
+    // Parse MessagingFee BCS from the last command's return value
+    // MessagingFee = { native_fee: u64, zro_fee: u64 } = 16 bytes LE
+    const lastResult = result.results?.[result.results.length - 1];
+    const returnBytes = lastResult?.returnValues?.[0]?.[0];
+    if (!returnBytes || returnBytes.length < 16) {
+      throw new Error('Failed to parse LZ fee quote: no return value');
+    }
+
+    const buf = Buffer.from(returnBytes);
+    const nativeFee = buf.readBigUInt64LE(0);
+    return nativeFee;
+  }
+
+  /**
    * Build and execute the 16-step LZ send PTB to send a proof back to EVM.
    *
    * PTB structure (from verified TX AZicYrtKDANQZvr7G3wHdMKjAhHxcb6v2Eft1DsnKSHg):

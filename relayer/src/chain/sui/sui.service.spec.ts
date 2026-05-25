@@ -186,3 +186,96 @@ describe('SuiService.lzSendProof', () => {
     ).rejects.toThrow(/LZ send proof requires/);
   });
 });
+
+describe('SuiService.quoteLzFee', () => {
+  let service: SuiService;
+  let mockDevInspect: jest.Mock;
+
+  beforeEach(async () => {
+    // BCS-encode MessagingFee { native_fee: u64, zro_fee: u64 }
+    // native_fee = 100_000_000 (0.1 SUI), zro_fee = 0
+    // Both as little-endian u64
+    const nativeFeeBytes = [0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00];
+    const zroFeeBytes = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+    mockDevInspect = jest.fn().mockResolvedValue({
+      effects: { status: { status: 'success' } },
+      results: [
+        // 15 intermediate commands with no meaningful return values
+        ...Array(15).fill({ returnValues: [] }),
+        // Last command (confirm_quote_proof) returns MessagingFee
+        {
+          returnValues: [
+            [[...nativeFeeBytes, ...zroFeeBytes], 'messaging_fee::MessagingFee'],
+          ],
+        },
+      ],
+    });
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        {
+          provide: ConfigService,
+          useValue: {
+            getOrThrow: jest.fn((key: string) => {
+              const map: Record<string, string> = {
+                SUI_RPC_URL: 'https://fullnode.testnet.sui.io:443',
+                SUI_RELAYER_KEY: FAKE_RELAYER_KEY,
+                SUI_PACKAGE_ID: '0xdeadbeef',
+                SUI_CONFIG_ID: '0xconfigid',
+                SUI_LZ_OAPP_ID: BOSPHOR.oappId,
+                SUI_LZ_MESSAGING_CHANNEL: BOSPHOR.messagingChannel,
+              };
+              if (map[key]) return map[key];
+              throw new Error(`Missing config: ${key}`);
+            }),
+            get: jest.fn((key: string, defaultValue?: string) => {
+              const map: Record<string, string> = {
+                SUI_LZ_PACKAGE_ID: BOSPHOR.lzPackageId,
+                SUI_LZ_CONFIG_ID: BOSPHOR.configId,
+                SUI_LZ_OAPP_ID: BOSPHOR.oappId,
+                SUI_LZ_MESSAGING_CHANNEL: BOSPHOR.messagingChannel,
+                SUI_LZ_ENDPOINT_V2: LZ_INFRA.endpointV2,
+                SUI_LZ_ENDPOINT_V2_OBJ: LZ_INFRA.endpointV2Obj,
+                SUI_LZ_ULN302: LZ_INFRA.uln302,
+                SUI_LZ_ULN302_OBJ: LZ_INFRA.uln302Obj,
+                SUI_LZ_EXECUTOR_PKG: LZ_INFRA.executorPkg,
+                SUI_LZ_EXECUTOR_OBJ: LZ_INFRA.executorObj,
+                SUI_LZ_EXEC_FEE_LIB: LZ_INFRA.execFeeLib,
+                SUI_LZ_EXEC_FEE_LIB_OBJ: LZ_INFRA.execFeeLibObj,
+                SUI_LZ_DVN_PKG: LZ_INFRA.dvnPkg,
+                SUI_LZ_DVN_OBJ: LZ_INFRA.dvnObj,
+                SUI_LZ_DVN_FEE_LIB: LZ_INFRA.dvnFeeLib,
+                SUI_LZ_DVN_FEE_LIB_OBJ: LZ_INFRA.dvnFeeLibObj,
+                SUI_LZ_PRICE_FEED: LZ_INFRA.priceFeed,
+                SUI_LZ_PRICE_FEED_OBJ: LZ_INFRA.priceFeedObj,
+                SUI_LZ_TREASURY: LZ_INFRA.treasury,
+                SUI_LZ_TREASURY_OBJ: LZ_INFRA.treasuryObj,
+              };
+              return map[key] ?? defaultValue ?? '';
+            }),
+          },
+        },
+      ],
+    }).compile();
+
+    service = module.get<SuiService>(SuiService);
+    service.onModuleInit();
+
+    const client = service.getClient();
+    client.devInspectTransactionBlock = mockDevInspect;
+  });
+
+  it('should call devInspect and return the quoted native fee', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const blobId = 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0';
+    const endEpoch = 100;
+    const dstEid = 40161;
+
+    const fee = await service.quoteLzFee(intentId, blobId, endEpoch, dstEid);
+
+    expect(fee).toBe(100_000_000n);
+    expect(mockDevInspect).toHaveBeenCalledTimes(1);
+  });
+});
