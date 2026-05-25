@@ -38,9 +38,10 @@ jobs:
       - name: Install Sui CLI
         if: steps.cache-sui.outputs.cache-hit != 'true'
         run: |
-          curl -fsSL "https://github.com/MystenLabs/sui/releases/download/testnet-v1.72.2/sui-testnet-v1.72.2-ubuntu-x86_64.tgz" -o sui.tgz
-          tar -xzf sui.tgz ./sui
-          sudo mv sui /usr/local/bin/sui
+          mkdir -p /tmp/sui-install
+          curl -fsSL "https://github.com/MystenLabs/sui/releases/download/testnet-v1.72.2/sui-testnet-v1.72.2-ubuntu-x86_64.tgz" -o /tmp/sui-install/sui.tgz
+          tar -xzf /tmp/sui-install/sui.tgz -C /tmp/sui-install ./sui
+          sudo mv /tmp/sui-install/sui /usr/local/bin/sui
 
       - name: Run Move tests
         run: sui move test --build-env testnet
