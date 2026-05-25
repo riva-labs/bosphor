@@ -16,7 +16,8 @@ const POLL_INTERVAL = 5_000;
 @Injectable()
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
-  private readonly processedIntents = new Set<string>();
+  private readonly processedIntents = new Map<string, number>();
+  private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
   private evmFromBlock = 0;
   private suiEventCursor: SuiEventCursor | null = null;
@@ -30,6 +31,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
+    this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
   }
 
   async onModuleInit() {
@@ -55,6 +57,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     if (this.stopped || this.processing) return;
     this.processing = true;
     try {
+      this.pruneProcessedIntents();
       await this.pollSuiLzEvents();
       await this.pollEvmEvents();
     } catch (err) {
@@ -97,7 +100,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         this.logger.error(
           `[${event.intentId}] Failed to decode ABI payload`,
         );
-        this.processedIntents.add(event.intentId);
+        this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
 
@@ -105,7 +108,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         this.logger.log(
           `[${event.intentId}] Skipping — deadline expired (via Sui LZ)`,
         );
-        this.processedIntents.add(event.intentId);
+        this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
 
@@ -121,7 +124,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
           Buffer.from(payloadBytes),
           deadlineMs,
         );
-        this.processedIntents.add(event.intentId);
+        this.processedIntents.set(event.intentId, Date.now());
         this.logger.log(
           `[${event.intentId}] Intent fulfilled (via Sui LZ)`,
         );
@@ -151,7 +154,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         this.logger.log(
           `[${event.intentId}] Skipping — deadline expired`,
         );
-        this.processedIntents.add(event.intentId);
+        this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
 
@@ -167,11 +170,20 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
           Buffer.from(payloadBytes),
           deadlineMs,
         );
-        this.processedIntents.add(event.intentId);
+        this.processedIntents.set(event.intentId, Date.now());
         this.logger.log(`[${event.intentId}] Intent fulfilled (via EVM)`);
       } catch (err) {
         this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
         // Do NOT mark as processed — allow retry on next poll
+      }
+    }
+  }
+
+  private pruneProcessedIntents(): void {
+    const now = Date.now();
+    for (const [id, timestamp] of this.processedIntents) {
+      if (now - timestamp > this.intentTtlMs) {
+        this.processedIntents.delete(id);
       }
     }
   }
