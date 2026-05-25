@@ -15,6 +15,27 @@ export const configValidationSchema = Joi.object({
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
   SUI_LZ_PACKAGE_ID: Joi.string().optional().allow(''),
+  SUI_LZ_CONFIG_ID: Joi.string().optional().allow(''),
+  SUI_LZ_OAPP_ID: Joi.string().optional().allow(''),
+  SUI_LZ_MESSAGING_CHANNEL: Joi.string().optional().allow(''),
+
+  // LZ v2 infrastructure (Sui testnet shared objects)
+  SUI_LZ_ENDPOINT_V2: Joi.string().optional().allow(''),
+  SUI_LZ_ENDPOINT_V2_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_ULN302: Joi.string().optional().allow(''),
+  SUI_LZ_ULN302_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_EXECUTOR_PKG: Joi.string().optional().allow(''),
+  SUI_LZ_EXECUTOR_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_EXEC_FEE_LIB: Joi.string().optional().allow(''),
+  SUI_LZ_EXEC_FEE_LIB_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_DVN_PKG: Joi.string().optional().allow(''),
+  SUI_LZ_DVN_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_DVN_FEE_LIB: Joi.string().optional().allow(''),
+  SUI_LZ_DVN_FEE_LIB_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_PRICE_FEED: Joi.string().optional().allow(''),
+  SUI_LZ_PRICE_FEED_OBJ: Joi.string().optional().allow(''),
+  SUI_LZ_TREASURY: Joi.string().optional().allow(''),
+  SUI_LZ_TREASURY_OBJ: Joi.string().optional().allow(''),
 
   // Walrus
   WALRUS_PUBLISHER_URL: Joi.string().uri().required(),
