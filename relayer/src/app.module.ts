@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './config/config.module';
 import { EvmModule } from './chain/evm/evm.module';
 import { SuiModule } from './chain/sui/sui.module';
@@ -9,6 +10,7 @@ import { HealthModule } from './health/health.module';
 @Module({
   imports: [
     AppConfigModule,
+    ScheduleModule.forRoot(),
     EvmModule,
     SuiModule,
     WalrusModule,
