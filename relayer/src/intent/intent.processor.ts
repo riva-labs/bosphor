@@ -1,17 +1,27 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiEventCursor } from '../chain/sui/sui.service';
 import { WalrusService } from '../walrus/walrus.service';
 
 const POLL_INTERVAL = 5_000;
+// Sepolia EID for the return path (Sui -> EVM)
+const EVM_DST_EID = 40161;
 
 @Injectable()
-export class IntentProcessor implements OnModuleInit {
+export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
   private readonly processedIntents = new Set<string>();
   private evmFromBlock = 0;
   private suiEventCursor: SuiEventCursor | null = null;
+  private processing = false;
+  private stopped = false;
 
   constructor(
     private readonly evm: EvmService,
@@ -22,23 +32,33 @@ export class IntentProcessor implements OnModuleInit {
   async onModuleInit() {
     this.evmFromBlock = await this.evm.getBlockNumber();
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
+    this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
+    this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
     this.logger.log(`Polling every ${POLL_INTERVAL / 1000}s for events`);
-    this.startPolling();
   }
 
-  private startPolling() {
-    const poll = async () => {
-      try {
-        // Poll Sui LZ events (primary path when configured)
-        await this.pollSuiLzEvents();
-        // Poll EVM events (fallback / backward-compatible)
-        await this.pollEvmEvents();
-      } catch (err) {
-        this.logger.error(`Poll error: ${err}`);
-      }
-      setTimeout(poll, POLL_INTERVAL);
-    };
-    poll();
+  async onModuleDestroy() {
+    this.logger.log('Shutting down intent processor...');
+    this.stopped = true;
+    // Wait for any in-flight processing to complete
+    while (this.processing) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    this.logger.log('Intent processor stopped');
+  }
+
+  @Interval(POLL_INTERVAL)
+  async poll(): Promise<void> {
+    if (this.stopped || this.processing) return;
+    this.processing = true;
+    try {
+      await this.pollSuiLzEvents();
+      await this.pollEvmEvents();
+    } catch (err) {
+      this.logger.error(`Poll error: ${err}`);
+    } finally {
+      this.processing = false;
+    }
   }
 
   private async pollSuiLzEvents(): Promise<void> {
@@ -182,18 +202,24 @@ export class IntentProcessor implements OnModuleInit {
     }
 
     // 3. Record on Sui
-    const suiDigest = await this.sui.executeStore(
+    const storeDigest = await this.sui.executeStore(
       intentId,
       sender,
       blobObjectId,
       deadlineMs,
     );
 
-    // 4. Confirm on EVM
-    const proof = JSON.stringify({
-      blobId: walrusInfo.blobId,
-      suiDigest,
-    });
-    await this.evm.confirmExecution(intentId, proof);
+    // Wait for TX finality to avoid object version conflicts on the next TX
+    await this.sui.getClient().waitForTransaction({ digest: storeDigest });
+
+    // 4. Send proof back to EVM via LayerZero
+    this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${EVM_DST_EID})...`);
+    const lzDigest = await this.sui.lzSendProof(
+      intentId,
+      walrusInfo.blobId,
+      walrusInfo.endEpoch,
+      EVM_DST_EID,
+    );
+    this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
   }
 }
