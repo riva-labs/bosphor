@@ -10,6 +10,28 @@ const SUI_CLOCK_OBJECT = '0x6';
 const WALRUS_PACKAGE_ID =
   '0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66';
 
+// Default LZ options: 200_000 gas for lzReceive on EVM
+const DEFAULT_LZ_OPTIONS = '0x00030100110100000000000000000000000000030d40';
+
+interface LzInfra {
+  endpointV2: string;
+  endpointV2Obj: string;
+  uln302: string;
+  uln302Obj: string;
+  executorPkg: string;
+  executorObj: string;
+  execFeeLib: string;
+  execFeeLibObj: string;
+  dvnPkg: string;
+  dvnObj: string;
+  dvnFeeLib: string;
+  dvnFeeLibObj: string;
+  priceFeed: string;
+  priceFeedObj: string;
+  treasury: string;
+  treasuryObj: string;
+}
+
 export interface SuiEventCursor {
   txDigest: string;
   eventSeq: string;
@@ -30,6 +52,10 @@ export class SuiService implements OnModuleInit {
   private packageId!: string;
   private configId!: string;
   private lzPackageId!: string;
+  private lzConfigId!: string;
+  private lzOappId!: string;
+  private lzMessagingChannel!: string;
+  private lzInfra!: LzInfra;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -39,6 +65,30 @@ export class SuiService implements OnModuleInit {
     this.packageId = this.config.getOrThrow<string>('SUI_PACKAGE_ID');
     this.configId = this.config.getOrThrow<string>('SUI_CONFIG_ID');
     this.lzPackageId = this.config.get<string>('SUI_LZ_PACKAGE_ID', '');
+    this.lzConfigId = this.config.get<string>('SUI_LZ_CONFIG_ID', '');
+    this.lzOappId = this.config.get<string>('SUI_LZ_OAPP_ID', '');
+    this.lzMessagingChannel = this.config.get<string>(
+      'SUI_LZ_MESSAGING_CHANNEL',
+      '',
+    );
+    this.lzInfra = {
+      endpointV2: this.config.get<string>('SUI_LZ_ENDPOINT_V2', ''),
+      endpointV2Obj: this.config.get<string>('SUI_LZ_ENDPOINT_V2_OBJ', ''),
+      uln302: this.config.get<string>('SUI_LZ_ULN302', ''),
+      uln302Obj: this.config.get<string>('SUI_LZ_ULN302_OBJ', ''),
+      executorPkg: this.config.get<string>('SUI_LZ_EXECUTOR_PKG', ''),
+      executorObj: this.config.get<string>('SUI_LZ_EXECUTOR_OBJ', ''),
+      execFeeLib: this.config.get<string>('SUI_LZ_EXEC_FEE_LIB', ''),
+      execFeeLibObj: this.config.get<string>('SUI_LZ_EXEC_FEE_LIB_OBJ', ''),
+      dvnPkg: this.config.get<string>('SUI_LZ_DVN_PKG', ''),
+      dvnObj: this.config.get<string>('SUI_LZ_DVN_OBJ', ''),
+      dvnFeeLib: this.config.get<string>('SUI_LZ_DVN_FEE_LIB', ''),
+      dvnFeeLibObj: this.config.get<string>('SUI_LZ_DVN_FEE_LIB_OBJ', ''),
+      priceFeed: this.config.get<string>('SUI_LZ_PRICE_FEED', ''),
+      priceFeedObj: this.config.get<string>('SUI_LZ_PRICE_FEED_OBJ', ''),
+      treasury: this.config.get<string>('SUI_LZ_TREASURY', ''),
+      treasuryObj: this.config.get<string>('SUI_LZ_TREASURY_OBJ', ''),
+    };
 
     this.client = new SuiClient({ url: rpcUrl });
 
@@ -159,6 +209,189 @@ export class SuiService implements OnModuleInit {
     }
 
     this.logger.log(`[${intentId}] Sui tx digest: ${result.digest}`);
+    return result.digest;
+  }
+
+  /**
+   * Build and execute the 16-step LZ send PTB to send a proof back to EVM.
+   *
+   * PTB structure (from verified TX AZicYrtKDANQZvr7G3wHdMKjAhHxcb6v2Eft1DsnKSHg):
+   * [0]  SplitCoins (fee)
+   * [1]  APP::lz_send_proof → call
+   * [2]  endpoint_v2::send → msglib_call
+   * [3]  uln_302::send → exec_call, dvn_multi_call
+   * [4]  executor::assign_job → exec_fl_call
+   * [5]  exec_fee_lib::get_fee → exec_pf_call
+   * [6]  price_feed::estimate_fee_by_eid
+   * [7]  exec_fee_lib::confirm_get_fee
+   * [8]  executor::confirm_assign_job
+   * [9]  dvn::assign_job → dvn_fl_call
+   * [10] dvn_fee_lib::get_fee → dvn_pf_call
+   * [11] price_feed::estimate_fee_by_eid
+   * [12] dvn_fee_lib::confirm_get_fee
+   * [13] dvn::confirm_assign_job
+   * [14] uln_302::confirm_send
+   * [15] APP::confirm_lz_send_proof
+   */
+  async lzSendProof(
+    intentId: string,
+    blobId: string,
+    endEpoch: number,
+    dstEid: number,
+    feeAmount: bigint = 500_000_000n, // 0.5 SUI default fee budget
+  ): Promise<string> {
+    if (!this.lzConfigId || !this.lzOappId || !this.lzMessagingChannel) {
+      throw new Error(
+        'LZ send proof requires SUI_LZ_CONFIG_ID, SUI_LZ_OAPP_ID, and SUI_LZ_MESSAGING_CHANNEL',
+      );
+    }
+    if (!this.lzInfra.endpointV2 || !this.lzInfra.uln302Obj) {
+      throw new Error(
+        'LZ infrastructure not configured. Set all SUI_LZ_* env vars.',
+      );
+    }
+
+    const tx = new Transaction();
+    const infra = this.lzInfra;
+
+    const intentIdBytes = Array.from(ethers.getBytes(intentId));
+    // Walrus blobId is base64url-encoded; convert to raw 32-byte array
+    const blobIdBytes = Array.from(Buffer.from(blobId, 'base64url'));
+    const optionsBytes = Array.from(ethers.getBytes(DEFAULT_LZ_OPTIONS));
+
+    // [0] SplitCoins — split fee from gas
+    const [feeCoin] = tx.splitCoins(tx.gas, [feeAmount]);
+
+    // [1] APP::lz_send_proof
+    const [call] = tx.moveCall({
+      target: `${this.lzPackageId}::lz_receiver::lz_send_proof`,
+      arguments: [
+        tx.object(this.lzConfigId),
+        tx.object(this.lzOappId),
+        tx.pure.vector('u8', intentIdBytes),
+        tx.pure.vector('u8', blobIdBytes),
+        tx.pure.u64(endEpoch),
+        tx.pure.u32(dstEid),
+        tx.pure.vector('u8', optionsBytes),
+        feeCoin,
+      ],
+    });
+
+    // [2] endpoint_v2::send
+    const [msglibCall] = tx.moveCall({
+      target: `${infra.endpointV2}::endpoint_v2::send`,
+      arguments: [
+        tx.object(infra.endpointV2Obj),
+        tx.object(this.lzMessagingChannel),
+        call,
+      ],
+    });
+
+    // [3] uln_302::send
+    const [execCall, dvnMultiCall] = tx.moveCall({
+      target: `${infra.uln302}::uln_302::send`,
+      arguments: [tx.object(infra.uln302Obj), msglibCall],
+    });
+
+    // [4] executor::assign_job
+    const [execFlCall] = tx.moveCall({
+      target: `${infra.executorPkg}::executor_worker::assign_job`,
+      arguments: [tx.object(infra.executorObj), execCall],
+    });
+
+    // [5] exec_fee_lib::get_fee
+    const [execPfCall] = tx.moveCall({
+      target: `${infra.execFeeLib}::executor_fee_lib::get_fee`,
+      arguments: [tx.object(infra.execFeeLibObj), execFlCall],
+    });
+
+    // [6] price_feed::estimate_fee_by_eid (executor)
+    tx.moveCall({
+      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+      arguments: [tx.object(infra.priceFeedObj), execPfCall],
+    });
+
+    // [7] exec_fee_lib::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.execFeeLib}::executor_fee_lib::confirm_get_fee`,
+      arguments: [tx.object(infra.execFeeLibObj), execFlCall, execPfCall],
+    });
+
+    // [8] executor::confirm_assign_job
+    tx.moveCall({
+      target: `${infra.executorPkg}::executor_worker::confirm_assign_job`,
+      arguments: [tx.object(infra.executorObj), execCall, execFlCall],
+    });
+
+    // [9] dvn::assign_job
+    const [dvnFlCall] = tx.moveCall({
+      target: `${infra.dvnPkg}::dvn::assign_job`,
+      arguments: [tx.object(infra.dvnObj), dvnMultiCall],
+    });
+
+    // [10] dvn_fee_lib::get_fee
+    const [dvnPfCall] = tx.moveCall({
+      target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
+      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
+    });
+
+    // [11] price_feed::estimate_fee_by_eid (dvn)
+    tx.moveCall({
+      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+      arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
+    });
+
+    // [12] dvn_fee_lib::confirm_get_fee
+    tx.moveCall({
+      target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
+      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
+    });
+
+    // [13] dvn::confirm_assign_job
+    tx.moveCall({
+      target: `${infra.dvnPkg}::dvn::confirm_assign_job`,
+      arguments: [tx.object(infra.dvnObj), dvnMultiCall, dvnFlCall],
+    });
+
+    // [14] uln_302::confirm_send
+    tx.moveCall({
+      target: `${infra.uln302}::uln_302::confirm_send`,
+      arguments: [
+        tx.object(infra.uln302Obj),
+        tx.object(infra.endpointV2Obj),
+        tx.object(infra.treasuryObj),
+        tx.object(this.lzMessagingChannel),
+        call,
+        msglibCall,
+        execCall,
+        dvnMultiCall,
+      ],
+    });
+
+    // [15] APP::confirm_lz_send_proof
+    tx.moveCall({
+      target: `${this.lzPackageId}::lz_receiver::confirm_lz_send_proof`,
+      arguments: [
+        tx.object(this.lzConfigId),
+        tx.object(this.lzOappId),
+        call,
+      ],
+    });
+
+    const result = await this.client.signAndExecuteTransaction({
+      signer: this.keypair,
+      transaction: tx,
+      options: { showEffects: true },
+    });
+
+    const status = result.effects?.status?.status;
+    if (status !== 'success') {
+      throw new Error(
+        `Sui tx failed: ${JSON.stringify(result.effects?.status)}`,
+      );
+    }
+
+    this.logger.log(`[${intentId}] LZ send proof tx: ${result.digest}`);
     return result.digest;
   }
 
