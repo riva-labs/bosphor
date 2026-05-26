@@ -70,11 +70,19 @@ This runs sequentially:
 
 ### 4. `npm run test:e2e`
 
-1. Builds a test payload
-2. Quotes LZ fee via `adapter.quote()`
-3. Calls `submitIntent` with quoted fee
-4. Polls LZ Scan API every 15 seconds for up to 15 minutes
-5. Reports DELIVERED / FAILED / TIMEOUT with all TX links
+Two-step verification of the full round-trip:
+
+**Phase 1 (Forward):**
+1. Builds a test payload and quotes LZ fee
+2. Calls `submitIntent` on EVM
+3. Polls LZ Scan API for forward delivery (EVM -> Sui)
+
+**Phase 2 (Return):**
+4. Waits for the relayer to process the intent (Walrus upload + execute_store)
+5. Polls EVM for `IntentExecuted` event (proof delivered back via LZ)
+6. Decodes proof data (blob ID, end epoch) from the event
+
+The test outputs a 6-checkpoint summary with TX hashes and explorer links for both chains. Set `SUI_PACKAGE_ID` and `SUI_LZ_PACKAGE_ID` in `.env` for full Sui event details (Walrus blob, proof TX).
 
 ## Docker (Relayer)
 
