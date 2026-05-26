@@ -105,3 +105,14 @@ After deployment, verify:
 2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` — verify OApp exists
 3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` — verify contract
 4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>` — verify blob retrieval
+5. **Move Registry**: search `@bosphor/core` at https://www.moveregistry.com or run `mvr resolve @bosphor/core --network testnet`
+
+### Move Registry
+
+| Item | Value |
+|------|-------|
+| MVR Name | `@bosphor/core` |
+| SuiNS Name | `bosphor.sui` |
+| Testnet PackageInfo | `0x1927186c77ee261f67f6646efb1403b08643c912cbd1fdcfea6b60d4e1627360` |
+| Mainnet AppCap | `0x12f12b1135dc87b262d937c4c878ea5b54df0c036e2a00675bc448427f9f1aff` |
+| MVR Registry | `0x0e5d473a055b6b7d014af557a13ad9075157fdc19b6d51562a18511afd397727` |
