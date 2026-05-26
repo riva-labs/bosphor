@@ -283,11 +283,11 @@ public struct StorageExecuted has copy, drop {
 
 ## Wire Formats
 
-### Forward path (EVM to Sui)
+### Step 1: Intent Delivery (EVM to Sui)
 
 `abi.encode(intentId, sender, payload, deadline)` sent via `_lzSend`.
 
-### Return path (Sui to EVM)
+### Step 2: Proof Verification (Sui to EVM)
 
 Type 1 proof message: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
 

@@ -12,7 +12,7 @@ The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both 
 1. Polls Sui for `IntentReceived` events (delivered by LayerZero from EVM)
 2. Uploads the intent payload to Walrus as a deletable blob
 3. Calls `execute_store` on Sui with the certified blob
-4. Quotes the LZ fee for the return path (adds 10% buffer)
+4. Quotes the LZ fee for proof verification (adds 10% buffer)
 5. Calls `lz_send_proof` on Sui to send the proof back to EVM
 6. EVM `_lzReceive` marks the intent as executed
 
@@ -37,9 +37,9 @@ The relayer does not have custody of user funds. It triggers execution and proof
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EVM_DST_EID` | `40161` | EVM destination endpoint ID for return-path proofs |
+| `EVM_DST_EID` | `40161` | EVM destination endpoint ID for proof verification |
 | `SUI_RPC_URL` | `https://fullnode.testnet.sui.io:443` | Sui RPC endpoint |
-| `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for return path) |
+| `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
 | `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |

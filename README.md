@@ -1,25 +1,28 @@
 # Bosphor
 
+[![CI](https://github.com/AliErcanOzgokce/bosphor/actions/workflows/ci.yml/badge.svg)](https://github.com/AliErcanOzgokce/bosphor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-22-brightgreen.svg)](https://nodejs.org/)
+
 > Cross-chain storage intent routing for [Walrus](https://walrus.xyz).
 
 Bosphor routes storage intents from any EVM chain to Walrus on Sui via
 LayerZero v2, returning verifiable proof of execution to the origin chain.
 
-## How It Works
+## How It Works (Two-Step Verification)
 
 ```
-EVM ──submitIntent──► LayerZero v2 ──► Sui lz_receive
-                                            │
-                                       Walrus STORE
-                                       (deletable blob)
-                                            │
-EVM ◄──_lzReceive──◄── LayerZero v2 ◄── lz_send_proof
+Step 1: Intent Delivery (EVM → Sui)
+EVM ──submitIntent──► LayerZero v2 (DVN) ──► Sui lz_receive
+
+Step 2: Proof Verification (Sui → EVM)
+                       Walrus STORE (deletable blob)
+                              │
+EVM ◄──_lzReceive──◄── LayerZero v2 (DVN) ◄── lz_send_proof
 ```
 
-1. User calls `submitIntent(payload, deadline)` on EVM
-2. LayerZero DVN verifies and delivers the message to Sui
-3. Relayer uploads the payload to Walrus as a deletable blob
-4. Relayer calls `execute_store` on Sui, then sends proof back to EVM via LayerZero (`lz_send_proof`)
+1. **Step 1 (Intent Delivery):** User calls `submitIntent(payload, deadline)` on EVM. LayerZero DVN verifies and delivers the message to Sui.
+2. **Step 2 (Proof Verification):** Relayer uploads the payload to Walrus, calls `execute_store` on Sui, then sends DVN-verified proof back to EVM via LayerZero (`lz_send_proof`).
 
 ## Status
 
