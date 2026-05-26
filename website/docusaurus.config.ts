@@ -47,6 +47,10 @@ const config: Config = {
     },
     navbar: {
       title: 'Bosphor',
+      logo: {
+        alt: 'Bosphor Logo',
+        src: 'img/logo.svg',
+      },
       items: [
         {
           type: 'docSidebar',
@@ -68,6 +72,13 @@ const config: Config = {
     },
     footer: {
       style: 'dark',
+      logo: {
+        alt: 'Powered by Walrus',
+        src: 'img/walrus.svg',
+        href: 'https://www.walrus.xyz/',
+        width: 120,
+        height: 40,
+      },
       links: [
         {
           title: 'Docs',
