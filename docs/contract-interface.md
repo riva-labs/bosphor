@@ -90,7 +90,124 @@ event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 
 ## Sui Modules
 
-### lz_receiver::IntentReceived
+### lz_receiver
+
+Receives cross-chain intent messages from EVM and sends execution proofs back.
+
+#### lz_receive
+
+Called by the LZ executor via PTB. Consumes the hot-potato `Call`, validates the message through the OApp (peer + endpoint checks), extracts the intent ID, records the intent, and emits `IntentReceived`.
+
+```move
+public fun lz_receive(
+    config: &mut LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<LzReceiveParam, Void>,
+    ctx: &mut TxContext,
+)
+```
+
+Message format from EVM (`abi.encode`):
+
+| Offset | Length | Field |
+|--------|--------|-------|
+| 0:32 | 32 | intentId (bytes32) |
+| 32:64 | 32 | sender (address, left-padded) |
+| 64:96 | 32 | offset to payload data |
+| 96:128 | 32 | deadline (uint256) |
+| 128:160 | 32 | payload length |
+| 160:... | variable | payload data |
+
+**Aborts**: `EInvalidMessageLength` (1) if message < 32 bytes, `EIntentAlreadyReceived` (0) if duplicate.
+
+#### lz_send_proof
+
+Initiates an LZ send of the execution proof back to EVM. Builds the type-1 proof message and calls `oapp::lz_send()`. Returns a hot-potato `Call` that must be routed through the LZ endpoint in the same PTB, then finalized via `confirm_lz_send_proof`.
+
+```move
+public fun lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    intent_id: vector<u8>,    // 32 bytes
+    blob_id: vector<u8>,      // 32 bytes
+    end_epoch: u64,
+    dst_eid: u32,             // e.g. 40161 for Sepolia
+    options: vector<u8>,
+    native_fee: Coin<SUI>,
+    ctx: &mut TxContext,
+): Call<SendParam, MessagingReceipt>
+```
+
+**Aborts**: `EUnauthorizedRelayer` (2) if caller is not the relayer, `EIntentNotReceived` (6) if intent not recorded.
+
+#### confirm_lz_send_proof
+
+Finalizes the LZ send and handles coin refunds. Must be called after the `Call` from `lz_send_proof` has been executed by the LZ endpoint. Emits `ProofSent`.
+
+```move
+public fun confirm_lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    call: Call<SendParam, MessagingReceipt>,
+    ctx: &mut TxContext,
+)
+```
+
+#### quote_proof
+
+Estimates the LZ fee for sending a proof message. Returns a hot-potato `Call` that must be routed through the endpoint, then finalized via `confirm_quote_proof`.
+
+```move
+public fun quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    options: vector<u8>,
+    ctx: &mut TxContext,
+): Call<QuoteParam, MessagingFee>
+```
+
+#### confirm_quote_proof
+
+Finalizes a quote and returns the estimated messaging fee.
+
+```move
+public fun confirm_quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<QuoteParam, MessagingFee>,
+): MessagingFee
+```
+
+#### set_relayer
+
+Updates the authorized relayer address. Admin-only (requires `AdminCap`).
+
+```move
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+)
+```
+
+**Aborts**: `EZeroAddress` (5) if `new_relayer` is `@0x0`.
+
+#### is_received
+
+Returns `true` if an intent with the given ID has been received.
+
+```move
+public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool
+```
+
+### lz_receiver Events
+
+#### IntentReceived
 
 Emitted when `lz_receive` processes an incoming LZ message.
 
@@ -104,7 +221,54 @@ public struct IntentReceived has copy, drop {
 }
 ```
 
-### walrus_executor::StorageExecuted
+#### ProofSent
+
+Emitted when `confirm_lz_send_proof` completes a proof send back to EVM.
+
+```move
+public struct ProofSent has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes
+    blob_id: vector<u8>,     // 32 bytes
+    end_epoch: u64,          // Walrus blob expiry epoch
+    dst_eid: u32,            // Destination EID (40161 for Sepolia)
+    nonce: u64,              // LZ message nonce
+    guid: Bytes32,           // LZ message GUID
+}
+```
+
+### lz_receiver Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | `EIntentAlreadyReceived` | Intent with this ID was already received |
+| 1 | `EInvalidMessageLength` | Message payload shorter than 32 bytes |
+| 2 | `EUnauthorizedRelayer` | Caller is not the authorized relayer |
+| 3 | `EInvalidIntentIdLength` | intent_id must be exactly 32 bytes |
+| 4 | `EInvalidBlobIdLength` | blob_id must be exactly 32 bytes |
+| 5 | `EZeroAddress` | Relayer address must not be zero |
+| 6 | `EIntentNotReceived` | Intent must exist before sending proof |
+
+### walrus_executor
+
+#### execute_store
+
+Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
+
+```move
+entry fun execute_store(
+    config: &mut ExecutorConfig,
+    intent_id: vector<u8>,
+    blob: Blob,
+    deadline_ms: u64,
+    clock: &Clock,
+    sender: address,
+    ctx: &mut TxContext,
+)
+```
+
+**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3).
+
+#### StorageExecuted
 
 Emitted when `execute_store` records a Walrus blob.
 
@@ -116,6 +280,18 @@ public struct StorageExecuted has copy, drop {
     executor: address,       // Relayer address
 }
 ```
+
+## Wire Formats
+
+### Forward path (EVM to Sui)
+
+`abi.encode(intentId, sender, payload, deadline)` sent via `_lzSend`.
+
+### Return path (Sui to EVM)
+
+Type 1 proof message: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
+
+Total: 97 bytes (1 type byte + 32 intentId + 32 blobId + 32 endEpoch).
 
 ## LZ Options
 

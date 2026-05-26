@@ -13,13 +13,13 @@ EVM ──submitIntent──► LayerZero v2 ──► Sui lz_receive
                                        Walrus STORE
                                        (deletable blob)
                                             │
-EVM ◄──IntentExecuted──◄── Relayer ◄────────┘
+EVM ◄──_lzReceive──◄── LayerZero v2 ◄── lz_send_proof
 ```
 
 1. User calls `submitIntent(payload, deadline)` on EVM
 2. LayerZero DVN verifies and delivers the message to Sui
 3. Relayer uploads the payload to Walrus as a deletable blob
-4. Relayer calls `execute_store` on Sui and `confirmExecution` on EVM
+4. Relayer calls `execute_store` on Sui, then sends proof back to EVM via LayerZero (`lz_send_proof`)
 
 ## Status
 
@@ -50,6 +50,14 @@ See [docs/deployment.md](docs/deployment.md) for detailed setup instructions.
 - `relayer/` — NestJS relayer service with health endpoint
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) -- system design and message flow
+- [Contract Interface](docs/contract-interface.md) -- EVM and Sui function reference
+- [Deployment](docs/deployment.md) -- setup and deployment guide
+- [Relayer](docs/relayer.md) -- operator guide, configuration, health endpoint
+- [Testing](docs/testing.md) -- test suites, CI pipeline, E2E verification
 
 ## Testnet Evidence
 
