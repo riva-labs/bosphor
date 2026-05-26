@@ -95,18 +95,18 @@ Generates PTB metadata for the LZ executor.
 
 **Critical**: `lz_receive_info` must return `OAppInfoV1`-formatted bytes (not raw MoveCall bytes). The LZ executor deserializes the response as `OAppInfoV1 { oapp_object, next_nonce_info, lz_receive_info, extra_info }`.
 
-## LayerZero Proof Pipeline
+## Two-Step Verification Pipeline
 
-### EVM -> Sui (Forward Path)
+### Step 1: Intent Delivery (EVM -> Sui)
 
 1. `submitIntent` calls `_lzSend` with 4-field ABI-encoded message
 2. LayerZero DVN (LayerZero Labs) verifies the message on Sui endpoint
 3. Confirmation depth: 2 blocks
 4. LZ executor reads `OAppInfoV1` from endpoint registry, builds PTB, executes `lz_receive`
 
-### Sui -> EVM (Return Path)
+### Step 2: Proof Verification (Sui -> EVM)
 
-Bidirectional LZ proof path:
+DVN-verified proof delivery:
 1. Relayer observes `IntentReceived` event on Sui
 2. Uploads payload to Walrus (deletable blob)
 3. Calls `execute_store` on Sui
@@ -143,4 +143,4 @@ Where `lz_receive_info` itself contains:
 | No origin-chain payment flow | Medium | Escrow-based payment (Milestone 4) |
 | Sui testnet only | Low | Mainnet after Milestone 2 |
 | Single DVN (LZ Labs) | Low | Multi-DVN in hardening phase |
-| Relayer triggers return path | Low | Permissionless relayer auction (Milestone 4) |
+| Relayer triggers proof verification | Low | Permissionless relayer auction (Milestone 4) |

@@ -19,16 +19,16 @@ origin chain.
 3. **Store**: Relayer uploads the payload to Walrus as a deletable blob
 4. **Prove**: Execution proof (blob ID, expiry epoch) returns to EVM via LayerZero
 
-The full round-trip is trustless end-to-end: both the forward path (EVM to Sui) and the return path (Sui to EVM) are verified by LayerZero DVNs. The relayer triggers execution but cannot forge proofs.
+The full round-trip is trustless end-to-end: both Step 1 (intent delivery, EVM to Sui) and Step 2 (proof verification, Sui to EVM) are verified by LayerZero DVNs. The relayer triggers execution but cannot forge proofs.
 
 ## Current status
 
 **Milestone 1 complete.** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow.
 
 Features shipped:
-- Bidirectional LayerZero messaging (forward intents + return proofs)
+- Two-step LayerZero verification (intent delivery + proof verification)
 - Walrus blob storage with on-chain execution receipts
-- LZ fee quoting on the return path (Sui `quote_proof` + relayer 10% buffer)
+- LZ fee quoting for proof verification (Sui `quote_proof` + relayer 10% buffer)
 - TTL-based deduplication pruning in the relayer
 - Health monitoring endpoint (`GET /health`)
 - CI pipeline (Forge tests, Move tests, relayer build + unit tests)
