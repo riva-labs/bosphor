@@ -6,12 +6,12 @@ export const configValidationSchema = Joi.object({
   // Private key for the EVM relayer wallet (EVM_PRIVATE_KEY)
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
-  EVM_DST_EID: Joi.number().integer().default(40161),
+  EVM_DST_EID: Joi.number().integer().default(30184),
 
   // Sui
   SUI_RPC_URL: Joi.string()
     .uri()
-    .default('https://fullnode.testnet.sui.io:443'),
+    .default('https://fullnode.mainnet.sui.io:443'),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),

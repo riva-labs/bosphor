@@ -53,9 +53,12 @@ const ADAPTER_ABI = [
   "function submitIntent(uint32 dstEid, bytes payload, uint256 deadline, bytes options) payable returns (bytes32)",
 ];
 
-const DST_EID = 40378; // Sui testnet
+const DST_EID = Number(process.env.SUI_EID) || 40378;
 const LZ_OPTIONS = "0x00030100110100000000000000000000000000030d40";
 const MAX_WAIT = 15 * 60 * 1000; // 15 minutes per phase
+const isMainnet = !EVM_RPC_URL.includes("sepolia") && !EVM_RPC_URL.includes("testnet");
+const LZ_SCAN_BASE = isMainnet ? "https://scan.layerzero-api.com" : "https://scan-testnet.layerzero-api.com";
+const LZ_EXPLORER_BASE = isMainnet ? "https://layerzeroscan.com" : "https://testnet.layerzeroscan.com";
 const POLL_INTERVAL = 15_000; // 15 seconds
 
 const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, {
@@ -85,7 +88,7 @@ async function checkLzStatus(
 ): Promise<{ status: string; message: string; destination: string }> {
   try {
     const res = await fetch(
-      `https://scan-testnet.layerzero-api.com/v1/messages/tx/${txHash}`,
+      `${LZ_SCAN_BASE}/v1/messages/tx/${txHash}`,
     );
     if (!res.ok)
       return {
@@ -221,12 +224,13 @@ async function main() {
   console.log("=".repeat(56));
   console.log(`  Sender:  ${sender}`);
   console.log(`  Adapter: ${EVM_ADAPTER_ADDRESS}`);
-  console.log(`  DST EID: ${DST_EID} (Sui testnet)`);
+  const networkLabel = SUI_RPC_URL.includes('mainnet') ? 'Sui mainnet' : 'Sui testnet';
+  console.log(`  DST EID: ${DST_EID} (${networkLabel})`);
 
   // ── Build and submit intent ──
 
   const payload = ethers.toUtf8Bytes(`bosphor-e2e-${Date.now()}`);
-  const deadline = Math.floor(Date.now() / 1000) + 3600;
+  const deadline = Math.floor(Date.now() / 1000) + 14400; // 4 hours (testnet LZ can be slow)
 
   const nonce = await adapter.nonces(sender);
   const intentId = ethers.keccak256(
@@ -274,10 +278,10 @@ async function main() {
   console.log(`\n  [1/6] EVM intent TX`);
   console.log(`        TX:        ${tx.hash}`);
   console.log(
-    `        Etherscan: https://sepolia.etherscan.io/tx/${tx.hash}`,
+    `        Etherscan: ${isMainnet ? "https://basescan.org/tx/" : "https://sepolia.etherscan.io/tx/"}${tx.hash}`,
   );
   console.log(
-    `        LZ:        https://testnet.layerzeroscan.com/tx/${tx.hash}`,
+    `        LZ:        ${LZ_EXPLORER_BASE}/tx/${tx.hash}`,
   );
 
   // ── Phase 1: Forward LZ delivery (EVM -> Sui) ──
@@ -406,7 +410,7 @@ async function main() {
     console.log(`  [3/6] Sui execution`);
     console.log(`        TX:       ${se.txDigest}`);
     console.log(
-      `        Explorer: https://suiscan.xyz/testnet/tx/${se.txDigest}`,
+      `        Explorer: https://suiscan.xyz/${isMainnet ? 'mainnet' : 'testnet'}/tx/${se.txDigest}`,
     );
     console.log(`  [4/6] Walrus blob`);
     console.log(`        Blob ID:  ${se.blobId}`);
@@ -424,7 +428,7 @@ async function main() {
     console.log(`  [5/6] LZ return proof`);
     console.log(`        TX:       ${ps.txDigest}`);
     console.log(
-      `        Explorer: https://suiscan.xyz/testnet/tx/${ps.txDigest}`,
+      `        Explorer: https://suiscan.xyz/${isMainnet ? 'mainnet' : 'testnet'}/tx/${ps.txDigest}`,
     );
 
     // Check return LZ message status
@@ -464,7 +468,7 @@ async function main() {
       console.log(`  [6/6] EVM proof receipt`);
       console.log(`        TX:        ${proofTxHash}`);
       console.log(
-        `        Etherscan: https://sepolia.etherscan.io/tx/${proofTxHash}`,
+        `        Etherscan: ${isMainnet ? "https://basescan.org/tx/" : "https://sepolia.etherscan.io/tx/"}${proofTxHash}`,
       );
       console.log(`        Blob ID:   ${blobId}`);
       console.log(`        End epoch: ${endEpoch}`);
@@ -504,24 +508,24 @@ async function main() {
   console.log("");
   console.log("  Explorer Links:");
   console.log(
-    `    Etherscan (submit):   https://sepolia.etherscan.io/tx/${tx.hash}`,
+    `    Etherscan (submit):   ${isMainnet ? "https://basescan.org/tx/" : "https://sepolia.etherscan.io/tx/"}${tx.hash}`,
   );
   console.log(
-    `    LZ Explorer:          https://testnet.layerzeroscan.com/tx/${tx.hash}`,
+    `    LZ Explorer:          ${LZ_EXPLORER_BASE}/tx/${tx.hash}`,
   );
   if (suiStorageTx !== "(not available)") {
     console.log(
-      `    Sui Explorer (exec):  https://suiscan.xyz/testnet/tx/${suiStorageTx}`,
+      `    Sui Explorer (exec):  https://suiscan.xyz/${isMainnet ? 'mainnet' : 'testnet'}/tx/${suiStorageTx}`,
     );
   }
   if (suiProofTx !== "(not available)") {
     console.log(
-      `    Sui Explorer (proof): https://suiscan.xyz/testnet/tx/${suiProofTx}`,
+      `    Sui Explorer (proof): https://suiscan.xyz/${isMainnet ? 'mainnet' : 'testnet'}/tx/${suiProofTx}`,
     );
   }
   if (proofTxHash !== "(unknown)") {
     console.log(
-      `    Etherscan (proof):    https://sepolia.etherscan.io/tx/${proofTxHash}`,
+      `    Etherscan (proof):    ${isMainnet ? "https://basescan.org/tx/" : "https://sepolia.etherscan.io/tx/"}${proofTxHash}`,
     );
   }
   console.log("");

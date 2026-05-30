@@ -22,26 +22,25 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { bcs } from "@mysten/sui/bcs";
 
-// --- LZ Infrastructure (Sui testnet, fixed) ---
-const LZ_ENDPOINT_OBJ = "0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a";
-const OAPP_PKG = "0x04c440985f5deab2fb7f821b3288d93225a3e637cf22dda476809836f0533751";
-const BYTES32_PKG = "0xb168928451914a99ec70aa954e4b7e45e2739fdb5c403f540caf647c01645f30";
-const ULN302 = "0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24";
-const ULN302_OBJ = "0x69541d4feeb08cdd3b20b3502021a676eea0fca4f47d46e423cdc9686df406ff";
-const LZ_DVN_SUI = "0x1356fef0c7325536e289e53cc545219cbfbd1490ed762c8d8efb97efa6cfb856";
-const LZ_EXECUTOR_SUI = "0xbd529bbc1e862db38c374435c40bb6399f3fffbc097977dbae4b71cfa975adb1";
+// --- LZ Infrastructure (from .env) ---
+const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
+const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
+const ULN302 = process.env.SUI_LZ_ULN302!;
+const ULN302_OBJ = process.env.SUI_LZ_ULN302_OBJ!;
+const LZ_DVN_SUI = process.env.SUI_LZ_DVN_PKG!;
+const LZ_EXECUTOR_SUI = process.env.SUI_LZ_EXECUTOR_PKG!;
 const CLOCK = "0x6";
 
-const EVM_EID = 40161; // Sepolia
+const EVM_EID = Number(process.env.EVM_EID) || 40161;
 
 // --- Config from env ---
 const SUI_RPC_URL = process.env.SUI_RPC_URL || "https://fullnode.testnet.sui.io:443";
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
 
-if (!SUI_DEPLOYER_KEY) {
-  console.error("Missing SUI_DEPLOYER_KEY in .env");
-  process.exit(1);
+const requiredEnv = ["SUI_DEPLOYER_KEY", "SUI_LZ_ENDPOINT_V2_OBJ", "SUI_LZ_OAPP_PKG", "SUI_LZ_ULN302", "SUI_LZ_ULN302_OBJ", "SUI_LZ_DVN_PKG", "SUI_LZ_EXECUTOR_PKG", "SUI_LZ_BYTES32_PKG"];
+for (const k of requiredEnv) {
+  if (!process.env[k]) { console.error(`Missing ${k} in .env`); process.exit(1); }
 }
 
 const suiClient = new SuiClient({ url: SUI_RPC_URL });
@@ -132,6 +131,12 @@ interface PublishResult {
 
 async function publish(): Promise<PublishResult> {
   console.log("\n=== Step 1: Publish bosphor_lz package ===");
+  // Detect network from SUI_RPC_URL and switch sui client env
+  const isMainnet = SUI_RPC_URL.includes("mainnet");
+  if (isMainnet) {
+    try { execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" }); } catch {}
+    console.log("  Switched sui client to mainnet");
+  }
   const suiLzPath = resolve(import.meta.dirname, "../sui/lz-receiver");
 
   // Remove Published.toml if exists (allows fresh publish)
@@ -317,7 +322,7 @@ async function setPeer(
 
   const tx1 = new Transaction();
   const [peerBytes32] = tx1.moveCall({
-    target: `${BYTES32_PKG}::bytes32::from_bytes`,
+    target: `${process.env.SUI_LZ_BYTES32_PKG}::bytes32::from_bytes`,
     arguments: [tx1.pure("vector<u8>", addressToBytes32(EVM_ADAPTER_ADDRESS))],
   });
   tx1.moveCall({
