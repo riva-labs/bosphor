@@ -21,12 +21,12 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 
-// --- LZ constants ---
-const OAPP_PKG = "0x04c440985f5deab2fb7f821b3288d93225a3e637cf22dda476809836f0533751";
-const BYTES32_PKG = "0xb168928451914a99ec70aa954e4b7e45e2739fdb5c403f540caf647c01645f30";
-const LZ_ENDPOINT_OBJ = "0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a";
-const EVM_EID = 40161;
-const SUI_EID = 40378;
+// --- LZ constants (from .env) ---
+const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
+const BYTES32_PKG = process.env.SUI_LZ_BYTES32_PKG!;
+const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
+const EVM_EID = Number(process.env.EVM_EID) || 40161;
+const SUI_EID = Number(process.env.SUI_EID) || 40378;
 
 // --- Config from env ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
