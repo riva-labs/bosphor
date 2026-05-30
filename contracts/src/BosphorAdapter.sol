@@ -150,14 +150,15 @@ contract BosphorAdapter is OApp {
 
     // --- Internal execution logic ---
     /// @notice Shared validation and state update for both execution paths.
-    /// @dev Reverts if the intent does not exist, was already executed, or its deadline has
-    ///      passed. On success, sets `executed[_intentId]` and emits `IntentExecuted`.
+    /// @dev Reverts if the intent does not exist or was already executed.
+    ///      Deadline is enforced only at submission time (`submitIntent`), not at proof
+    ///      receipt, because the storage has already been completed on Walrus by the time
+    ///      the proof arrives.
     /// @param _intentId The deterministic identifier of the intent.
     /// @param _proof Opaque proof data to emit alongside the execution event.
     function _markExecuted(bytes32 _intentId, bytes memory _proof) internal {
         if (!intents[_intentId]) revert IntentNotFound();
         if (executed[_intentId]) revert AlreadyExecuted();
-        if (block.timestamp > intentDeadlines[_intentId]) revert DeadlineExpired();
 
         executed[_intentId] = true;
         emit IntentExecuted(_intentId, _proof);
