@@ -216,16 +216,24 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`[${intentId}] Found: ${blobObjectId}`);
     }
 
-    // 3. Record on Sui
-    const storeDigest = await this.sui.executeStore(
-      intentId,
-      sender,
-      blobObjectId,
-      deadlineMs,
-    );
-
-    // Wait for TX finality to avoid object version conflicts on the next TX
-    await this.sui.getClient().waitForTransaction({ digest: storeDigest });
+    // 3. Record on Sui (skip if already executed from a prior attempt)
+    try {
+      const storeDigest = await this.sui.executeStore(
+        intentId,
+        sender,
+        blobObjectId,
+        deadlineMs,
+      );
+      // Wait for TX finality to avoid object version conflicts on the next TX
+      await this.sui.getClient().waitForTransaction({ digest: storeDigest });
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes('execute_store') && msg.includes(', 2)')) {
+        this.logger.log(`[${intentId}] execute_store already done, proceeding to LZ send`);
+      } else {
+        throw err;
+      }
+    }
 
     // 4. Quote LZ fee, then send proof back to EVM via LayerZero
     let feeAmount: bigint | undefined;

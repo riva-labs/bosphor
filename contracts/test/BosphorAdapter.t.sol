@@ -106,14 +106,14 @@ contract BosphorAdapterTest is Test {
         adapter.confirmExecution(bytes32(uint256(999)), "proof");
     }
 
-    function test_confirmExecution_expiredDeadline_reverts() public {
+    function test_confirmExecution_afterDeadline_succeeds() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
         vm.warp(deadline + 1);
 
-        vm.expectRevert(BosphorAdapter.DeadlineExpired.selector);
         adapter.confirmExecution(intentId, "proof");
+        assertTrue(adapter.executed(intentId));
     }
 
     function test_confirmExecution_relayer_reverts() public {
@@ -234,7 +234,7 @@ contract BosphorAdapterTest is Test {
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
     }
 
-    function test_lzReceive_type1_expired_reverts() public {
+    function test_lzReceive_type1_afterDeadline_succeeds() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes32 intentId = _submitIntent(user, "hello", deadline);
 
@@ -243,8 +243,8 @@ contract BosphorAdapterTest is Test {
         bytes32 blobId = keccak256("walrus-blob-123");
         bytes memory message = _buildType1Message(intentId, blobId, 42);
 
-        vm.expectRevert(BosphorAdapter.DeadlineExpired.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
+        assertTrue(adapter.executed(intentId));
     }
 
     function test_lzReceive_emptyMessage_reverts() public {

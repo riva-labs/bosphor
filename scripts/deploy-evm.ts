@@ -27,8 +27,8 @@ if (!EVM_RPC_URL || !EVM_RELAYER_KEY) {
   process.exit(1);
 }
 
-const LZ_ENDPOINT_SEPOLIA = "0x6EDCE65403992e310A62460808c4b910D972f10f";
-const SUI_EID = 40378;
+const LZ_ENDPOINT = process.env.LZ_ENDPOINT_ADDRESS || "0x6EDCE65403992e310A62460808c4b910D972f10f";
+const SUI_EID = Number(process.env.SUI_EID) || 40378;
 
 const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, { staticNetwork: true });
 const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
@@ -53,7 +53,7 @@ async function main() {
   console.log("=== Bosphor EVM Deployment ===");
   console.log(`  Deployer: ${deployer}`);
   console.log(`  RPC:      ${EVM_RPC_URL}`);
-  console.log(`  Endpoint: ${LZ_ENDPOINT_SEPOLIA}`);
+  console.log(`  Endpoint: ${LZ_ENDPOINT}`);
 
   // Step 1: Build contracts
   console.log("\n=== Step 1: Build contracts ===");
@@ -80,7 +80,7 @@ async function main() {
   const bytecode = artifact.bytecode.object;
 
   const factory = new ethers.ContractFactory(abi, bytecode, wallet);
-  const contract = await factory.deploy(LZ_ENDPOINT_SEPOLIA, deployer, deployer);
+  const contract = await factory.deploy(LZ_ENDPOINT, deployer, deployer);
   await contract.waitForDeployment();
   const adapterAddress = await contract.getAddress();
 

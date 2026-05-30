@@ -3,7 +3,7 @@ name = "bosphor"
 edition = "2024.beta"
 
 [dependencies]
-Walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "main" }
+Walrus = { local = "deps/walrus" }
 
 [addresses]
 bosphor = "0x0"
