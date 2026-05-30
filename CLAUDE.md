@@ -110,6 +110,14 @@ All steps must pass. A passing build alone is not sufficient. If any step fails,
 
 After every development task, check whether `docs/` or `website/docs/` has a page that covers the changed or added feature. If it does, update it. If the feature is new and user-facing (contract interface, relayer behavior, deployment flow, protocol change), create the relevant page. Write in plain language for developers integrating with Bosphor. Do not write docs for internal implementation details.
 
+## Health Stack
+
+- solidity: cd contracts && forge build && forge test -vvv
+- move: cd sui/lz-receiver && sui move test --build-env testnet
+- relayer-build: cd relayer && npm run build
+- relayer-test: cd relayer && npm run test
+- e2e: npm run test:e2e
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
