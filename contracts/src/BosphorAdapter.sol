@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { OApp, Origin, MessagingFee, MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
+import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
 
 /// @title BosphorAdapter
 /// @author Riva Labs
@@ -9,7 +10,7 @@ import { OApp, Origin, MessagingFee, MessagingReceipt } from "@layerzerolabs/oap
 ///         receives execution proofs back, enabling cross-chain decentralised storage.
 /// @dev Intents flow EVM -> LayerZero v2 -> Sui lz_receive -> Walrus upload -> proof
 ///      back to this contract via either a LayerZero message or a trusted relayer call.
-contract BosphorAdapter is OApp {
+contract BosphorAdapter is OApp, IBosphorAdapter {
     // --- Types ---
     /// @dev Internal representation of a storage intent (not used in external ABI).
     struct Intent {
@@ -20,37 +21,12 @@ contract BosphorAdapter is OApp {
         uint256 deadline;
     }
 
-    // --- Events ---
-    /// @notice Emitted when a new storage intent is submitted and sent cross-chain.
-    event IntentSubmitted(
-        bytes32 indexed intentId,
-        address indexed sender,
-        uint64 targetChainId,
-        bytes payload,
-        uint256 nonce,
-        uint256 deadline
-    );
-
-    /// @notice Emitted when an intent is marked as executed with its proof.
-    event IntentExecuted(bytes32 indexed intentId, bytes proof);
-
-    /// @notice Emitted when the owner changes the trusted relayer address.
-    event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
-
     // --- State ---
     address public trustedRelayer;
     mapping(bytes32 => bool) public intents;
     mapping(bytes32 => bool) public executed;
     mapping(bytes32 => uint256) public intentDeadlines;
     mapping(address => uint256) public nonces;
-
-    // --- Errors ---
-    error DeadlineExpired();
-    error IntentAlreadyExists();
-    error IntentNotFound();
-    error AlreadyExecuted();
-    error ZeroAddress();
-    error UnknownMessageType();
 
     // --- Constructor ---
     /// @notice Deploys the adapter and registers it with the LayerZero endpoint.

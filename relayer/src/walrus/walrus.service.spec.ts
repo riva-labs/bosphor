@@ -34,7 +34,14 @@ describe('WalrusService', () => {
         },
       ],
     })
-      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .setLogger({
+        log() {},
+        error() {},
+        warn() {},
+        debug() {},
+        verbose() {},
+        fatal() {},
+      })
       .compile();
 
     service = module.get<WalrusService>(WalrusService);
@@ -96,90 +103,74 @@ describe('WalrusService', () => {
       });
     });
 
-    it(
-      'should retry on 5xx and succeed',
-      async () => {
-        mockFetch
-          .mockResolvedValueOnce({
-            ok: false,
-            status: 502,
-            text: jest.fn().mockResolvedValue('Bad Gateway'),
-          } as any)
-          .mockResolvedValueOnce({
-            ok: true,
-            status: 200,
-            json: jest.fn().mockResolvedValue({
-              newlyCreated: {
-                blobObject: {
-                  blobId: 'blob789',
-                  id: '0xobj789',
-                  storage: { endEpoch: 40 },
-                },
+    it('should retry on 5xx and succeed', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 502,
+          text: jest.fn().mockResolvedValue('Bad Gateway'),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValue({
+            newlyCreated: {
+              blobObject: {
+                blobId: 'blob789',
+                id: '0xobj789',
+                storage: { endEpoch: 40 },
               },
-            }),
-          } as any);
-
-        const result = await service.upload(Buffer.from('retry-data'));
-
-        expect(result.blobId).toBe('blob789');
-        expect(mockFetch).toHaveBeenCalledTimes(2);
-      },
-      10_000,
-    );
-
-    it(
-      'should throw after max retries on persistent 5xx',
-      async () => {
-        mockFetch.mockResolvedValue({
-          ok: false,
-          status: 500,
-          text: jest.fn().mockResolvedValue('Internal Server Error'),
+            },
+          }),
         } as any);
 
-        await expect(
-          service.upload(Buffer.from('fail-data')),
-        ).rejects.toThrow('Walrus upload failed (500)');
+      const result = await service.upload(Buffer.from('retry-data'));
 
-        expect(mockFetch).toHaveBeenCalledTimes(3);
-      },
-      15_000,
-    );
+      expect(result.blobId).toBe('blob789');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    }, 10_000);
 
-    it(
-      'should retry on 4xx and throw after max attempts',
-      async () => {
-        mockFetch.mockResolvedValue({
-          ok: false,
-          status: 400,
-          text: jest.fn().mockResolvedValue('Bad Request'),
-        } as any);
+    it('should throw after max retries on persistent 5xx', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: jest.fn().mockResolvedValue('Internal Server Error'),
+      } as any);
 
-        await expect(
-          service.upload(Buffer.from('bad-data')),
-        ).rejects.toThrow('Walrus upload failed (400)');
+      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
+        'Walrus upload failed (500)',
+      );
 
-        expect(mockFetch).toHaveBeenCalledTimes(3);
-      },
-      15_000,
-    );
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    }, 15_000);
 
-    it(
-      'should throw when all attempts time out',
-      async () => {
-        const abortError = new DOMException(
-          'The operation was aborted',
-          'AbortError',
-        );
-        mockFetch.mockRejectedValue(abortError);
+    it('should retry on 4xx and throw after max attempts', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        text: jest.fn().mockResolvedValue('Bad Request'),
+      } as any);
 
-        await expect(
-          service.upload(Buffer.from('timeout-data')),
-        ).rejects.toThrow();
+      await expect(service.upload(Buffer.from('bad-data'))).rejects.toThrow(
+        'Walrus upload failed (400)',
+      );
 
-        expect(mockFetch).toHaveBeenCalledTimes(3);
-      },
-      15_000,
-    );
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    }, 15_000);
+
+    it('should throw when all attempts time out', async () => {
+      const abortError = new DOMException(
+        'The operation was aborted',
+        'AbortError',
+      );
+      mockFetch.mockRejectedValue(abortError);
+
+      await expect(
+        service.upload(Buffer.from('timeout-data')),
+      ).rejects.toThrow();
+
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    }, 15_000);
 
     it('should throw on unexpected response shape', async () => {
       mockFetch.mockResolvedValue({
@@ -188,9 +179,9 @@ describe('WalrusService', () => {
         json: jest.fn().mockResolvedValue({ unknownField: true }),
       } as any);
 
-      await expect(
-        service.upload(Buffer.from('weird-data')),
-      ).rejects.toThrow('Unexpected Walrus response');
+      await expect(service.upload(Buffer.from('weird-data'))).rejects.toThrow(
+        'Unexpected Walrus response',
+      );
     });
   });
 

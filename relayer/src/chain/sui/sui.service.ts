@@ -125,9 +125,7 @@ export class SuiService implements OnModuleInit {
     return this.client.getLatestCheckpointSequenceNumber();
   }
 
-  async pollLzEvents(
-    cursor: SuiEventCursor | null,
-  ): Promise<{
+  async pollLzEvents(cursor: SuiEventCursor | null): Promise<{
     events: SuiLzEvent[];
     newCursor: SuiEventCursor | null;
     hasMore: boolean;
@@ -365,11 +363,7 @@ export class SuiService implements OnModuleInit {
     // [14] endpoint_v2::confirm_quote
     tx.moveCall({
       target: `${infra.endpointV2}::endpoint_v2::confirm_quote`,
-      arguments: [
-        tx.object(infra.endpointV2Obj),
-        quoteCall,
-        msglibQuoteCall,
-      ],
+      arguments: [tx.object(infra.endpointV2Obj), quoteCall, msglibQuoteCall],
     });
 
     // [15] APP::confirm_quote_proof → returns MessagingFee
@@ -566,11 +560,7 @@ export class SuiService implements OnModuleInit {
     // [15] APP::confirm_lz_send_proof
     tx.moveCall({
       target: `${this.lzPackageId}::lz_receiver::confirm_lz_send_proof`,
-      arguments: [
-        tx.object(this.lzConfigId),
-        tx.object(this.lzOappId),
-        call,
-      ],
+      arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), call],
     });
 
     const result = await this.client.signAndExecuteTransaction({

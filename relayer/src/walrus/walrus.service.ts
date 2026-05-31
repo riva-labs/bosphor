@@ -22,8 +22,9 @@ export class WalrusService implements OnModuleInit {
 
   onModuleInit() {
     this.publisherUrl = this.config.getOrThrow<string>('WALRUS_PUBLISHER_URL');
-    this.aggregatorUrl =
-      this.config.getOrThrow<string>('WALRUS_AGGREGATOR_URL');
+    this.aggregatorUrl = this.config.getOrThrow<string>(
+      'WALRUS_AGGREGATOR_URL',
+    );
     this.storeEpochs = this.config.get<number>('WALRUS_STORE_EPOCHS', 5);
 
     this.logger.log(`Walrus publisher: ${this.publisherUrl}`);

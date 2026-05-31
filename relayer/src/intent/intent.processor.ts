@@ -38,7 +38,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.evmFromBlock = await this.evm.getBlockNumber();
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
-    this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
+    this.logger.log(
+      `LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`,
+    );
     this.logger.log(`Polling every ${POLL_INTERVAL / 1000}s for events`);
   }
 
@@ -97,9 +99,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         userPayload = decoded[2];
         deadlineMs = BigInt(decoded[3]) * 1000n;
       } catch {
-        this.logger.error(
-          `[${event.intentId}] Failed to decode ABI payload`,
-        );
+        this.logger.error(`[${event.intentId}] Failed to decode ABI payload`);
         this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
@@ -125,9 +125,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
           deadlineMs,
         );
         this.processedIntents.set(event.intentId, Date.now());
-        this.logger.log(
-          `[${event.intentId}] Intent fulfilled (via Sui LZ)`,
-        );
+        this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
       } catch (err) {
         this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
         // Do NOT mark as processed — allow retry on next poll
@@ -143,17 +141,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     for (const event of events) {
       if (this.processedIntents.has(event.intentId)) {
-        this.logger.debug(
-          `[${event.intentId}] Skipping — already processed`,
-        );
+        this.logger.debug(`[${event.intentId}] Skipping — already processed`);
         continue;
       }
 
       const deadlineMs = BigInt(event.deadline) * 1000n;
       if (Date.now() > Number(deadlineMs)) {
-        this.logger.log(
-          `[${event.intentId}] Skipping — deadline expired`,
-        );
+        this.logger.log(`[${event.intentId}] Skipping — deadline expired`);
         this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
@@ -198,12 +192,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[${intentId}] Uploading to Walrus...`);
     const walrusInfo = await this.walrus.upload(payload);
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
-    this.logger.log(
-      `[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`,
-    );
-    this.logger.log(
-      `[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`,
-    );
+    this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
+    this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
     this.logger.log(
       `[${intentId}] Verify: ${this.walrus.getAggregatorUrl()}/v1/blobs/${walrusInfo.blobId}`,
     );
@@ -229,7 +219,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const msg = String(err);
       if (msg.includes('execute_store') && msg.includes(', 2)')) {
-        this.logger.log(`[${intentId}] execute_store already done, proceeding to LZ send`);
+        this.logger.log(
+          `[${intentId}] execute_store already done, proceeding to LZ send`,
+        );
       } else {
         throw err;
       }
@@ -246,12 +238,18 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       );
       // Add 10% buffer to the quoted fee
       feeAmount = (quotedFee * 11n) / 10n;
-      this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`);
+      this.logger.log(
+        `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
+      );
     } catch (err) {
-      this.logger.warn(`[${intentId}] LZ fee quote failed, using default: ${err}`);
+      this.logger.warn(
+        `[${intentId}] LZ fee quote failed, using default: ${err}`,
+      );
     }
 
-    this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
+    this.logger.log(
+      `[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`,
+    );
     const lzDigest = await this.sui.lzSendProof(
       intentId,
       walrusInfo.blobId,

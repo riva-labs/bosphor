@@ -31,14 +31,20 @@ export class EvmService implements OnModuleInit {
   onModuleInit() {
     const rpcUrl = this.config.getOrThrow<string>('EVM_RPC_URL');
     const privateKey = this.config.getOrThrow<string>('EVM_RELAYER_KEY');
-    const adapterAddress = this.config.getOrThrow<string>('EVM_ADAPTER_ADDRESS');
+    const adapterAddress = this.config.getOrThrow<string>(
+      'EVM_ADAPTER_ADDRESS',
+    );
 
     this.provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
       staticNetwork: true,
       polling: true,
     });
     this.wallet = new ethers.Wallet(privateKey, this.provider);
-    this.adapter = new ethers.Contract(adapterAddress, ADAPTER_ABI, this.wallet);
+    this.adapter = new ethers.Contract(
+      adapterAddress,
+      ADAPTER_ABI,
+      this.wallet,
+    );
 
     this.logger.log(`EVM adapter: ${adapterAddress}`);
     this.logger.log(`EVM relayer: ${this.wallet.address}`);

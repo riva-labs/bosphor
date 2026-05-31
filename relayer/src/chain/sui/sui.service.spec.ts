@@ -8,8 +8,7 @@ const LZ_INFRA = {
     '0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a',
   endpointV2Obj:
     '0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a',
-  uln302:
-    '0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24',
+  uln302: '0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24',
   uln302Obj:
     '0x69541d4feeb08cdd3b20b3502021a676eea0fca4f47d46e423cdc9686df406ff',
   executorPkg:
@@ -20,10 +19,8 @@ const LZ_INFRA = {
     '0xa99c7ca780a6cedfc27d9274c031741b68014886cba04dafe8335c72eeeed0b5',
   execFeeLibObj:
     '0x4e0c4cc4aa88b428005a8bb131014fdf9637a3ae042f192b9071119a64a32138',
-  dvnPkg:
-    '0xfa5a7bd745a56f3f18f4830563c8b65a737dcfca5b9e5aa281f2f2cd3f6eaf6d',
-  dvnObj:
-    '0x4160cd9281e79a93f87f7f45853cd682750102be01f36d1c33ef99ee8cd86e0d',
+  dvnPkg: '0xfa5a7bd745a56f3f18f4830563c8b65a737dcfca5b9e5aa281f2f2cd3f6eaf6d',
+  dvnObj: '0x4160cd9281e79a93f87f7f45853cd682750102be01f36d1c33ef99ee8cd86e0d',
   dvnFeeLib:
     '0xfb596f2afcc4f15ec8660fb241c3a7bc9aa2f9b3b820914b6990202b5f236f2f',
   dvnFeeLibObj:
@@ -43,8 +40,7 @@ const BOSPHOR = {
     '0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656',
   configId:
     '0xea751eeb901093cf8f45532876c12408f0cc627aad570f6112b2dc2ee8d9e432',
-  oappId:
-    '0x9631910c0bc687a74f0b99dd88d2f0033c393aa36735095de8cce67d5eeb27b0',
+  oappId: '0x9631910c0bc687a74f0b99dd88d2f0033c393aa36735095de8cce67d5eeb27b0',
   messagingChannel:
     '0x1d1058fd590c44154a92282ebaab621aae10df0982466a433e9c9a18fe9c8301',
 };
@@ -206,7 +202,10 @@ describe('SuiService.quoteLzFee', () => {
         // Last command (confirm_quote_proof) returns MessagingFee
         {
           returnValues: [
-            [[...nativeFeeBytes, ...zroFeeBytes], 'messaging_fee::MessagingFee'],
+            [
+              [...nativeFeeBytes, ...zroFeeBytes],
+              'messaging_fee::MessagingFee',
+            ],
           ],
         },
       ],

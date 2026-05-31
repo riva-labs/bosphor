@@ -116,3 +116,62 @@ fun test_build_proof_message_rejects_short_blob_id() {
     let blob_id = x"CCDD"; // only 2 bytes
     lz_receiver::build_proof_message(intent_id, blob_id, 1);
 }
+
+// === set_relayer tests ===
+
+#[test]
+fun test_set_relayer_success() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let mut config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        let admin_cap = scenario.take_from_sender<oapp::oapp::AdminCap>();
+        let oapp = scenario.take_shared<oapp::oapp::OApp>();
+        lz_receiver::set_relayer(&mut config, &admin_cap, &oapp, RELAYER);
+        test_scenario::return_shared(oapp);
+        scenario.return_to_sender(admin_cap);
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EZeroAddress)]
+fun test_set_relayer_zero_address_fails() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let mut config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        let admin_cap = scenario.take_from_sender<oapp::oapp::AdminCap>();
+        let oapp = scenario.take_shared<oapp::oapp::OApp>();
+        lz_receiver::set_relayer(&mut config, &admin_cap, &oapp, @0x0);
+        test_scenario::return_shared(oapp);
+        scenario.return_to_sender(admin_cap);
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
+// === oapp_cap_id test ===
+
+#[test]
+fun test_oapp_cap_id_callable() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        // Verify function is callable and returns a valid address
+        let _cap_id = lz_receiver::oapp_cap_id(&config);
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}

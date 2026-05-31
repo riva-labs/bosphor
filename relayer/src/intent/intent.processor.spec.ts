@@ -15,7 +15,9 @@ describe('IntentProcessor.processIntent', () => {
   beforeEach(async () => {
     mockEvm = {
       getBlockNumber: jest.fn().mockResolvedValue(100),
-      pollEvents: jest.fn().mockResolvedValue({ events: [], newFromBlock: 101 }),
+      pollEvents: jest
+        .fn()
+        .mockResolvedValue({ events: [], newFromBlock: 101 }),
       confirmExecution: jest.fn().mockResolvedValue('0xevmhash'),
     };
 
@@ -75,7 +77,12 @@ describe('IntentProcessor.processIntent', () => {
     const deadlineMs = BigInt(Date.now() + 60_000);
 
     // processIntent is private, so we access it via the class prototype
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (processor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     // Walrus upload should be called
     expect(mockWalrus.upload).toHaveBeenCalledWith(payload);
@@ -110,7 +117,18 @@ describe('IntentProcessor.processIntent', () => {
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
         { provide: WalrusService, useValue: mockWalrus },
-        { provide: ConfigService, useValue: { get: jest.fn((key: string) => key === 'EVM_DST_EID' ? customEid : undefined), getOrThrow: jest.fn((key: string) => { if (key === 'EVM_DST_EID') return customEid; throw new Error(`Missing: ${key}`); }) } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) =>
+              key === 'EVM_DST_EID' ? customEid : undefined,
+            ),
+            getOrThrow: jest.fn((key: string) => {
+              if (key === 'EVM_DST_EID') return customEid;
+              throw new Error(`Missing: ${key}`);
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -121,7 +139,12 @@ describe('IntentProcessor.processIntent', () => {
     const payload = Buffer.from('hello');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (customProcessor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (customProcessor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     expect(mockSui.lzSendProof).toHaveBeenCalledWith(
       intentId,
@@ -138,7 +161,12 @@ describe('IntentProcessor.processIntent', () => {
     const payload = Buffer.from('hello');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (processor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     expect(mockEvm.confirmExecution).not.toHaveBeenCalled();
   });
@@ -149,12 +177,20 @@ describe('IntentProcessor.processIntent', () => {
     const payload = Buffer.from('test');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (processor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     // Verify call order: upload first, then executeStore, then lzSendProof
-    const uploadOrder = (mockWalrus.upload as jest.Mock).mock.invocationCallOrder[0];
-    const storeOrder = (mockSui.executeStore as jest.Mock).mock.invocationCallOrder[0];
-    const proofOrder = (mockSui.lzSendProof as jest.Mock).mock.invocationCallOrder[0];
+    const uploadOrder = (mockWalrus.upload as jest.Mock).mock
+      .invocationCallOrder[0];
+    const storeOrder = (mockSui.executeStore as jest.Mock).mock
+      .invocationCallOrder[0];
+    const proofOrder = (mockSui.lzSendProof as jest.Mock).mock
+      .invocationCallOrder[0];
 
     expect(uploadOrder).toBeLessThan(storeOrder);
     expect(storeOrder).toBeLessThan(proofOrder);
@@ -166,7 +202,12 @@ describe('IntentProcessor.processIntent', () => {
     const payload = Buffer.from('hello');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (processor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     // quoteLzFee returns 100_000_000n, 10% buffer = 110_000_000n
     expect(mockSui.quoteLzFee).toHaveBeenCalledWith(
@@ -185,14 +226,21 @@ describe('IntentProcessor.processIntent', () => {
   });
 
   it('should fall back to default fee when quoteLzFee fails', async () => {
-    (mockSui.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
+    (mockSui.quoteLzFee as jest.Mock).mockRejectedValue(
+      new Error('devInspect failed'),
+    );
 
     const intentId = '0x' + 'ab'.repeat(32);
     const sender = '0x' + '11'.repeat(20);
     const payload = Buffer.from('hello');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await (processor as any).processIntent(
+      intentId,
+      sender,
+      payload,
+      deadlineMs,
+    );
 
     // lzSendProof should still be called (without fee arg, uses default 0.5 SUI)
     expect(mockSui.lzSendProof).toHaveBeenCalledWith(
@@ -213,7 +261,9 @@ describe('IntentProcessor.poll', () => {
   beforeEach(async () => {
     mockEvm = {
       getBlockNumber: jest.fn().mockResolvedValue(100),
-      pollEvents: jest.fn().mockResolvedValue({ events: [], newFromBlock: 101 }),
+      pollEvents: jest
+        .fn()
+        .mockResolvedValue({ events: [], newFromBlock: 101 }),
     };
 
     mockSui = {
@@ -234,7 +284,13 @@ describe('IntentProcessor.poll', () => {
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
         { provide: WalrusService, useValue: mockWalrus },
-        { provide: ConfigService, useValue: { get: jest.fn(() => 40161), getOrThrow: jest.fn(() => 40161) } },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn(() => 40161),
+            getOrThrow: jest.fn(() => 40161),
+          },
+        },
       ],
     }).compile();
 
@@ -265,7 +321,13 @@ describe('IntentProcessor.poll', () => {
   it('should skip poll if already processing', async () => {
     // Make the first poll hang
     (mockSui.pollLzEvents as jest.Mock).mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve({ events: [], newCursor: null, hasMore: false }), 200)),
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () => resolve({ events: [], newCursor: null, hasMore: false }),
+            200,
+          ),
+        ),
     );
 
     // Start first poll (will be in-flight)
@@ -325,14 +387,17 @@ describe('IntentProcessor.poll', () => {
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
         { provide: WalrusService, useValue: mockWalrus },
-        { provide: ConfigService, useValue: {
-          get: jest.fn((key: string) => {
-            if (key === 'INTENT_TTL_MS') return 60_000; // 1 minute TTL for test
-            if (key === 'EVM_DST_EID') return 40161;
-            return undefined;
-          }),
-          getOrThrow: jest.fn(() => 40161),
-        }},
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'INTENT_TTL_MS') return 60_000; // 1 minute TTL for test
+              if (key === 'EVM_DST_EID') return 40161;
+              return undefined;
+            }),
+            getOrThrow: jest.fn(() => 40161),
+          },
+        },
       ],
     }).compile();
 
@@ -393,16 +458,27 @@ describe('IntentProcessor.poll', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IntentProcessor,
-        { provide: EvmService, useValue: { ...mockEvm, pollEvents: jest.fn().mockResolvedValue({ events: [evmEvent], newFromBlock: 101 }) } },
+        {
+          provide: EvmService,
+          useValue: {
+            ...mockEvm,
+            pollEvents: jest
+              .fn()
+              .mockResolvedValue({ events: [evmEvent], newFromBlock: 101 }),
+          },
+        },
         { provide: SuiService, useValue: mockSui },
         { provide: WalrusService, useValue: fullWalrus },
-        { provide: ConfigService, useValue: {
-          get: jest.fn((key: string) => {
-            if (key === 'EVM_DST_EID') return 40161;
-            return undefined; // no INTENT_TTL_MS
-          }),
-          getOrThrow: jest.fn(() => 40161),
-        }},
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'EVM_DST_EID') return 40161;
+              return undefined; // no INTENT_TTL_MS
+            }),
+            getOrThrow: jest.fn(() => 40161),
+          },
+        },
       ],
     }).compile();
 

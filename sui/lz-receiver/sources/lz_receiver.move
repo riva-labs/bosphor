@@ -199,6 +199,11 @@ entry fun register_oapp(
 }
 
 /// Sets the authorized relayer address. Only the OApp admin can call this.
+///
+/// * `config` - Shared LzReceiverConfig to update.
+/// * `admin_cap` - Admin capability proving caller is the OApp admin.
+/// * `oapp` - The OApp shared object for admin verification.
+/// * `new_relayer` - Address of the new authorized relayer. Must not be zero.
 entry fun set_relayer(
     config: &mut LzReceiverConfig,
     admin_cap: &AdminCap,
@@ -219,6 +224,15 @@ entry fun set_relayer(
 /// then finalized via `confirm_lz_send_proof`.
 ///
 /// Only the authorized relayer can call this function.
+///
+/// * `config` - Shared LzReceiverConfig (provides CallCap and relayer check).
+/// * `oapp` - The OApp shared object for LZ send.
+/// * `intent_id` - 32-byte identifier of the intent being proven.
+/// * `blob_id` - 32-byte Walrus blob identifier.
+/// * `end_epoch` - Walrus storage end epoch.
+/// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
+/// * `options` - LayerZero messaging options.
+/// * `native_fee` - SUI coin to cover the LZ messaging fee.
 public fun lz_send_proof(
     config: &LzReceiverConfig,
     oapp: &mut OApp,
@@ -251,6 +265,10 @@ public fun lz_send_proof(
 /// Must be called after the `Call` from `lz_send_proof` has been executed by the
 /// LZ endpoint. Extracts the receipt, refunds remaining SUI to the sender, and
 /// emits a `ProofSent` event.
+///
+/// * `config` - Shared LzReceiverConfig (provides CallCap).
+/// * `oapp` - The OApp shared object.
+/// * `call` - Hot-potato Call returned by the LZ endpoint after send execution.
 public fun confirm_lz_send_proof(
     config: &LzReceiverConfig,
     oapp: &mut OApp,
@@ -293,6 +311,14 @@ public fun confirm_lz_send_proof(
 ///
 /// Returns a hot-potato `Call` that must be routed through the LZ endpoint for
 /// quote processing, then finalized via `confirm_quote_proof`.
+///
+/// * `config` - Shared LzReceiverConfig (provides CallCap).
+/// * `oapp` - The OApp shared object.
+/// * `intent_id` - 32-byte identifier of the intent.
+/// * `blob_id` - 32-byte Walrus blob identifier.
+/// * `end_epoch` - Walrus storage end epoch.
+/// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
+/// * `options` - LayerZero messaging options.
 public fun quote_proof(
     config: &LzReceiverConfig,
     oapp: &OApp,
@@ -315,6 +341,10 @@ public fun quote_proof(
 }
 
 /// Finalizes a quote and returns the estimated messaging fee.
+///
+/// * `config` - Shared LzReceiverConfig (provides CallCap).
+/// * `oapp` - The OApp shared object.
+/// * `call` - Hot-potato Call returned by the LZ endpoint after quote processing.
 public fun confirm_quote_proof(
     config: &LzReceiverConfig,
     oapp: &OApp,

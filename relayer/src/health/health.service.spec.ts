@@ -24,7 +24,14 @@ describe('HealthService', () => {
         { provide: SuiService, useValue: mockSui },
       ],
     })
-      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .setLogger({
+        log() {},
+        error() {},
+        warn() {},
+        debug() {},
+        verbose() {},
+        fatal() {},
+      })
       .compile();
 
     service = module.get<HealthService>(HealthService);

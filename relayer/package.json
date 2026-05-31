@@ -10,6 +10,10 @@
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
+    "lint": "eslint 'src/**/*.ts'",
+    "lint:fix": "eslint 'src/**/*.ts' --fix",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.config.ts"
   },
@@ -33,9 +37,13 @@
     "@nestjs/testing": "^11.1.19",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
     "jest": "^30.3.0",
+    "prettier": "^3.8.3",
     "ts-jest": "^29.4.9",
     "tsx": "^4.21.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.60.0"
   }
 }

@@ -7,6 +7,8 @@ title: Contract Interface Reference
 
 ## BosphorAdapter.sol (EVM)
 
+Integrators can import `IBosphorAdapter` from `contracts/src/interfaces/IBosphorAdapter.sol` to interact with the adapter without pulling in the full contract and its LayerZero OApp dependencies. The interface contains all public/external function signatures, events, and errors.
+
 ### submitIntent
 
 Submit a storage intent to be routed to Walrus via LayerZero.
@@ -27,7 +29,7 @@ function submitIntent(
 | `_deadline` | uint256 | Unix timestamp after which the intent expires |
 | `_options` | bytes | LayerZero execution options (gas limit, etc.) |
 
-**Returns**: `intentId` -- deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
+**Returns**: `intentId`, a deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
 
 **Emits**: `IntentSubmitted(intentId, sender, targetChainId, payload, nonce, deadline)`
 
@@ -44,7 +46,7 @@ function quote(
 ) external view returns (MessagingFee memory);
 ```
 
-**Returns**: `MessagingFee { nativeFee, lzTokenFee }` -- pass `nativeFee` as `msg.value` to `submitIntent`.
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`.
 
 ### confirmExecution
 
