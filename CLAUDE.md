@@ -108,7 +108,7 @@ All steps must pass. A passing build alone is not sufficient. If any step fails,
 
 # Docs rule
 
-After every development task, check whether `docs/` or `website/docs/` has a page that covers the changed or added feature. If it does, update it. If the feature is new and user-facing (contract interface, relayer behavior, deployment flow, protocol change), create the relevant page. Write in plain language for developers integrating with Bosphor. Do not write docs for internal implementation details.
+After every development task, check whether `website/docs/` has a page that covers the changed or added feature. If it does, update it. If the feature is new and user-facing (contract interface, relayer behavior, deployment flow, protocol change), create the relevant page. Write in plain language for developers integrating with Bosphor. Do not write docs for internal implementation details.
 
 ## Health Stack
 

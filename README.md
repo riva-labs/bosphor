@@ -43,7 +43,7 @@ cp .env.example .env  # fill in keys
 npm run new-deployment
 ```
 
-See [docs/deployment.md](docs/deployment.md) for detailed setup instructions.
+See [website/docs/deployment.md](website/docs/deployment.md) for detailed setup instructions.
 
 ## Architecture
 
@@ -52,15 +52,15 @@ See [docs/deployment.md](docs/deployment.md) for detailed setup instructions.
 - `sui/sources/walrus_executor.move` — Walrus blob executor
 - `relayer/` — NestJS relayer service with health endpoint
 
-See [docs/architecture.md](docs/architecture.md) for the full design.
+See [website/docs/architecture.md](website/docs/architecture.md) for the full design.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) -- system design and message flow
-- [Contract Interface](docs/contract-interface.md) -- EVM and Sui function reference
-- [Deployment](docs/deployment.md) -- setup and deployment guide
-- [Relayer](docs/relayer.md) -- operator guide, configuration, health endpoint
-- [Testing](docs/testing.md) -- test suites, CI pipeline, E2E verification
+- [Architecture](website/docs/architecture.md) -- system design and message flow
+- [Contract Interface](website/docs/contract-interface.md) -- EVM and Sui function reference
+- [Deployment](website/docs/deployment.md) -- setup and deployment guide
+- [Relayer](website/docs/relayer.md) -- operator guide, configuration, health endpoint
+- [Testing](website/docs/testing.md) -- test suites, CI pipeline, E2E verification
 
 ## Testnet Evidence
 
