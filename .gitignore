@@ -11,6 +11,8 @@ contracts/foundry.lock
 sui/build/
 sui/lz-receiver/build/
 sui/lz-receiver/Published.toml
+sui/deps/
+sui/lz-receiver/traces/
 
 # dependencies
 node_modules/
@@ -24,6 +26,9 @@ website/.docusaurus/
 
 # confidential
 AGREEMENT*.md
+
+# tooling
+.gstack/
 
 # misc
 .DS_Store
