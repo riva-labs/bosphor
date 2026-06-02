@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiEventCursor } from '../chain/sui/sui.service';
@@ -17,8 +18,11 @@ const POLL_INTERVAL = 5_000;
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
   private readonly processedIntents = new Map<string, number>();
+  private readonly sentProofs = new Set<string>();
   private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
+  private readonly cursorFile: string;
+  private readonly sentProofsFile: string;
   private evmFromBlock = 0;
   private suiEventCursor: SuiEventCursor | null = null;
   private processing = false;
@@ -32,9 +36,15 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
+    this.cursorFile =
+      this.config.get<string>('CURSOR_FILE') ?? 'sui-cursor.json';
+    this.sentProofsFile =
+      this.config.get<string>('SENT_PROOFS_FILE') ?? 'sui-sent-proofs.json';
   }
 
   async onModuleInit() {
+    this.loadCursor();
+    this.loadSentProofs();
     this.evmFromBlock = await this.evm.getBlockNumber();
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
@@ -49,6 +59,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     while (this.processing) {
       await new Promise((r) => setTimeout(r, 100));
     }
+    this.saveCursor();
     this.logger.log('Intent processor stopped');
   }
 
@@ -133,6 +144,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         // Do NOT mark as processed — allow retry on next poll
       }
     }
+
+    if (events.length > 0) {
+      this.saveCursor();
+    }
   }
 
   private async pollEvmEvents(): Promise<void> {
@@ -188,6 +203,67 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private loadCursor(): void {
+    try {
+      if (existsSync(this.cursorFile)) {
+        const data = JSON.parse(readFileSync(this.cursorFile, 'utf-8'));
+        if (data?.txDigest && data?.eventSeq) {
+          this.suiEventCursor = data as SuiEventCursor;
+          this.logger.log(
+            `Resumed Sui cursor: ${data.txDigest}:${data.eventSeq}`,
+          );
+          return;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to load cursor, starting fresh: ${err}`);
+    }
+    this.logger.log('No saved Sui cursor, starting from latest events');
+  }
+
+  private saveCursor(): void {
+    if (!this.suiEventCursor) return;
+    try {
+      writeFileSync(
+        this.cursorFile,
+        JSON.stringify(this.suiEventCursor),
+        'utf-8',
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to save cursor: ${err}`);
+    }
+  }
+
+  private loadSentProofs(): void {
+    try {
+      if (existsSync(this.sentProofsFile)) {
+        const data = JSON.parse(readFileSync(this.sentProofsFile, 'utf-8'));
+        if (Array.isArray(data)) {
+          for (const id of data) {
+            this.sentProofs.add(id);
+          }
+          this.logger.log(`Loaded ${this.sentProofs.size} sent proof records`);
+          return;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to load sent proofs, starting fresh: ${err}`);
+    }
+    this.logger.log('No sent proofs file, starting fresh');
+  }
+
+  private saveSentProofs(): void {
+    try {
+      writeFileSync(
+        this.sentProofsFile,
+        JSON.stringify([...this.sentProofs]),
+        'utf-8',
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to save sent proofs: ${err}`);
+    }
+  }
+
   private async processIntent(
     intentId: string,
     sender: string,
@@ -217,6 +293,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     // 3. Record on Sui (skip if already executed from a prior attempt)
+    let storeAlreadyDone = false;
     try {
       const storeDigest = await this.sui.executeStore(
         intentId,
@@ -229,13 +306,22 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       const msg = String(err);
       if (msg.includes('execute_store') && msg.includes(', 2)')) {
-        this.logger.log(`[${intentId}] execute_store already done, proceeding to LZ send`);
+        storeAlreadyDone = true;
+        this.logger.log(`[${intentId}] execute_store already done`);
       } else {
         throw err;
       }
     }
 
-    // 4. Quote LZ fee, then send proof back to EVM via LayerZero
+    // 4. Guard against duplicate LZ proof sends.
+    // If the store was already done AND we have a record of sending the proof,
+    // skip the LZ send entirely. This prevents duplicate nonces on restart.
+    if (storeAlreadyDone && this.sentProofs.has(intentId)) {
+      this.logger.log(`[${intentId}] LZ proof already sent, skipping duplicate`);
+      return;
+    }
+
+    // 5. Quote LZ fee, then send proof back to EVM via LayerZero
     let feeAmount: bigint | undefined;
     try {
       const quotedFee = await this.sui.quoteLzFee(
@@ -260,5 +346,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       ...(feeAmount !== undefined ? [feeAmount] : []),
     );
     this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
+
+    // Persist that we sent a proof for this intent
+    this.sentProofs.add(intentId);
+    this.saveSentProofs();
   }
 }

@@ -19,6 +19,10 @@ node_modules/
 relayer/node_modules/
 relayer/dist/
 
+# relayer runtime state
+sui-cursor.json
+sui-sent-proofs.json
+
 # website
 website/node_modules/
 website/build/

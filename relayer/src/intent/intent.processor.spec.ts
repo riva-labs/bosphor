@@ -1,9 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'node:fs';
 import { IntentProcessor } from './intent.processor';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
 import { WalrusService } from '../walrus/walrus.service';
+
+jest.mock('node:fs');
 
 describe('IntentProcessor.processIntent', () => {
   let processor: IntentProcessor;
@@ -184,6 +187,68 @@ describe('IntentProcessor.processIntent', () => {
     );
   });
 
+  it('should skip lzSendProof when executeStore is already done AND proof was already sent', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    // Simulate executeStore abort code 2 (already done)
+    (mockSui.executeStore as jest.Mock).mockRejectedValue(
+      new Error('MoveAbort(_, 2) in function execute_store'),
+    );
+
+    // Pre-populate sentProofs to simulate a prior successful run
+    (processor as any).sentProofs.add(intentId);
+
+    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+
+    // Walrus upload should still be called
+    expect(mockWalrus.upload).toHaveBeenCalled();
+
+    // lzSendProof should NOT be called (dedup guard)
+    expect(mockSui.lzSendProof).not.toHaveBeenCalled();
+    expect(mockSui.quoteLzFee).not.toHaveBeenCalled();
+  });
+
+  it('should proceed with lzSendProof when executeStore is already done BUT proof was NOT sent', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    // Simulate executeStore abort code 2 (already done)
+    (mockSui.executeStore as jest.Mock).mockRejectedValue(
+      new Error('MoveAbort(_, 2) in function execute_store'),
+    );
+
+    // sentProofs is empty (no prior record of sending proof)
+
+    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+
+    // lzSendProof SHOULD be called (edge case: store done but proof not sent)
+    expect(mockSui.lzSendProof).toHaveBeenCalled();
+
+    // Intent should now be in sentProofs
+    expect((processor as any).sentProofs.has(intentId)).toBe(true);
+  });
+
+  it('should persist sentProofs to file after successful lzSendProof', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+
+    // sentProofs file should be written
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      'sui-sent-proofs.json',
+      expect.stringContaining(intentId),
+      'utf-8',
+    );
+  });
+
   it('should fall back to default fee when quoteLzFee fails', async () => {
     (mockSui.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
 
@@ -355,6 +420,114 @@ describe('IntentProcessor.poll', () => {
     dateSpy.mockReturnValue(baseTime + 61_000);
     await processor.poll();
     expect(mockWalrus.upload).toHaveBeenCalledTimes(2); // now 2
+  });
+
+  it('should save cursor to file after processing Sui events', async () => {
+    const intentId = '0x' + 'ee'.repeat(32);
+    const futureDeadline = BigInt(Math.floor(Date.now() / 1000) + 7200);
+
+    const suiEvent = {
+      intentId,
+      payload: Array.from(
+        Buffer.from(
+          new (await import('ethers')).AbiCoder()
+            .encode(
+              ['bytes32', 'address', 'bytes', 'uint256'],
+              [intentId, '0x' + '11'.repeat(20), '0x1234', futureDeadline],
+            )
+            .slice(2),
+          'hex',
+        ),
+      ),
+      srcEid: 40161,
+      nonce: 1n,
+    };
+
+    const savedCursor = { txDigest: 'abc123', eventSeq: '0' };
+
+    // Full mocks for processing
+    const fullSui = {
+      ...mockSui,
+      pollLzEvents: jest.fn().mockResolvedValue({
+        events: [suiEvent],
+        newCursor: savedCursor,
+        hasMore: false,
+      }),
+      executeStore: jest.fn().mockResolvedValue('suidigest123'),
+      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
+      getClient: jest.fn().mockReturnValue({
+        waitForTransaction: jest.fn().mockResolvedValue({}),
+      }),
+    };
+    const fullWalrus = {
+      upload: jest.fn().mockResolvedValue({
+        blobId: 'blob123',
+        suiObjectId: '0xblobobj',
+        endEpoch: 50,
+      }),
+      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
+    };
+
+    const cursorConfig = {
+      get: jest.fn((key: string) => {
+        if (key === 'EVM_DST_EID') return 40161;
+        return undefined;
+      }),
+      getOrThrow: jest.fn(() => 40161),
+    };
+
+    const module2: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntentProcessor,
+        { provide: EvmService, useValue: mockEvm },
+        { provide: SuiService, useValue: fullSui },
+        { provide: WalrusService, useValue: fullWalrus },
+        { provide: ConfigService, useValue: cursorConfig },
+      ],
+    }).compile();
+
+    const proc = module2.get<IntentProcessor>(IntentProcessor);
+    await proc.poll();
+
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      'sui-cursor.json',
+      JSON.stringify(savedCursor),
+      'utf-8',
+    );
+  });
+
+  it('should load cursor from file on init', async () => {
+    const savedCursor = { txDigest: 'saved123', eventSeq: '5' };
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    (fs.readFileSync as jest.Mock).mockReturnValue(
+      JSON.stringify(savedCursor),
+    );
+
+    const cursorConfig = {
+      get: jest.fn((key: string) => {
+        if (key === 'EVM_DST_EID') return 40161;
+        return undefined;
+      }),
+      getOrThrow: jest.fn(() => 40161),
+    };
+
+    const module2: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntentProcessor,
+        { provide: EvmService, useValue: mockEvm },
+        { provide: SuiService, useValue: mockSui },
+        { provide: WalrusService, useValue: mockWalrus },
+        { provide: ConfigService, useValue: cursorConfig },
+      ],
+    }).compile();
+
+    const proc = module2.get<IntentProcessor>(IntentProcessor);
+    await proc.onModuleInit();
+
+    // After init, poll should use the loaded cursor
+    await proc.poll();
+    expect(mockSui.pollLzEvents).toHaveBeenCalledWith(savedCursor);
   });
 
   it('should default to 1 hour TTL when INTENT_TTL_MS is not configured', async () => {

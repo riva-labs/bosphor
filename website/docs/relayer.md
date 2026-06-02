@@ -45,6 +45,8 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |
 | `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
 | `INTENT_TTL_MS` | `3600000` | TTL for processed intent deduplication (ms) |
+| `CURSOR_FILE` | `sui-cursor.json` | File path for persisting the Sui event cursor |
+| `SENT_PROOFS_FILE` | `sui-sent-proofs.json` | File path for tracking sent LZ proofs |
 | `PORT` | `3000` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 
@@ -96,6 +98,16 @@ Processed intent entries expire after `INTENT_TTL_MS` (default: 1 hour). Expired
 - On-chain guards (`EIntentAlreadyExecuted`, `AlreadyExecuted`) prevent actual double-execution
 
 Set `INTENT_TTL_MS` higher if your relayer restarts frequently and you see unnecessary retry attempts.
+
+### Cursor persistence
+
+The Sui event cursor is saved to `CURSOR_FILE` (default: `sui-cursor.json`) after each batch of events. On startup, the relayer loads the saved cursor so it resumes from where it left off instead of re-processing from the latest checkpoint. If the cursor file is missing or corrupted, the relayer starts fresh.
+
+### Sent proof deduplication
+
+The relayer tracks which intents have had their LZ proof sent in `SENT_PROOFS_FILE` (default: `sui-sent-proofs.json`). On restart, if `execute_store` reports "already done" and the intent is in the sent proofs file, the relayer skips the LZ send. This prevents duplicate nonces and wasted gas on the return path.
+
+The sent proofs set is never pruned because proof deduplication must survive indefinitely across restarts.
 
 ## Fee quoting
 

@@ -17,16 +17,20 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { bcs } from "@mysten/sui/bcs";
 
-// --- LayerZero Labs DVN addresses ---
-const LZ_LABS_DVN_ETH = "0x589dEDbD617e0CBcB916A9223F4d1300c294236b";
-const LZ_LABS_DVN_SUI = "0x52aa129049de845353484868d1be6e2df6878b0ed2213d94d3c827309aeae685";
+// --- DVN addresses (from .env) ---
+if (!process.env.EVM_DVN_ADDRESS || !process.env.SUI_DVN_ADDRESS) {
+  console.error("Missing EVM_DVN_ADDRESS or SUI_DVN_ADDRESS in .env");
+  process.exit(1);
+}
+const LZ_LABS_DVN_ETH = process.env.EVM_DVN_ADDRESS;
+const LZ_LABS_DVN_SUI = process.env.SUI_DVN_ADDRESS;
 
 // --- EVM config ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
 const EVM_RELAYER_KEY = process.env.EVM_RELAYER_KEY!;
 const LZ_ENDPOINT = process.env.LZ_ENDPOINT_ADDRESS!;
 const EVM_ADAPTER = process.env.EVM_ADAPTER_ADDRESS!;
-const SUI_EID = Number(process.env.SUI_EID) || 30378;
+const SUI_EID = Number(process.env.SUI_EID) || 40378;
 
 // --- Sui config ---
 const SUI_RPC_URL = process.env.SUI_RPC_URL!;
@@ -37,7 +41,7 @@ const ULN302 = process.env.SUI_LZ_ULN302!;
 const ULN302_OBJ = process.env.SUI_LZ_ULN302_OBJ!;
 const OAPP_ID = process.env.SUI_LZ_OAPP_ID!;
 const ADMIN_CAP = process.env.SUI_LZ_ADMIN_CAP_ID!;
-const EVM_EID = Number(process.env.EVM_EID) || 30184;
+const EVM_EID = Number(process.env.EVM_EID) || 40161;
 
 // --- BCS encoding ---
 function encodeOAppUlnConfig(confirmations: bigint, requiredDvns: string[]): Uint8Array {
@@ -86,30 +90,38 @@ async function updateEvmDvn() {
   console.log(`  ReceiveLib: ${receiveLib}`);
 
   // UlnConfig struct: (uint64 confirmations, uint8 requiredDVNCount, uint8 optionalDVNCount, uint8 optionalDVNThreshold, address[] requiredDVNs, address[] optionalDVNs)
-  const ulnConfig = ethers.AbiCoder.defaultAbiCoder().encode(
+  // CONFIG_TYPE_ULN = 2
+  const configType = 2;
+
+  // Send config: EVM -> Sui (forward path), confirmations = 2
+  const sendUlnConfig = ethers.AbiCoder.defaultAbiCoder().encode(
     ["tuple(uint64, uint8, uint8, uint8, address[], address[])"],
     [[2n, 1, 0, 0, [LZ_LABS_DVN_ETH], []]]
   );
 
-  // CONFIG_TYPE_ULN = 2
-  const configType = 2;
-
-  // Update send config
-  console.log("\n  Setting send ULN config...");
+  console.log("\n  Setting send ULN config (confirmations=2)...");
   const sendTx = await endpoint.setConfig(
     EVM_ADAPTER,
     sendLib,
-    [{ eid: SUI_EID, configType, config: ulnConfig }]
+    [{ eid: SUI_EID, configType, config: sendUlnConfig }]
   );
   await sendTx.wait();
   console.log(`  [OK] Send config TX: ${sendTx.hash}`);
 
-  // Update receive config
-  console.log("  Setting receive ULN config...");
+  // Receive config: Sui -> EVM (return path), confirmations = 1
+  // Sui testnet DVN does not reliably handle confirmations > 1 for
+  // Sui's checkpoint-based finality model. Outbound (Sui send = 2) >=
+  // inbound (EVM recv = 1) satisfies the LZ constraint.
+  const recvUlnConfig = ethers.AbiCoder.defaultAbiCoder().encode(
+    ["tuple(uint64, uint8, uint8, uint8, address[], address[])"],
+    [[1n, 1, 0, 0, [LZ_LABS_DVN_ETH], []]]
+  );
+
+  console.log("  Setting receive ULN config (confirmations=1)...");
   const recvTx = await endpoint.setConfig(
     EVM_ADAPTER,
     receiveLib,
-    [{ eid: SUI_EID, configType, config: ulnConfig }]
+    [{ eid: SUI_EID, configType, config: recvUlnConfig }]
   );
   await recvTx.wait();
   console.log(`  [OK] Receive config TX: ${recvTx.hash}`);
@@ -157,9 +169,11 @@ async function updateSuiDvn() {
   tx1.moveCall({ target: `${ULN302}::uln_302::set_config`, arguments: [tx1.object(ULN302_OBJ), call1] });
   await exec(tx1, "set_receive_uln_config (LayerZero Labs)");
 
-  // Send ULN config (type 2) - for messages going TO EVM
+  // Send ULN config (type 2) - for messages going TO EVM (return path)
+  // Confirmations = 1 to match EVM receive side. Sui checkpoint finality
+  // is near-instant, so 1 confirmation is sufficient.
   const tx2 = new Transaction();
-  const sendConfig = encodeOAppUlnConfig(2n, [LZ_LABS_DVN_SUI]);
+  const sendConfig = encodeOAppUlnConfig(1n, [LZ_LABS_DVN_SUI]);
   const [call2] = tx2.moveCall({
     target: `${OAPP_PKG}::endpoint_calls::set_config`,
     arguments: [

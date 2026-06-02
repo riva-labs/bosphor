@@ -23,7 +23,7 @@ interface LzInfra {
   execFeeLib: string;
   execFeeLibObj: string;
   dvnPkg: string;
-  dvnObj: string;
+  dvnObjs: string[];
   dvnFeeLib: string;
   dvnFeeLibObj: string;
   priceFeed: string;
@@ -81,7 +81,10 @@ export class SuiService implements OnModuleInit {
       execFeeLib: this.config.get<string>('SUI_LZ_EXEC_FEE_LIB', ''),
       execFeeLibObj: this.config.get<string>('SUI_LZ_EXEC_FEE_LIB_OBJ', ''),
       dvnPkg: this.config.get<string>('SUI_LZ_DVN_PKG', ''),
-      dvnObj: this.config.get<string>('SUI_LZ_DVN_OBJ', ''),
+      dvnObjs: (this.config.get<string>('SUI_LZ_DVN_OBJS', '') || this.config.get<string>('SUI_LZ_DVN_OBJ', ''))
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
       dvnFeeLib: this.config.get<string>('SUI_LZ_DVN_FEE_LIB', ''),
       dvnFeeLibObj: this.config.get<string>('SUI_LZ_DVN_FEE_LIB_OBJ', ''),
       priceFeed: this.config.get<string>('SUI_LZ_PRICE_FEED', ''),
@@ -320,35 +323,33 @@ export class SuiService implements OnModuleInit {
       arguments: [tx.object(infra.executorObj), execGetFeeCall, execFlCall],
     });
 
-    // [8] dvn::get_fee
-    const [dvnFlCall] = tx.moveCall({
-      target: `${infra.dvnPkg}::dvn::get_fee`,
-      arguments: [tx.object(infra.dvnObj), dvnGetFeeMultiCall],
-    });
+    // [8..8+5N] DVN loop: get_fee → dvn_fee_lib::get_fee → estimate_fee → confirm_get_fee → dvn::confirm_get_fee
+    for (const dvnObj of infra.dvnObjs) {
+      const [dvnFlCall] = tx.moveCall({
+        target: `${infra.dvnPkg}::dvn::get_fee`,
+        arguments: [tx.object(dvnObj), dvnGetFeeMultiCall],
+      });
 
-    // [9] dvn_fee_lib::get_fee
-    const [dvnPfCall] = tx.moveCall({
-      target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
-      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
-    });
+      const [dvnPfCall] = tx.moveCall({
+        target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
+        arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
+      });
 
-    // [10] price_feed::estimate_fee_by_eid (dvn)
-    tx.moveCall({
-      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
-      arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
-    });
+      tx.moveCall({
+        target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+        arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
+      });
 
-    // [11] dvn_fee_lib::confirm_get_fee
-    tx.moveCall({
-      target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
-      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
-    });
+      tx.moveCall({
+        target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
+        arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
+      });
 
-    // [12] dvn::confirm_get_fee
-    tx.moveCall({
-      target: `${infra.dvnPkg}::dvn::confirm_get_fee`,
-      arguments: [tx.object(infra.dvnObj), dvnGetFeeMultiCall, dvnFlCall],
-    });
+      tx.moveCall({
+        target: `${infra.dvnPkg}::dvn::confirm_get_fee`,
+        arguments: [tx.object(dvnObj), dvnGetFeeMultiCall, dvnFlCall],
+      });
+    }
 
     // [13] uln_302::confirm_quote
     tx.moveCall({
@@ -518,35 +519,33 @@ export class SuiService implements OnModuleInit {
       arguments: [tx.object(infra.executorObj), execCall, execFlCall],
     });
 
-    // [9] dvn::assign_job
-    const [dvnFlCall] = tx.moveCall({
-      target: `${infra.dvnPkg}::dvn::assign_job`,
-      arguments: [tx.object(infra.dvnObj), dvnMultiCall],
-    });
+    // [9..9+5N] DVN loop: assign_job → get_fee → estimate_fee → confirm_get_fee → confirm_assign_job
+    for (const dvnObj of infra.dvnObjs) {
+      const [dvnFlCall] = tx.moveCall({
+        target: `${infra.dvnPkg}::dvn::assign_job`,
+        arguments: [tx.object(dvnObj), dvnMultiCall],
+      });
 
-    // [10] dvn_fee_lib::get_fee
-    const [dvnPfCall] = tx.moveCall({
-      target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
-      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
-    });
+      const [dvnPfCall] = tx.moveCall({
+        target: `${infra.dvnFeeLib}::dvn_fee_lib::get_fee`,
+        arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall],
+      });
 
-    // [11] price_feed::estimate_fee_by_eid (dvn)
-    tx.moveCall({
-      target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
-      arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
-    });
+      tx.moveCall({
+        target: `${infra.priceFeed}::price_feed::estimate_fee_by_eid`,
+        arguments: [tx.object(infra.priceFeedObj), dvnPfCall],
+      });
 
-    // [12] dvn_fee_lib::confirm_get_fee
-    tx.moveCall({
-      target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
-      arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
-    });
+      tx.moveCall({
+        target: `${infra.dvnFeeLib}::dvn_fee_lib::confirm_get_fee`,
+        arguments: [tx.object(infra.dvnFeeLibObj), dvnFlCall, dvnPfCall],
+      });
 
-    // [13] dvn::confirm_assign_job
-    tx.moveCall({
-      target: `${infra.dvnPkg}::dvn::confirm_assign_job`,
-      arguments: [tx.object(infra.dvnObj), dvnMultiCall, dvnFlCall],
-    });
+      tx.moveCall({
+        target: `${infra.dvnPkg}::dvn::confirm_assign_job`,
+        arguments: [tx.object(dvnObj), dvnMultiCall, dvnFlCall],
+      });
+    }
 
     // [14] uln_302::confirm_send
     tx.moveCall({
