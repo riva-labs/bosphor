@@ -11,7 +11,7 @@
 ### Local Environment
 
 ```bash
-git clone https://github.com/AliErcanOzgokce/bosphor
+git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor
 cd bosphor
 nvm use
 npm install
