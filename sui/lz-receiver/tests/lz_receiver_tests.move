@@ -5,7 +5,6 @@ use bosphor_lz::lz_receiver;
 use sui::test_scenario;
 
 const ADMIN: address = @0xA;
-const RELAYER: address = @0xB;
 
 #[test]
 fun test_init_creates_shared_config() {
@@ -62,13 +61,13 @@ fun test_build_proof_message_encoding() {
     // intent_id: 32 bytes, first byte 0xAA, rest zeros
     let mut intent_id = vector::empty<u8>();
     intent_id.push_back(0xAA);
-    let mut i = 1;
+    let mut i = 1u64;
     while (i < 32) { intent_id.push_back(0); i = i + 1; };
 
     // blob_id: 32 bytes, first byte 0xBB, rest zeros
     let mut blob_id = vector::empty<u8>();
     blob_id.push_back(0xBB);
-    i = 1;
+    i = 1u64;
     while (i < 32) { blob_id.push_back(0); i = i + 1; };
 
     let end_epoch: u64 = 42;
@@ -102,7 +101,7 @@ fun test_build_proof_message_encoding() {
 fun test_build_proof_message_rejects_short_intent_id() {
     let intent_id = x"AABB"; // only 2 bytes
     let mut blob_id = vector::empty<u8>();
-    let mut i = 0;
+    let mut i = 0u64;
     while (i < 32) { blob_id.push_back(0); i = i + 1; };
     lz_receiver::build_proof_message(intent_id, blob_id, 1);
 }
@@ -111,7 +110,7 @@ fun test_build_proof_message_rejects_short_intent_id() {
 #[expected_failure(abort_code = lz_receiver::EInvalidBlobIdLength)]
 fun test_build_proof_message_rejects_short_blob_id() {
     let mut intent_id = vector::empty<u8>();
-    let mut i = 0;
+    let mut i = 0u64;
     while (i < 32) { intent_id.push_back(0); i = i + 1; };
     let blob_id = x"CCDD"; // only 2 bytes
     lz_receiver::build_proof_message(intent_id, blob_id, 1);

@@ -3,6 +3,10 @@
 /// Executes storage intents by verifying certified Walrus blobs, recording
 /// execution, and transferring the blob and a receipt to the original sender.
 /// All blobs are stored as deletable (enforced at upload time in the relayer).
+///
+/// The relayer calls `execute_store` after uploading data to Walrus and receiving
+/// a certified blob. This module verifies certification, enforces deadlines,
+/// prevents double-execution, and transfers ownership to the original sender.
 module bosphor::walrus_executor {
     use sui::event;
     use sui::table::{Self, Table};
@@ -22,21 +26,31 @@ module bosphor::walrus_executor {
 
     // --- Types ---
 
-    /// Shared configuration for the executor. Holds the authorized relayer address
-    /// and a table tracking which intents have been executed.
+    /// Shared configuration for the executor.
+    ///
+    /// Holds the authorized relayer address and a deduplication table tracking
+    /// which intents have been executed. Created once at module initialization.
     public struct ExecutorConfig has key {
         id: UID,
+        /// Address authorized to call `execute_store`.
         relayer: address,
+        /// Deduplication table keyed by intent ID. Value is always `true`.
         executed_intents: Table<vector<u8>, bool>,
     }
 
-    /// On-chain receipt proving a storage intent was fulfilled. Transferred to the
-    /// original sender along with the Walrus blob.
+    /// On-chain receipt proving a storage intent was fulfilled.
+    ///
+    /// Transferred to the original sender along with the Walrus blob.
+    /// Can be used by downstream contracts or off-chain indexers as proof of execution.
     public struct StorageReceipt has key, store {
         id: UID,
+        /// Unique identifier of the executed storage intent.
         intent_id: vector<u8>,
+        /// Walrus blob ID (content-addressed hash of the stored data).
         walrus_blob_id: u256,
+        /// Walrus epoch at which the blob storage expires.
         end_epoch: u32,
+        /// Address of the original intent sender on EVM (mapped to Sui address).
         sender: address,
     }
 
@@ -44,15 +58,21 @@ module bosphor::walrus_executor {
 
     /// Emitted when a storage intent is successfully executed.
     public struct StorageExecuted has copy, drop {
+        /// Unique identifier of the executed storage intent.
         intent_id: vector<u8>,
+        /// Walrus blob ID of the stored data.
         walrus_blob_id: u256,
+        /// Walrus epoch at which the blob storage expires.
         end_epoch: u32,
+        /// Address of the relayer that executed the intent.
         executor: address,
     }
 
     /// Emitted once at module initialization with the config and relayer addresses.
     public struct ConfigCreated has copy, drop {
+        /// Object ID of the newly created ExecutorConfig.
         config_id: address,
+        /// Address of the initial relayer (the deployer).
         relayer: address,
     }
 
@@ -157,6 +177,9 @@ module bosphor::walrus_executor {
     }
 
     // --- Testing ---
+
+    /// Test-only initializer. Creates and shares the ExecutorConfig with the
+    /// transaction sender as the initial relayer.
     #[test_only]
     public fun init_for_testing(ctx: &mut TxContext) {
         init(ctx);
