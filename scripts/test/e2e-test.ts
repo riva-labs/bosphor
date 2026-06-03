@@ -15,7 +15,7 @@
  */
 import { config } from "dotenv";
 import { resolve } from "path";
-config({ path: resolve(import.meta.dirname, "../.env") });
+config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers, EventLog } from "ethers";
 import { SuiClient } from "@mysten/sui/client";

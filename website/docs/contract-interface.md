@@ -7,7 +7,7 @@ title: Contract Interface Reference
 
 ## IBosphorAdapter (Interface)
 
-Integrators should import `IBosphorAdapter.sol` from `contracts/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface includes all external function signatures, events, errors, and structs needed for integration.
+Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface includes all external function signatures, events, errors, and structs needed for integration.
 
 ```solidity
 import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";

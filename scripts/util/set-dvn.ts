@@ -4,11 +4,11 @@
  * Updates the required DVN configuration on both EVM and Sui sides
  * to use the LayerZero Labs DVN.
  *
- * Usage: npx tsx scripts/set-dvn.ts
+ * Usage: npx tsx scripts/util/set-dvn.ts
  */
 import { config } from "dotenv";
 import { resolve } from "path";
-config({ path: resolve(import.meta.dirname, "../.env") });
+config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers } from "ethers";
 import { SuiClient } from "@mysten/sui/client";

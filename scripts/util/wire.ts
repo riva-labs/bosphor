@@ -13,7 +13,7 @@
 import { config } from "dotenv";
 import { resolve } from "path";
 import { readFileSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../.env") });
+config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers } from "ethers";
 import { SuiClient } from "@mysten/sui/client";

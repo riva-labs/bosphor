@@ -8,16 +8,16 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "deploy:sui": "tsx scripts/deploy-sui.ts",
-    "deploy:evm": "tsx scripts/deploy-evm.ts",
-    "wire": "tsx scripts/wire.ts",
-    "test:e2e": "tsx scripts/e2e-test.ts",
+    "deploy:sui": "tsx scripts/deploy/deploy-sui.ts",
+    "deploy:evm": "tsx scripts/deploy/deploy-evm.ts",
+    "wire": "tsx scripts/util/wire.ts",
+    "test:e2e": "tsx scripts/test/e2e-test.ts",
     "new-deployment": "npm run deploy:sui && npm run deploy:evm && npm run wire && npm run test:e2e",
     "relayer:dev": "cd relayer && npm run start:dev",
     "relayer:build": "cd relayer && npm run build",
     "docs:dev": "cd website && npm run start",
     "docs:build": "cd website && npm run build",
-    "test:forge": "cd contracts && forge test -vvv",
+    "test:forge": "cd contracts/evm && forge test -vvv",
     "test:move": "cd sui/lz-receiver && sui move test --build-env testnet"
   },
   "dependencies": {

@@ -98,7 +98,7 @@ Before committing or shipping, Claude MUST run the full build and test gate:
 
 ```bash
 # From the project root:
-(cd contracts && forge build && forge test -vvv)
+(cd contracts/evm && forge build && forge test -vvv)
 (cd sui/lz-receiver && sui move test --build-env testnet)
 (cd relayer && npm run build)
 npm run test:e2e
@@ -112,7 +112,7 @@ After every development task, check whether `website/docs/` has a page that cove
 
 ## Health Stack
 
-- solidity: cd contracts && forge build && forge test -vvv
+- solidity: cd contracts/evm && forge build && forge test -vvv
 - move: cd sui/lz-receiver && sui move test --build-env testnet
 - relayer-build: cd relayer && npm run build
 - relayer-test: cd relayer && npm run test
