@@ -22,8 +22,7 @@ export class WalrusService implements OnModuleInit {
 
   onModuleInit() {
     this.publisherUrl = this.config.getOrThrow<string>('WALRUS_PUBLISHER_URL');
-    this.aggregatorUrl =
-      this.config.getOrThrow<string>('WALRUS_AGGREGATOR_URL');
+    this.aggregatorUrl = this.config.getOrThrow<string>('WALRUS_AGGREGATOR_URL');
     this.storeEpochs = this.config.get<number>('WALRUS_STORE_EPOCHS', 5);
 
     this.logger.log(`Walrus publisher: ${this.publisherUrl}`);
@@ -54,9 +53,7 @@ export class WalrusService implements OnModuleInit {
           this.logger.warn(
             `Walrus upload attempt ${attempt}/${maxAttempts} got ${res.status}: ${body}`,
           );
-          await new Promise((r) =>
-            setTimeout(r, baseDelay * Math.pow(2, attempt - 1)),
-          );
+          await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
           continue;
         }
 
@@ -84,19 +81,13 @@ export class WalrusService implements OnModuleInit {
           };
         }
 
-        throw new Error(
-          `Unexpected Walrus response: ${JSON.stringify(responseData)}`,
-        );
+        throw new Error(`Unexpected Walrus response: ${JSON.stringify(responseData)}`);
       } catch (err: any) {
         if (err.name === 'AbortError') {
-          this.logger.error(
-            `Walrus upload attempt ${attempt}/${maxAttempts} timed out`,
-          );
+          this.logger.error(`Walrus upload attempt ${attempt}/${maxAttempts} timed out`);
         }
         if (attempt === maxAttempts) throw err;
-        await new Promise((r) =>
-          setTimeout(r, baseDelay * Math.pow(2, attempt - 1)),
-        );
+        await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
       } finally {
         clearTimeout(timeout);
       }

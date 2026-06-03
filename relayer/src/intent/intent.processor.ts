@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  OnModuleDestroy,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
@@ -68,9 +63,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async pollSuiLzEvents(): Promise<void> {
-    const { events, newCursor } = await this.sui.pollLzEvents(
-      this.suiEventCursor,
-    );
+    const { events, newCursor } = await this.sui.pollLzEvents(this.suiEventCursor);
     this.suiEventCursor = newCursor;
 
     for (const event of events) {
@@ -80,10 +73,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
       // Decode ABI-encoded message: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
       const payloadHex =
-        '0x' +
-        event.payload
-          .map((b: number) => b.toString(16).padStart(2, '0'))
-          .join('');
+        '0x' + event.payload.map((b: number) => b.toString(16).padStart(2, '0')).join('');
 
       let sender: string;
       let userPayload: string;
@@ -97,17 +87,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         userPayload = decoded[2];
         deadlineMs = BigInt(decoded[3]) * 1000n;
       } catch {
-        this.logger.error(
-          `[${event.intentId}] Failed to decode ABI payload`,
-        );
+        this.logger.error(`[${event.intentId}] Failed to decode ABI payload`);
         this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
 
       if (Date.now() > Number(deadlineMs)) {
-        this.logger.log(
-          `[${event.intentId}] Skipping — deadline expired (via Sui LZ)`,
-        );
+        this.logger.log(`[${event.intentId}] Skipping — deadline expired (via Sui LZ)`);
         this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
@@ -118,16 +104,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
       try {
         const payloadBytes = ethers.getBytes(userPayload);
-        await this.processIntent(
-          event.intentId,
-          sender,
-          Buffer.from(payloadBytes),
-          deadlineMs,
-        );
+        await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
         this.processedIntents.set(event.intentId, Date.now());
-        this.logger.log(
-          `[${event.intentId}] Intent fulfilled (via Sui LZ)`,
-        );
+        this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
       } catch (err) {
         this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
         // Do NOT mark as processed — allow retry on next poll
@@ -136,24 +115,18 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async pollEvmEvents(): Promise<void> {
-    const { events, newFromBlock } = await this.evm.pollEvents(
-      this.evmFromBlock,
-    );
+    const { events, newFromBlock } = await this.evm.pollEvents(this.evmFromBlock);
     this.evmFromBlock = newFromBlock;
 
     for (const event of events) {
       if (this.processedIntents.has(event.intentId)) {
-        this.logger.debug(
-          `[${event.intentId}] Skipping — already processed`,
-        );
+        this.logger.debug(`[${event.intentId}] Skipping — already processed`);
         continue;
       }
 
       const deadlineMs = BigInt(event.deadline) * 1000n;
       if (Date.now() > Number(deadlineMs)) {
-        this.logger.log(
-          `[${event.intentId}] Skipping — deadline expired`,
-        );
+        this.logger.log(`[${event.intentId}] Skipping — deadline expired`);
         this.processedIntents.set(event.intentId, Date.now());
         continue;
       }
@@ -198,12 +171,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[${intentId}] Uploading to Walrus...`);
     const walrusInfo = await this.walrus.upload(payload);
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
-    this.logger.log(
-      `[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`,
-    );
-    this.logger.log(
-      `[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`,
-    );
+    this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
+    this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
     this.logger.log(
       `[${intentId}] Verify: ${this.walrus.getAggregatorUrl()}/v1/blobs/${walrusInfo.blobId}`,
     );
@@ -218,12 +187,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     // 3. Record on Sui (skip if already executed from a prior attempt)
     try {
-      const storeDigest = await this.sui.executeStore(
-        intentId,
-        sender,
-        blobObjectId,
-        deadlineMs,
-      );
+      const storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
       // Wait for TX finality to avoid object version conflicts on the next TX
       await this.sui.getClient().waitForTransaction({ digest: storeDigest });
     } catch (err) {
@@ -246,7 +210,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       );
       // Add 10% buffer to the quoted fee
       feeAmount = (quotedFee * 11n) / 10n;
-      this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`);
+      this.logger.log(
+        `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
+      );
     } catch (err) {
       this.logger.warn(`[${intentId}] LZ fee quote failed, using default: ${err}`);
     }
