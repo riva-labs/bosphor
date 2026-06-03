@@ -140,6 +140,126 @@ event IntentExecuted(bytes32 indexed intentId, bytes proof);
 event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 ```
 
+## Usage Examples (ethers.js)
+
+### Submit an intent
+
+```typescript
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+
+const adapter = new ethers.Contract(
+  ADAPTER_ADDRESS,
+  [
+    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+  ],
+  signer
+);
+
+const dstEid = 40378; // Sui testnet
+const payload = ethers.toUtf8Bytes("Hello Walrus");
+const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+const options = "0x00030100110100000000000000000000000000030d40";
+
+// Get fee estimate
+const fee = await adapter.quote(dstEid, payload, deadline, options);
+
+// Submit intent
+const tx = await adapter.submitIntent(dstEid, payload, deadline, options, {
+  value: fee.nativeFee,
+});
+const receipt = await tx.wait();
+console.log("Intent submitted:", receipt.hash);
+```
+
+### Listen for events
+
+```typescript
+// Listen for new intents
+adapter.on("IntentSubmitted", (intentId, sender, targetChainId, payload, nonce, deadline) => {
+  console.log("New intent:", intentId);
+  console.log("Sender:", sender);
+  console.log("Payload:", ethers.toUtf8String(payload));
+});
+
+// Listen for execution confirmations
+adapter.on("IntentExecuted", (intentId, proof) => {
+  const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
+    ["bytes32", "uint256"],
+    proof
+  );
+  console.log("Intent executed:", intentId);
+  console.log("Walrus blob ID:", blobId);
+  console.log("Expiry epoch:", endEpoch.toString());
+});
+```
+
+## Usage Examples (@mysten/sui)
+
+### Call execute_store
+
+The relayer calls `execute_store` after uploading the payload to Walrus and receiving a certified blob.
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+const keypair = Ed25519Keypair.fromSecretKey(RELAYER_SECRET_KEY);
+
+const tx = new Transaction();
+
+tx.moveCall({
+  target: `${PACKAGE_ID}::walrus_executor::execute_store`,
+  arguments: [
+    tx.object(EXECUTOR_CONFIG_ID),
+    tx.pure.vector("u8", intentIdBytes),   // 32-byte intent ID
+    tx.object(certifiedBlobId),            // Walrus Blob object
+    tx.pure.u64(deadlineMs),               // deadline in milliseconds
+    tx.object("0x6"),                      // Sui Clock object
+    tx.pure.address(senderAddress),        // original sender
+  ],
+});
+
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+});
+console.log("execute_store tx:", result.digest);
+```
+
+### Query intent status
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+
+// Query IntentReceived events
+const events = await client.queryEvents({
+  query: {
+    MoveEventType: `${PACKAGE_ID}::lz_receiver::IntentReceived`,
+  },
+  limit: 10,
+  order: "descending",
+});
+
+for (const event of events.data) {
+  const { intent_id, src_eid, nonce } = event.parsedJson as {
+    intent_id: number[];
+    src_eid: number;
+    nonce: string;
+  };
+  console.log("Intent:", Buffer.from(intent_id).toString("hex"));
+  console.log("Source EID:", src_eid, "Nonce:", nonce);
+}
+```
+
 ## Sui Modules
 
 ### lz_receiver
