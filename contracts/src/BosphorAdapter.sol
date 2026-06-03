@@ -34,16 +34,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     }
 
     // --- Core ---
-    /// @notice Submits a storage intent and sends it to the destination chain via LayerZero.
-    /// @dev The cross-chain message is ABI-encoded as `(intentId, sender, payload, deadline)`.
-    ///      The caller must attach enough native gas to cover the LayerZero messaging fee
-    ///      (use `quote` to estimate). The intent ID is deterministically derived from the
-    ///      sender, destination EID, payload, nonce, and deadline.
-    /// @param _dstEid LayerZero endpoint ID of the destination chain (e.g. 40378 for Sui testnet).
-    /// @param _payload Arbitrary data describing the storage intent (passed through to Sui).
-    /// @param _deadline Unix timestamp after which the intent cannot be executed.
-    /// @param _options LayerZero messaging options (gas, executor settings, etc.).
-    /// @return intentId Deterministic keccak256 identifier for this intent.
+    /// @inheritdoc IBosphorAdapter
     function submitIntent(
         uint32 _dstEid,
         bytes calldata _payload,
@@ -102,11 +93,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     }
 
     // --- Hybrid relayer path (backward-compatible) ---
-    /// @notice Emergency fallback: allows the owner to manually confirm execution of an intent.
-    /// @dev The primary path for proof receipt is `_lzReceive` with a type 1 message from Sui.
-    ///      This function is retained for disaster recovery only.
-    /// @param _intentId The deterministic identifier of the intent to confirm.
-    /// @param _proof Opaque proof data attesting that the storage was executed on Walrus.
+    /// @inheritdoc IBosphorAdapter
     function confirmExecution(
         bytes32 _intentId,
         bytes calldata _proof
@@ -131,15 +118,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     }
 
     // --- Fee estimation ---
-    /// @notice Estimates the LayerZero messaging fee for a `submitIntent` call.
-    /// @dev Builds the same ABI-encoded message that `submitIntent` would send (using a
-    ///      zeroed intent ID since the actual ID is not known before submission) and
-    ///      delegates to the internal `_quote` helper provided by OApp.
-    /// @param _dstEid LayerZero endpoint ID of the destination chain.
-    /// @param _payload Arbitrary data describing the storage intent.
-    /// @param _deadline Unix timestamp after which the intent cannot be executed.
-    /// @param _options LayerZero messaging options (gas, executor settings, etc.).
-    /// @return fee The estimated native and LZ token fees required for the message.
+    /// @inheritdoc IBosphorAdapter
     function quote(
         uint32 _dstEid,
         bytes calldata _payload,
@@ -151,9 +130,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     }
 
     // --- Admin ---
-    /// @notice Updates the trusted relayer address. Only callable by the contract owner.
-    /// @dev Reverts with `ZeroAddress` if `_relayer` is the zero address.
-    /// @param _relayer The new relayer address for off-chain identification.
+    /// @inheritdoc IBosphorAdapter
     function setRelayer(address _relayer) external onlyOwner {
         if (_relayer == address(0)) revert ZeroAddress();
         address old = trustedRelayer;
@@ -162,14 +139,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     }
 
     // --- View ---
-    /// @notice Computes the deterministic intent ID for the given parameters.
-    /// @dev Uses `abi.encodePacked` and `keccak256`, matching the derivation in `submitIntent`.
-    /// @param _sender The address that would submit the intent.
-    /// @param _targetChainId The destination chain EID (cast to uint64).
-    /// @param _payload The storage intent payload.
-    /// @param _nonce The sender's nonce at the time of submission.
-    /// @param _deadline The deadline timestamp for the intent.
-    /// @return The keccak256 intent identifier.
+    /// @inheritdoc IBosphorAdapter
     function getIntentId(
         address _sender,
         uint64 _targetChainId,
