@@ -1,7 +1,13 @@
 /// Bosphor PTB Builder for LZ Executor
 ///
-/// Generates execution metadata (lz_receive_info) for endpoint registration,
-/// and builds PTB MoveCalls for the executor to deliver messages.
+/// Generates execution metadata (`lz_receive_info`) for endpoint registration,
+/// and builds Programmable Transaction Block (PTB) MoveCalls for the LayerZero
+/// executor to deliver messages to this OApp.
+///
+/// This module is called in two contexts:
+/// 1. At registration time, to produce OAppInfoV1-encoded metadata.
+/// 2. At message delivery time (simulate mode), to produce the MoveCall sequence
+///    the executor replays in the actual `lz_receive` transaction.
 module bosphor_lz::ptb_builder;
 
 use call::call::{Call, Void};
@@ -15,7 +21,9 @@ use sui::bcs;
 use utils::{buffer_writer, package};
 
 /// Marker struct for package address resolution after upgrades.
-/// If upgrading, create a new struct with the same pattern and update `bosphor_package()`.
+///
+/// The LZ executor uses this type's package address to build MoveCalls.
+/// After a contract upgrade, create a new marker struct and update `bosphor_package()`.
 public struct BosphorPtbBuilder has drop {}
 
 /// Generates OAppInfoV1-encoded execution metadata for OApp registration with
@@ -92,7 +100,10 @@ public fun build_lz_receive_ptb(
     builder.build()
 }
 
-/// Returns the current package address. Update this after contract upgrades.
+/// Returns the current package address by resolving `BosphorPtbBuilder`'s type info.
+///
+/// Must be updated after a contract upgrade by changing the marker type
+/// passed to `package::package_of_type`.
 fun bosphor_package(): address {
     package::package_of_type<BosphorPtbBuilder>()
 }
