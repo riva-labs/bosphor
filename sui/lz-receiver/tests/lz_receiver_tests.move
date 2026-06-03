@@ -67,7 +67,7 @@ fun test_build_proof_message_encoding() {
     // blob_id: 32 bytes, first byte 0xBB, rest zeros
     let mut blob_id = vector::empty<u8>();
     blob_id.push_back(0xBB);
-    i = 1;
+    i = 1u64;
     while (i < 32) { blob_id.push_back(0); i = i + 1; };
 
     let end_epoch: u64 = 42;

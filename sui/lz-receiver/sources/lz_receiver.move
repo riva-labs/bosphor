@@ -269,6 +269,7 @@ entry fun set_relayer(
 /// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
 /// * `options` - LZ messaging options (executor gas, etc.).
 /// * `native_fee` - SUI coin to cover LayerZero messaging fees.
+/// * `ctx` - Transaction context, used to verify the sender is the authorized relayer.
 ///
 /// Aborts with `EUnauthorizedRelayer` if the caller is not the authorized relayer.
 /// Aborts with `EIntentNotReceived` if the intent ID is not in received_intents.
@@ -308,6 +309,7 @@ public fun lz_send_proof(
 /// * `config` - Shared LzReceiverConfig (provides the CallCap).
 /// * `oapp` - Mutable reference to the OApp for confirming the send.
 /// * `call` - Hot-potato Call returned by the LZ endpoint after processing the send.
+/// * `ctx` - Transaction context, used to transfer SUI/ZRO refunds to the sender.
 public fun confirm_lz_send_proof(
     config: &LzReceiverConfig,
     oapp: &mut OApp,
@@ -358,6 +360,7 @@ public fun confirm_lz_send_proof(
 /// * `end_epoch` - Walrus storage epoch at which the blob expires.
 /// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
 /// * `options` - LZ messaging options for fee estimation.
+/// * `ctx` - Transaction context, required by the LZ endpoint quote call.
 public fun quote_proof(
     config: &LzReceiverConfig,
     oapp: &OApp,
