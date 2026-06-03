@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/BosphorAdapter.sol";
+import "../src/interfaces/IBosphorAdapter.sol";
 import "./mocks/EndpointV2Mock.sol";
 
 contract BosphorAdapterTest is Test {
@@ -49,7 +50,7 @@ contract BosphorAdapterTest is Test {
         uint256 fee = endpoint.NATIVE_FEE();
         vm.deal(user, fee);
         vm.prank(user);
-        vm.expectRevert(BosphorAdapter.DeadlineExpired.selector);
+        vm.expectRevert(IBosphorAdapter.DeadlineExpired.selector);
         adapter.submitIntent{value: fee}(DST_EID, "hello", block.timestamp - 1, _defaultOptions());
     }
 
@@ -97,12 +98,12 @@ contract BosphorAdapterTest is Test {
         // Owner calls twice
         adapter.confirmExecution(intentId, "proof");
 
-        vm.expectRevert(BosphorAdapter.AlreadyExecuted.selector);
+        vm.expectRevert(IBosphorAdapter.AlreadyExecuted.selector);
         adapter.confirmExecution(intentId, "proof");
     }
 
     function test_confirmExecution_nonExistentIntent_reverts() public {
-        vm.expectRevert(BosphorAdapter.IntentNotFound.selector);
+        vm.expectRevert(IBosphorAdapter.IntentNotFound.selector);
         adapter.confirmExecution(bytes32(uint256(999)), "proof");
     }
 
@@ -140,12 +141,12 @@ contract BosphorAdapterTest is Test {
     }
 
     function test_setRelayer_zeroAddress_reverts() public {
-        vm.expectRevert(BosphorAdapter.ZeroAddress.selector);
+        vm.expectRevert(IBosphorAdapter.ZeroAddress.selector);
         adapter.setRelayer(address(0));
     }
 
     function test_constructor_zeroRelayer_reverts() public {
-        vm.expectRevert(BosphorAdapter.ZeroAddress.selector);
+        vm.expectRevert(IBosphorAdapter.ZeroAddress.selector);
         new BosphorAdapter(address(endpoint), address(this), address(0));
     }
 
@@ -222,7 +223,7 @@ contract BosphorAdapterTest is Test {
 
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
 
-        vm.expectRevert(BosphorAdapter.AlreadyExecuted.selector);
+        vm.expectRevert(IBosphorAdapter.AlreadyExecuted.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
     }
 
@@ -230,7 +231,7 @@ contract BosphorAdapterTest is Test {
         bytes32 fakeId = bytes32(uint256(999));
         bytes memory message = _buildType1Message(fakeId, bytes32(0), 1);
 
-        vm.expectRevert(BosphorAdapter.IntentNotFound.selector);
+        vm.expectRevert(IBosphorAdapter.IntentNotFound.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, message);
     }
 
@@ -248,19 +249,19 @@ contract BosphorAdapterTest is Test {
     }
 
     function test_lzReceive_emptyMessage_reverts() public {
-        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        vm.expectRevert(IBosphorAdapter.UnknownMessageType.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, "");
     }
 
     function test_lzReceive_unknownType_reverts() public {
         // Type 0
         bytes memory msgType0 = bytes.concat(bytes1(0x00), abi.encode(bytes32(0), bytes32(0), uint256(0)));
-        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        vm.expectRevert(IBosphorAdapter.UnknownMessageType.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, msgType0);
 
         // Type 2
         bytes memory msgType2 = bytes.concat(bytes1(0x02), abi.encode(bytes32(0), bytes32(0), uint256(0)));
-        vm.expectRevert(BosphorAdapter.UnknownMessageType.selector);
+        vm.expectRevert(IBosphorAdapter.UnknownMessageType.selector);
         endpoint.simulateLzReceive(address(adapter), DST_EID, PEER, msgType2);
     }
 
@@ -272,7 +273,7 @@ contract BosphorAdapterTest is Test {
         uint256 endEpoch = 42;
 
         vm.expectEmit(true, false, false, true);
-        emit BosphorAdapter.IntentExecuted(intentId, abi.encode(blobId, endEpoch));
+        emit IBosphorAdapter.IntentExecuted(intentId, abi.encode(blobId, endEpoch));
 
         endpoint.simulateLzReceive(
             address(adapter), DST_EID, PEER,
