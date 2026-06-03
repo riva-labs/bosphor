@@ -2,6 +2,14 @@
 ///
 /// Receives cross-chain intent messages from EVM via LayerZero v2 and sends
 /// execution proofs back to EVM via the LZ return path.
+///
+/// ## Message Flow
+///
+/// **Inbound (EVM to Sui):**
+/// EVM `submitIntent` -> LayerZero -> `lz_receive` -> `IntentReceived` event
+///
+/// **Outbound (Sui to EVM):**
+/// Relayer calls `lz_send_proof` -> LayerZero -> EVM `_lzReceive` confirms execution
 #[allow(lint(self_transfer))]
 module bosphor_lz::lz_receiver;
 
@@ -45,39 +53,65 @@ public struct LZ_RECEIVER has drop {}
 
 // === Structs ===
 
-/// Shared config holding the OApp call capability, received intents, and relayer address
+/// Shared configuration for the LayerZero receiver.
+///
+/// Holds the OApp call capability (required for endpoint interactions),
+/// a deduplication table of received intents, and the authorized relayer address.
 public struct LzReceiverConfig has key {
     id: UID,
+    /// CallCap for invoking OApp operations on the LZ endpoint.
     oapp_cap: CallCap,
+    /// Deduplication table keyed by 32-byte intent ID.
     received_intents: Table<vector<u8>, IntentRecord>,
+    /// Address authorized to trigger proof sends back to EVM.
     relayer: address,
 }
 
-/// Record of a received intent
+/// Record of a received cross-chain intent.
+///
+/// Stored in `LzReceiverConfig.received_intents` after successful `lz_receive`.
 public struct IntentRecord has store {
+    /// Full ABI-encoded message payload from the EVM source.
     payload: vector<u8>,
+    /// LayerZero endpoint ID of the source chain (e.g. 40161 for Sepolia).
     src_eid: u32,
+    /// LayerZero message nonce for ordering and replay protection.
     nonce: u64,
 }
 
 // === Events ===
 
-/// Emitted when LZ delivers an intent from EVM
+/// Emitted when the LZ executor delivers an intent from EVM.
+///
+/// The relayer watches for this event to trigger Walrus upload and proof return.
 public struct IntentReceived has copy, drop {
+    /// 32-byte unique identifier extracted from the first 32 bytes of the message.
     intent_id: vector<u8>,
+    /// Full ABI-encoded message payload from EVM.
     payload: vector<u8>,
+    /// LayerZero endpoint ID of the source chain.
     src_eid: u32,
+    /// LayerZero message nonce.
     nonce: u64,
+    /// Globally unique identifier assigned by LayerZero.
     guid: Bytes32,
 }
 
-/// Emitted when a proof is sent back to EVM via LayerZero
+/// Emitted when a proof is sent back to EVM via LayerZero.
+///
+/// Confirms that `lz_send_proof` and `confirm_lz_send_proof` completed successfully.
 public struct ProofSent has copy, drop {
+    /// 32-byte intent identifier matching the original `IntentReceived`.
     intent_id: vector<u8>,
+    /// 32-byte Walrus blob identifier proving the data was stored.
     blob_id: vector<u8>,
+    /// Walrus storage epoch at which the blob expires.
     end_epoch: u64,
+    /// LayerZero endpoint ID of the destination chain (EVM).
     dst_eid: u32,
+    /// LayerZero message nonce for the outbound proof message.
     nonce: u64,
+    /// Globally unique identifier assigned by LayerZero for the proof message.
     guid: Bytes32,
 }
 
@@ -199,6 +233,13 @@ entry fun register_oapp(
 }
 
 /// Sets the authorized relayer address. Only the OApp admin can call this.
+///
+/// * `config` - Shared LzReceiverConfig to update.
+/// * `admin_cap` - AdminCap proving the caller owns the OApp.
+/// * `oapp` - The OApp shared object for admin verification.
+/// * `new_relayer` - New relayer address. Must not be the zero address.
+///
+/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
 entry fun set_relayer(
     config: &mut LzReceiverConfig,
     admin_cap: &AdminCap,
@@ -219,6 +260,19 @@ entry fun set_relayer(
 /// then finalized via `confirm_lz_send_proof`.
 ///
 /// Only the authorized relayer can call this function.
+///
+/// * `config` - Shared LzReceiverConfig (checks relayer auth and intent existence).
+/// * `oapp` - Mutable reference to the OApp for sending.
+/// * `intent_id` - 32-byte intent identifier (must already exist in received_intents).
+/// * `blob_id` - 32-byte Walrus blob identifier proving storage.
+/// * `end_epoch` - Walrus storage epoch at which the blob expires.
+/// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
+/// * `options` - LZ messaging options (executor gas, etc.).
+/// * `native_fee` - SUI coin to cover LayerZero messaging fees.
+/// * `ctx` - Transaction context, used to verify the sender is the authorized relayer.
+///
+/// Aborts with `EUnauthorizedRelayer` if the caller is not the authorized relayer.
+/// Aborts with `EIntentNotReceived` if the intent ID is not in received_intents.
 public fun lz_send_proof(
     config: &LzReceiverConfig,
     oapp: &mut OApp,
@@ -251,6 +305,11 @@ public fun lz_send_proof(
 /// Must be called after the `Call` from `lz_send_proof` has been executed by the
 /// LZ endpoint. Extracts the receipt, refunds remaining SUI to the sender, and
 /// emits a `ProofSent` event.
+///
+/// * `config` - Shared LzReceiverConfig (provides the CallCap).
+/// * `oapp` - Mutable reference to the OApp for confirming the send.
+/// * `call` - Hot-potato Call returned by the LZ endpoint after processing the send.
+/// * `ctx` - Transaction context, used to transfer SUI/ZRO refunds to the sender.
 public fun confirm_lz_send_proof(
     config: &LzReceiverConfig,
     oapp: &mut OApp,
@@ -293,6 +352,15 @@ public fun confirm_lz_send_proof(
 ///
 /// Returns a hot-potato `Call` that must be routed through the LZ endpoint for
 /// quote processing, then finalized via `confirm_quote_proof`.
+///
+/// * `config` - Shared LzReceiverConfig (provides the CallCap).
+/// * `oapp` - The OApp shared object.
+/// * `intent_id` - 32-byte intent identifier.
+/// * `blob_id` - 32-byte Walrus blob identifier.
+/// * `end_epoch` - Walrus storage epoch at which the blob expires.
+/// * `dst_eid` - LayerZero endpoint ID of the destination chain (EVM).
+/// * `options` - LZ messaging options for fee estimation.
+/// * `ctx` - Transaction context, required by the LZ endpoint quote call.
 public fun quote_proof(
     config: &LzReceiverConfig,
     oapp: &OApp,
@@ -315,6 +383,10 @@ public fun quote_proof(
 }
 
 /// Finalizes a quote and returns the estimated messaging fee.
+///
+/// * `config` - Shared LzReceiverConfig (provides the CallCap).
+/// * `oapp` - The OApp shared object.
+/// * `call` - Hot-potato Call returned by the LZ endpoint after processing the quote.
 public fun confirm_quote_proof(
     config: &LzReceiverConfig,
     oapp: &OApp,
@@ -327,6 +399,12 @@ public fun confirm_quote_proof(
 // === Internal ===
 
 /// Extracts a contiguous byte slice from `data` starting at `start` with length `len`.
+///
+/// * `data` - Source byte vector.
+/// * `start` - Zero-based starting index.
+/// * `len` - Number of bytes to extract.
+///
+/// Aborts if `start + len` exceeds the length of `data`.
 fun slice(data: &vector<u8>, start: u64, len: u64): vector<u8> {
     let mut result = vector::empty<u8>();
     let mut i = 0;
@@ -338,7 +416,12 @@ fun slice(data: &vector<u8>, start: u64, len: u64): vector<u8> {
 }
 
 /// Decodes a u64 from a 32-byte big-endian uint256 at the given offset.
-/// Reads the last 8 bytes (offset+24..offset+32) as big-endian u64.
+///
+/// Reads the last 8 bytes (offset+24..offset+32) as big-endian u64,
+/// discarding the upper 24 bytes. Assumes the value fits in u64.
+///
+/// * `data` - Source byte vector containing the ABI-encoded uint256.
+/// * `offset` - Byte offset where the 32-byte uint256 starts.
 fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
     let base = offset + 24;
     ((*data.borrow(base) as u64) << 56)
@@ -353,10 +436,17 @@ fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
 
 // === Message Encoding ===
 
-/// Builds the proof message with type 1 prefix and ABI-encoded payload.
+/// Builds the proof message with type-1 prefix and ABI-encoded payload.
 ///
-/// Format: [0x01] [intentId(32)] [blobId(32)] [endEpoch(32, left-padded u256)]
+/// Format: `[0x01] [intentId(32)] [blobId(32)] [endEpoch(32, left-padded u256)]`
 /// Total: 97 bytes. Matches the EVM `_lzReceive` decoder for message type 1.
+///
+/// * `intent_id` - 32-byte intent identifier. Must be exactly 32 bytes.
+/// * `blob_id` - 32-byte Walrus blob identifier. Must be exactly 32 bytes.
+/// * `end_epoch` - Walrus storage epoch, encoded as big-endian uint256.
+///
+/// Aborts with `EInvalidIntentIdLength` if `intent_id` is not 32 bytes.
+/// Aborts with `EInvalidBlobIdLength` if `blob_id` is not 32 bytes.
 public(package) fun build_proof_message(
     intent_id: vector<u8>,
     blob_id: vector<u8>,
@@ -406,6 +496,8 @@ public(package) fun build_proof_message(
 
 // === Test Helpers ===
 
+/// Test-only initializer. Creates the OApp and LzReceiverConfig using a
+/// synthetic one-time witness.
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(LZ_RECEIVER {}, ctx);
