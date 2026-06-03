@@ -22,7 +22,7 @@ cp .env.example .env
 
 ```bash
 # Solidity (Foundry)
-cd contracts && forge test -vvv
+cd contracts/evm && forge test -vvv
 
 # Sui Move
 cd sui/lz-receiver && sui move test --build-env testnet
