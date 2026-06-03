@@ -1,5 +1,7 @@
 # env
 .env
+.env.*
+relayer/.env.*
 
 # contracts
 contracts/out/
@@ -26,6 +28,13 @@ website/.docusaurus/
 
 # confidential
 AGREEMENT*.md
+
+# relayer runtime state
+relayer/sui-cursor.json
+relayer/sui-sent-proofs.json
+
+# logs
+*.log
 
 # tooling
 .gstack/
