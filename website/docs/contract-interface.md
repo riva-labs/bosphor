@@ -5,7 +5,17 @@ title: Contract Interface Reference
 
 # Contract Interface Reference
 
+## IBosphorAdapter (Interface)
+
+Integrators should import `IBosphorAdapter.sol` from `contracts/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface includes all external function signatures, events, errors, and structs needed for integration.
+
+```solidity
+import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
+```
+
 ## BosphorAdapter.sol (EVM)
+
+`BosphorAdapter` implements `IBosphorAdapter` and extends the LayerZero `OApp`.
 
 ### submitIntent
 
@@ -27,7 +37,7 @@ function submitIntent(
 | `_deadline` | uint256 | Unix timestamp after which the intent expires |
 | `_options` | bytes | LayerZero execution options (gas limit, etc.) |
 
-**Returns**: `intentId` -- deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
+**Returns**: `intentId`, a deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
 
 **Emits**: `IntentSubmitted(intentId, sender, targetChainId, payload, nonce, deadline)`
 
@@ -68,12 +78,49 @@ Handles incoming LayerZero messages from the remote chain. The first byte is a m
 
 Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
 
-### executed
+### setRelayer
 
-Check if an intent has been executed.
+Update the trusted relayer address. Owner-only.
 
 ```solidity
+function setRelayer(address _relayer) external; // onlyOwner
+```
+
+**Emits**: `RelayerUpdated(oldRelayer, newRelayer)`
+
+### getIntentId
+
+Compute the deterministic intent ID for a given set of parameters.
+
+```solidity
+function getIntentId(
+    address _sender,
+    uint64 _targetChainId,
+    bytes calldata _payload,
+    uint256 _nonce,
+    uint256 _deadline
+) external pure returns (bytes32);
+```
+
+### View Functions
+
+```solidity
+function trustedRelayer() external view returns (address);
+function intents(bytes32 intentId) external view returns (bool);
 function executed(bytes32 intentId) external view returns (bool);
+function intentDeadlines(bytes32 intentId) external view returns (uint256);
+function nonces(address sender) external view returns (uint256);
+```
+
+### Errors
+
+```solidity
+error DeadlineExpired();
+error IntentAlreadyExists();
+error IntentNotFound();
+error AlreadyExecuted();
+error ZeroAddress();
+error UnknownMessageType();
 ```
 
 ## Events
