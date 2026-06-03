@@ -37,7 +37,7 @@ EVM ◄──_lzReceive──◄── LayerZero v2 (DVN) ◄── lz_send_proo
 ## Quickstart
 
 ```bash
-git clone https://github.com/AliErcanOzgokce/bosphor
+git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor
 cd bosphor && nvm use && npm install
 cp .env.example .env  # fill in keys
 npm run new-deployment

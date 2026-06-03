@@ -18,7 +18,7 @@ Get Bosphor running on Sepolia + Sui Testnet.
 ## Setup
 
 ```bash
-git clone https://github.com/AliErcanOzgokce/bosphor.git
+git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor.git
 cd bosphor
 nvm use
 npm install
