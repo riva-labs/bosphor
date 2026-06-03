@@ -9,9 +9,7 @@ export const configValidationSchema = Joi.object({
   EVM_DST_EID: Joi.number().integer().default(30184),
 
   // Sui
-  SUI_RPC_URL: Joi.string()
-    .uri()
-    .default('https://fullnode.mainnet.sui.io:443'),
+  SUI_RPC_URL: Joi.string().uri().default('https://fullnode.mainnet.sui.io:443'),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
