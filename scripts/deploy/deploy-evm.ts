@@ -13,7 +13,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../.env") });
+config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers } from "ethers";
 
@@ -35,7 +35,7 @@ const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
 
 // --- Helpers ---
 function updateEnv(updates: Record<string, string>) {
-  const envPath = resolve(import.meta.dirname, "../.env");
+  const envPath = resolve(import.meta.dirname, "../../.env");
   let content = readFileSync(envPath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");
@@ -57,7 +57,7 @@ async function main() {
 
   // Step 1: Build contracts
   console.log("\n=== Step 1: Build contracts ===");
-  const contractsDir = resolve(import.meta.dirname, "../contracts");
+  const contractsDir = resolve(import.meta.dirname, "../../contracts/evm");
   try {
     execSync("forge build", { cwd: contractsDir, encoding: "utf-8", stdio: "pipe" });
     console.log("[OK] forge build");

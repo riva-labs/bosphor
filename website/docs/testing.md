@@ -11,7 +11,7 @@ Bosphor has four test layers: Solidity unit tests, Move unit tests, relayer unit
 
 ```bash
 # Run everything (except e2e, which needs live testnet)
-(cd contracts && forge test -vvv)
+(cd contracts/evm && forge test -vvv)
 (cd sui/lz-receiver && sui move test --build-env testnet)
 (cd relayer && npm test)
 
@@ -22,11 +22,11 @@ npm run test:e2e
 ## Solidity tests (Forge)
 
 ```bash
-cd contracts
+cd contracts/evm
 forge test -vvv
 ```
 
-Tests are in `contracts/test/BosphorAdapter.t.sol`. They use a minimal `EndpointV2Mock` (not the full LZ TestHelper) to simulate LayerZero message delivery.
+Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `EndpointV2Mock` (not the full LZ TestHelper) to simulate LayerZero message delivery.
 
 ### What is covered
 
@@ -146,7 +146,7 @@ The CI runs on every push to `main` and every pull request. See `.github/workflo
 
 | Job | What it does |
 |-----|-------------|
-| `forge-tests` | Checks out with submodules, installs Foundry, runs `forge test -vvv` in `contracts/` |
+| `forge-tests` | Checks out with submodules, installs Foundry, runs `forge test -vvv` in `contracts/evm/` |
 | `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `sui/lz-receiver/` |
 | `relayer-build-and-test` | Sets up Node.js 22, installs, builds, and tests the relayer |
 

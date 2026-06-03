@@ -198,7 +198,7 @@ Before committing or shipping, Claude MUST run the full build and test suite and
 # From the project root:
 
 # 1. Solidity build + tests
-(cd contracts && forge build && forge test -vvv)
+(cd contracts/evm && forge build && forge test -vvv)
 
 # 2. Move tests
 (cd sui/lz-receiver && sui move test --build-env testnet)

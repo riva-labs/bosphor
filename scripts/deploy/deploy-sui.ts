@@ -14,7 +14,7 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../.env") });
+config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
@@ -52,7 +52,7 @@ const deployerAddress = keypair.toSuiAddress();
 
 // --- Helpers ---
 function updateEnv(updates: Record<string, string>) {
-  const envPath = resolve(import.meta.dirname, "../.env");
+  const envPath = resolve(import.meta.dirname, "../../.env");
   let content = readFileSync(envPath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");
@@ -137,7 +137,7 @@ async function publish(): Promise<PublishResult> {
     try { execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" }); } catch {}
     console.log("  Switched sui client to mainnet");
   }
-  const suiLzPath = resolve(import.meta.dirname, "../sui/lz-receiver");
+  const suiLzPath = resolve(import.meta.dirname, "../../sui/lz-receiver");
 
   // Remove Published.toml if exists (allows fresh publish)
   const publishedToml = resolve(suiLzPath, "Published.toml");

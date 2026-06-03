@@ -4,16 +4,17 @@
 relayer/.env.*
 
 # contracts
-contracts/out/
-contracts/cache/
-contracts/broadcast/
-contracts/foundry.lock
+contracts/evm/out/
+contracts/evm/cache/
+contracts/evm/broadcast/
+contracts/evm/foundry.lock
 
 # sui
-sui/build/
+sui/executor/build/
+sui/executor/deps/
+sui/executor/Published.toml
 sui/lz-receiver/build/
 sui/lz-receiver/Published.toml
-sui/deps/
 sui/lz-receiver/traces/
 
 # dependencies
