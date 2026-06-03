@@ -4,49 +4,29 @@ import { SuiService } from './sui.service';
 
 // LZ infrastructure IDs (testnet, from verified TX)
 const LZ_INFRA = {
-  endpointV2:
-    '0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a',
-  endpointV2Obj:
-    '0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a',
-  uln302:
-    '0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24',
-  uln302Obj:
-    '0x69541d4feeb08cdd3b20b3502021a676eea0fca4f47d46e423cdc9686df406ff',
-  executorPkg:
-    '0xb9fdc6748fb939095e249b22717d564edf890681e387131d6c525d867d30f834',
-  executorObj:
-    '0x51816836a18df1cc8bbc0ae840e01da8fef15968ddbb390f4d6b9243b7911f23',
-  execFeeLib:
-    '0xa99c7ca780a6cedfc27d9274c031741b68014886cba04dafe8335c72eeeed0b5',
-  execFeeLibObj:
-    '0x4e0c4cc4aa88b428005a8bb131014fdf9637a3ae042f192b9071119a64a32138',
-  dvnPkg:
-    '0xfa5a7bd745a56f3f18f4830563c8b65a737dcfca5b9e5aa281f2f2cd3f6eaf6d',
-  dvnObj:
-    '0x4160cd9281e79a93f87f7f45853cd682750102be01f36d1c33ef99ee8cd86e0d',
-  dvnFeeLib:
-    '0xfb596f2afcc4f15ec8660fb241c3a7bc9aa2f9b3b820914b6990202b5f236f2f',
-  dvnFeeLibObj:
-    '0xd433507170ea8cf08c5697128e80fca03f5c03c4a2f639bc632e6647baff63e1',
-  priceFeed:
-    '0xa4f8f126dc7e2a763676eab3a6f0a12afaf334baa0f37b41a1e93890cf95ea4c',
-  priceFeedObj:
-    '0xc8ae95cdc862a032e4d35f5f4c5dd6d3d07bdde2c7f39460e78e1539cc07dc2d',
-  treasury:
-    '0xb9ae7adf8193fb0bf2cc99d89dac19ae309c0f1b768d0976166f507c1daa9936',
-  treasuryObj:
-    '0x40a2b309bda42658dd12e967574f6e77170082599a77b158051c31064df82be1',
+  endpointV2: '0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a',
+  endpointV2Obj: '0x2b96537c30c5fa962a1bfb58a168fc17c17f2546c88e2e9252f21ee7d5eff57a',
+  uln302: '0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24',
+  uln302Obj: '0x69541d4feeb08cdd3b20b3502021a676eea0fca4f47d46e423cdc9686df406ff',
+  executorPkg: '0xb9fdc6748fb939095e249b22717d564edf890681e387131d6c525d867d30f834',
+  executorObj: '0x51816836a18df1cc8bbc0ae840e01da8fef15968ddbb390f4d6b9243b7911f23',
+  execFeeLib: '0xa99c7ca780a6cedfc27d9274c031741b68014886cba04dafe8335c72eeeed0b5',
+  execFeeLibObj: '0x4e0c4cc4aa88b428005a8bb131014fdf9637a3ae042f192b9071119a64a32138',
+  dvnPkg: '0xfa5a7bd745a56f3f18f4830563c8b65a737dcfca5b9e5aa281f2f2cd3f6eaf6d',
+  dvnObj: '0x4160cd9281e79a93f87f7f45853cd682750102be01f36d1c33ef99ee8cd86e0d',
+  dvnFeeLib: '0xfb596f2afcc4f15ec8660fb241c3a7bc9aa2f9b3b820914b6990202b5f236f2f',
+  dvnFeeLibObj: '0xd433507170ea8cf08c5697128e80fca03f5c03c4a2f639bc632e6647baff63e1',
+  priceFeed: '0xa4f8f126dc7e2a763676eab3a6f0a12afaf334baa0f37b41a1e93890cf95ea4c',
+  priceFeedObj: '0xc8ae95cdc862a032e4d35f5f4c5dd6d3d07bdde2c7f39460e78e1539cc07dc2d',
+  treasury: '0xb9ae7adf8193fb0bf2cc99d89dac19ae309c0f1b768d0976166f507c1daa9936',
+  treasuryObj: '0x40a2b309bda42658dd12e967574f6e77170082599a77b158051c31064df82be1',
 };
 
 const BOSPHOR = {
-  lzPackageId:
-    '0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656',
-  configId:
-    '0xea751eeb901093cf8f45532876c12408f0cc627aad570f6112b2dc2ee8d9e432',
-  oappId:
-    '0x9631910c0bc687a74f0b99dd88d2f0033c393aa36735095de8cce67d5eeb27b0',
-  messagingChannel:
-    '0x1d1058fd590c44154a92282ebaab621aae10df0982466a433e9c9a18fe9c8301',
+  lzPackageId: '0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656',
+  configId: '0xea751eeb901093cf8f45532876c12408f0cc627aad570f6112b2dc2ee8d9e432',
+  oappId: '0x9631910c0bc687a74f0b99dd88d2f0033c393aa36735095de8cce67d5eeb27b0',
+  messagingChannel: '0x1d1058fd590c44154a92282ebaab621aae10df0982466a433e9c9a18fe9c8301',
 };
 
 // Raw 32-byte Ed25519 secret key in base64 (test only)
@@ -125,12 +105,7 @@ describe('SuiService.lzSendProof', () => {
     const endEpoch = 100;
     const dstEid = 40161;
 
-    const digest = await service.lzSendProof(
-      intentId,
-      blobId,
-      endEpoch,
-      dstEid,
-    );
+    const digest = await service.lzSendProof(intentId, blobId, endEpoch, dstEid);
 
     expect(digest).toBe('fakedigest123');
     expect(mockSignAndExecute).toHaveBeenCalledTimes(1);
@@ -149,9 +124,9 @@ describe('SuiService.lzSendProof', () => {
     const intentId = '0x' + 'ab'.repeat(32);
     const blobId = 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0';
 
-    await expect(
-      service.lzSendProof(intentId, blobId, 100, 40161),
-    ).rejects.toThrow(/Sui tx failed/);
+    await expect(service.lzSendProof(intentId, blobId, 100, 40161)).rejects.toThrow(
+      /Sui tx failed/,
+    );
   });
 
   it('should throw when LZ config is missing', async () => {
@@ -181,9 +156,9 @@ describe('SuiService.lzSendProof', () => {
     const svc = module2.get<SuiService>(SuiService);
     svc.onModuleInit();
 
-    await expect(
-      svc.lzSendProof('0x' + 'ab'.repeat(32), 'dGVzdA', 100, 40161),
-    ).rejects.toThrow(/LZ send proof requires/);
+    await expect(svc.lzSendProof('0x' + 'ab'.repeat(32), 'dGVzdA', 100, 40161)).rejects.toThrow(
+      /LZ send proof requires/,
+    );
   });
 });
 
@@ -205,9 +180,7 @@ describe('SuiService.quoteLzFee', () => {
         ...Array(15).fill({ returnValues: [] }),
         // Last command (confirm_quote_proof) returns MessagingFee
         {
-          returnValues: [
-            [[...nativeFeeBytes, ...zroFeeBytes], 'messaging_fee::MessagingFee'],
-          ],
+          returnValues: [[[...nativeFeeBytes, ...zroFeeBytes], 'messaging_fee::MessagingFee']],
         },
       ],
     });

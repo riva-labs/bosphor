@@ -94,9 +94,7 @@ describe('EvmService', () => {
     });
 
     it('should skip logs that fail to parse', async () => {
-      mockAdapter.queryFilter.mockResolvedValue([
-        { topics: ['0xtopic0'], data: '0xdata' },
-      ]);
+      mockAdapter.queryFilter.mockResolvedValue([{ topics: ['0xtopic0'], data: '0xdata' }]);
       mockAdapter.interface.parseLog.mockReturnValue(null);
 
       const result = await service.pollEvents(900);
@@ -119,38 +117,28 @@ describe('EvmService', () => {
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(1);
     });
 
-    it(
-      'should retry on transient failure and succeed',
-      async () => {
-        const mockTx = {
-          wait: jest.fn().mockResolvedValue({ hash: '0xtxhash' }),
-        };
-        mockAdapter.confirmExecution
-          .mockRejectedValueOnce(new Error('nonce too low'))
-          .mockResolvedValueOnce(mockTx);
+    it('should retry on transient failure and succeed', async () => {
+      const mockTx = {
+        wait: jest.fn().mockResolvedValue({ hash: '0xtxhash' }),
+      };
+      mockAdapter.confirmExecution
+        .mockRejectedValueOnce(new Error('nonce too low'))
+        .mockResolvedValueOnce(mockTx);
 
-        const hash = await service.confirmExecution('0xintentid', 'proof-data');
+      const hash = await service.confirmExecution('0xintentid', 'proof-data');
 
-        expect(hash).toBe('0xtxhash');
-        expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(2);
-      },
-      10_000,
-    );
+      expect(hash).toBe('0xtxhash');
+      expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(2);
+    }, 10_000);
 
-    it(
-      'should throw after max retries',
-      async () => {
-        mockAdapter.confirmExecution.mockRejectedValue(
-          new Error('persistent error'),
-        );
+    it('should throw after max retries', async () => {
+      mockAdapter.confirmExecution.mockRejectedValue(new Error('persistent error'));
 
-        await expect(
-          service.confirmExecution('0xintentid', 'proof-data'),
-        ).rejects.toThrow('persistent error');
+      await expect(service.confirmExecution('0xintentid', 'proof-data')).rejects.toThrow(
+        'persistent error',
+      );
 
-        expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(3);
-      },
-      10_000,
-    );
+      expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(3);
+    }, 10_000);
   });
 });

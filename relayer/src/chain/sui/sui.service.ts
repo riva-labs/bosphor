@@ -7,8 +7,7 @@ import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { ethers } from 'ethers';
 
 const SUI_CLOCK_OBJECT = '0x6';
-const WALRUS_PACKAGE_ID =
-  '0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66';
+const WALRUS_PACKAGE_ID = '0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66';
 
 // Default LZ options: 200_000 gas for lzReceive on EVM
 const DEFAULT_LZ_OPTIONS = '0x00030100110100000000000000000000000000030d40';
@@ -67,10 +66,7 @@ export class SuiService implements OnModuleInit {
     this.lzPackageId = this.config.get<string>('SUI_LZ_PACKAGE_ID', '');
     this.lzConfigId = this.config.get<string>('SUI_LZ_CONFIG_ID', '');
     this.lzOappId = this.config.get<string>('SUI_LZ_OAPP_ID', '');
-    this.lzMessagingChannel = this.config.get<string>(
-      'SUI_LZ_MESSAGING_CHANNEL',
-      '',
-    );
+    this.lzMessagingChannel = this.config.get<string>('SUI_LZ_MESSAGING_CHANNEL', '');
     this.lzInfra = {
       endpointV2: this.config.get<string>('SUI_LZ_ENDPOINT_V2', ''),
       endpointV2Obj: this.config.get<string>('SUI_LZ_ENDPOINT_V2_OBJ', ''),
@@ -125,9 +121,7 @@ export class SuiService implements OnModuleInit {
     return this.client.getLatestCheckpointSequenceNumber();
   }
 
-  async pollLzEvents(
-    cursor: SuiEventCursor | null,
-  ): Promise<{
+  async pollLzEvents(cursor: SuiEventCursor | null): Promise<{
     events: SuiLzEvent[];
     newCursor: SuiEventCursor | null;
     hasMore: boolean;
@@ -149,10 +143,7 @@ export class SuiService implements OnModuleInit {
       const fields = event.parsedJson as Record<string, any>;
       const intentIdBytes: number[] = fields.intent_id;
       const intentId =
-        '0x' +
-        intentIdBytes
-          .map((b: number) => b.toString(16).padStart(2, '0'))
-          .join('');
+        '0x' + intentIdBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
 
       events.push({
         intentId,
@@ -203,9 +194,7 @@ export class SuiService implements OnModuleInit {
 
     const status = result.effects?.status?.status;
     if (status !== 'success') {
-      throw new Error(
-        `Sui tx failed: ${JSON.stringify(result.effects?.status)}`,
-      );
+      throw new Error(`Sui tx failed: ${JSON.stringify(result.effects?.status)}`);
     }
 
     this.logger.log(`[${intentId}] Sui tx digest: ${result.digest}`);
@@ -248,9 +237,7 @@ export class SuiService implements OnModuleInit {
       );
     }
     if (!this.lzInfra.endpointV2 || !this.lzInfra.uln302Obj) {
-      throw new Error(
-        'LZ infrastructure not configured. Set all SUI_LZ_* env vars.',
-      );
+      throw new Error('LZ infrastructure not configured. Set all SUI_LZ_* env vars.');
     }
 
     const tx = new Transaction();
@@ -277,11 +264,7 @@ export class SuiService implements OnModuleInit {
     // [1] endpoint_v2::quote
     const [msglibQuoteCall] = tx.moveCall({
       target: `${infra.endpointV2}::endpoint_v2::quote`,
-      arguments: [
-        tx.object(infra.endpointV2Obj),
-        tx.object(this.lzMessagingChannel),
-        quoteCall,
-      ],
+      arguments: [tx.object(infra.endpointV2Obj), tx.object(this.lzMessagingChannel), quoteCall],
     });
 
     // [2] uln_302::quote
@@ -365,21 +348,13 @@ export class SuiService implements OnModuleInit {
     // [14] endpoint_v2::confirm_quote
     tx.moveCall({
       target: `${infra.endpointV2}::endpoint_v2::confirm_quote`,
-      arguments: [
-        tx.object(infra.endpointV2Obj),
-        quoteCall,
-        msglibQuoteCall,
-      ],
+      arguments: [tx.object(infra.endpointV2Obj), quoteCall, msglibQuoteCall],
     });
 
     // [15] APP::confirm_quote_proof → returns MessagingFee
     tx.moveCall({
       target: `${this.lzPackageId}::lz_receiver::confirm_quote_proof`,
-      arguments: [
-        tx.object(this.lzConfigId),
-        tx.object(this.lzOappId),
-        quoteCall,
-      ],
+      arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), quoteCall],
     });
 
     const result = await this.client.devInspectTransactionBlock({
@@ -389,9 +364,7 @@ export class SuiService implements OnModuleInit {
 
     const status = result.effects?.status?.status;
     if (status !== 'success') {
-      throw new Error(
-        `LZ fee quote simulation failed: ${JSON.stringify(result.effects?.status)}`,
-      );
+      throw new Error(`LZ fee quote simulation failed: ${JSON.stringify(result.effects?.status)}`);
     }
 
     // Parse MessagingFee BCS from the last command's return value
@@ -441,9 +414,7 @@ export class SuiService implements OnModuleInit {
       );
     }
     if (!this.lzInfra.endpointV2 || !this.lzInfra.uln302Obj) {
-      throw new Error(
-        'LZ infrastructure not configured. Set all SUI_LZ_* env vars.',
-      );
+      throw new Error('LZ infrastructure not configured. Set all SUI_LZ_* env vars.');
     }
 
     const tx = new Transaction();
@@ -475,11 +446,7 @@ export class SuiService implements OnModuleInit {
     // [2] endpoint_v2::send
     const [msglibCall] = tx.moveCall({
       target: `${infra.endpointV2}::endpoint_v2::send`,
-      arguments: [
-        tx.object(infra.endpointV2Obj),
-        tx.object(this.lzMessagingChannel),
-        call,
-      ],
+      arguments: [tx.object(infra.endpointV2Obj), tx.object(this.lzMessagingChannel), call],
     });
 
     // [3] uln_302::send
@@ -566,11 +533,7 @@ export class SuiService implements OnModuleInit {
     // [15] APP::confirm_lz_send_proof
     tx.moveCall({
       target: `${this.lzPackageId}::lz_receiver::confirm_lz_send_proof`,
-      arguments: [
-        tx.object(this.lzConfigId),
-        tx.object(this.lzOappId),
-        call,
-      ],
+      arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), call],
     });
 
     const result = await this.client.signAndExecuteTransaction({
@@ -581,9 +544,7 @@ export class SuiService implements OnModuleInit {
 
     const status = result.effects?.status?.status;
     if (status !== 'success') {
-      throw new Error(
-        `Sui tx failed: ${JSON.stringify(result.effects?.status)}`,
-      );
+      throw new Error(`Sui tx failed: ${JSON.stringify(result.effects?.status)}`);
     }
 
     this.logger.log(`[${intentId}] LZ send proof tx: ${result.digest}`);

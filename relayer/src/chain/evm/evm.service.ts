@@ -48,9 +48,7 @@ export class EvmService implements OnModuleInit {
     return this.provider.getBlockNumber();
   }
 
-  async pollEvents(
-    fromBlock: number,
-  ): Promise<{ events: EvmIntentEvent[]; newFromBlock: number }> {
+  async pollEvents(fromBlock: number): Promise<{ events: EvmIntentEvent[]; newFromBlock: number }> {
     const latestBlock = await this.provider.getBlockNumber();
     if (fromBlock > latestBlock) {
       return { events: [], newFromBlock: fromBlock };
@@ -67,8 +65,7 @@ export class EvmService implements OnModuleInit {
       });
       if (!parsed) continue;
 
-      const { intentId, sender, targetChainId, payload, nonce, deadline } =
-        parsed.args;
+      const { intentId, sender, targetChainId, payload, nonce, deadline } = parsed.args;
       events.push({
         intentId,
         sender,
@@ -88,14 +85,9 @@ export class EvmService implements OnModuleInit {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const tx = await this.adapter.confirmExecution(
-          intentId,
-          ethers.toUtf8Bytes(proof),
-        );
+        const tx = await this.adapter.confirmExecution(intentId, ethers.toUtf8Bytes(proof));
         const receipt = await tx.wait();
-        this.logger.log(
-          `[${intentId}] EVM confirm tx: ${receipt.hash} (attempt ${attempt})`,
-        );
+        this.logger.log(`[${intentId}] EVM confirm tx: ${receipt.hash} (attempt ${attempt})`);
         return receipt.hash;
       } catch (err) {
         this.logger.error(

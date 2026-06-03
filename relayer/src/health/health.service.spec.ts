@@ -40,9 +40,7 @@ describe('HealthService', () => {
   });
 
   it('should return degraded when EVM check fails', async () => {
-    (mockEvm.getBlockNumber as jest.Mock).mockRejectedValue(
-      new Error('EVM down'),
-    );
+    (mockEvm.getBlockNumber as jest.Mock).mockRejectedValue(new Error('EVM down'));
 
     const health = await service.getHealth();
 
@@ -52,9 +50,7 @@ describe('HealthService', () => {
   });
 
   it('should return degraded when Sui check fails', async () => {
-    (mockSui.getCheckpoint as jest.Mock).mockRejectedValue(
-      new Error('Sui down'),
-    );
+    (mockSui.getCheckpoint as jest.Mock).mockRejectedValue(new Error('Sui down'));
 
     const health = await service.getHealth();
 
@@ -64,12 +60,8 @@ describe('HealthService', () => {
   });
 
   it('should return degraded when both chains fail', async () => {
-    (mockEvm.getBlockNumber as jest.Mock).mockRejectedValue(
-      new Error('EVM down'),
-    );
-    (mockSui.getCheckpoint as jest.Mock).mockRejectedValue(
-      new Error('Sui down'),
-    );
+    (mockEvm.getBlockNumber as jest.Mock).mockRejectedValue(new Error('EVM down'));
+    (mockSui.getCheckpoint as jest.Mock).mockRejectedValue(new Error('Sui down'));
 
     const health = await service.getHealth();
 
