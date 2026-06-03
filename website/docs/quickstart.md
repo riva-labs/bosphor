@@ -5,15 +5,51 @@ title: Quickstart
 
 # Quickstart
 
-Get Bosphor running on Sepolia + Sui Testnet.
+Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
 
 ## Prerequisites
 
-- **Node.js 22** (pinned via `.nvmrc`)
-- **Foundry** for EVM contract compilation and deployment
-- **Sui CLI** for Sui contract deployment
-- **Sepolia ETH** for EVM gas and LayerZero fees
-- **Sui testnet SUI** for Sui gas (`sui client faucet`)
+### Node.js 22
+
+Bosphor requires Node.js 22 (pinned via `.nvmrc`).
+
+```bash
+nvm install 22
+nvm use 22
+```
+
+### Foundry
+
+Install Foundry for EVM contract compilation and deployment:
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+Verify with `forge --version`.
+
+### Sui CLI
+
+Install the Sui CLI for Sui contract deployment. See the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install) for full instructions.
+
+After installation, configure for testnet:
+
+```bash
+sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
+sui client switch --env testnet
+```
+
+### Testnet tokens
+
+- **Sepolia ETH** for EVM gas and LayerZero fees. Use the [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud Sepolia Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia).
+- **Sui testnet SUI** for Sui gas:
+
+```bash
+sui client faucet
+```
+
+Or use the [Sui Testnet Faucet](https://faucet.testnet.sui.io/).
 
 ## Setup
 
@@ -58,10 +94,45 @@ npm run wire            # Update peers only
 npm run test:e2e        # Run E2E test with LZ polling
 ```
 
+## What success looks like
+
+After a successful deployment, you should see:
+
+1. **Sui deploy** prints the package ID and OApp object ID.
+2. **EVM deploy** prints the BosphorAdapter contract address.
+3. **Wire** confirms peers are set on both chains.
+4. **E2E test** submits an intent on Sepolia, waits for LayerZero delivery, and confirms the `IntentReceived` event on Sui. Output ends with a success message and transaction hashes for both chains.
+
 ## Verify deployment
 
 After deployment, check:
 
-- **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` -- message status should be DELIVERED
-- **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` -- OApp object exists
-- **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` -- contract verified
+- **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` for message status DELIVERED
+- **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` for OApp object
+- **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` for contract verification
+
+## Troubleshooting
+
+### `nvm: command not found`
+
+Install nvm first: see [nvm install instructions](https://github.com/nvm-sh/nvm#installing-and-updating).
+
+### `forge: command not found`
+
+Foundry is not installed or not in PATH. Run `foundryup` and restart your terminal.
+
+### `sui: command not found`
+
+The Sui CLI is not installed. Follow the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install).
+
+### Deployment fails with "insufficient funds"
+
+Your wallet does not have enough testnet tokens. Request more from the faucets listed in [Testnet tokens](#testnet-tokens) above.
+
+### E2E test times out waiting for LZ delivery
+
+LayerZero testnet delivery can take 1 to 5 minutes. If the test times out, check [LayerZero Testnet Scan](https://testnet.layerzeroscan.com) for the transaction status. The message may still be in flight.
+
+### Sui transaction fails with "object version conflict"
+
+This happens when two Sui transactions reference the same object in quick succession. The deploy scripts include `waitForTransaction` calls to prevent this, but if you run manual transactions too quickly, wait a few seconds and retry.
