@@ -1,7 +1,9 @@
 # env
 .env
 .env.*
+!.env.example
 relayer/.env.*
+!relayer/.env.example
 
 # contracts
 contracts/evm/out/
@@ -39,6 +41,7 @@ relayer/sui-sent-proofs.json
 
 # tooling
 .gstack/
+.claude/worktrees/
 
 # misc
 .DS_Store
