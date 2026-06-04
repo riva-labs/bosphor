@@ -113,26 +113,4 @@ After deployment, check:
 
 ## Troubleshooting
 
-### `nvm: command not found`
-
-Install nvm first: see [nvm install instructions](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-### `forge: command not found`
-
-Foundry is not installed or not in PATH. Run `foundryup` and restart your terminal.
-
-### `sui: command not found`
-
-The Sui CLI is not installed. Follow the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install).
-
-### Deployment fails with "insufficient funds"
-
-Your wallet does not have enough testnet tokens. Request more from the faucets listed in [Testnet tokens](#testnet-tokens) above.
-
-### E2E test times out waiting for LZ delivery
-
-LayerZero testnet delivery can take 1 to 5 minutes. If the test times out, check [LayerZero Testnet Scan](https://testnet.layerzeroscan.com) for the transaction status. The message may still be in flight.
-
-### Sui transaction fails with "object version conflict"
-
-This happens when two Sui transactions reference the same object in quick succession. The deploy scripts include `waitForTransaction` calls to prevent this, but if you run manual transactions too quickly, wait a few seconds and retry.
+If you run into issues during setup or deployment, see the [Troubleshooting](troubleshooting.md) page for solutions to common problems including setup errors, deployment failures, relayer issues, and cross-chain debugging.
