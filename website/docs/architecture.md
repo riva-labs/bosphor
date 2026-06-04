@@ -44,35 +44,9 @@ title: Architecture
 
 ## EVM Adapter Contract (BosphorAdapter.sol)
 
-### Interface
+The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (emergency fallback). Intent IDs are deterministic hashes of sender, chain, payload, nonce, and deadline.
 
-| Function | Access | Description |
-|----------|--------|-------------|
-| `submitIntent(dstEid, payload, deadline, options)` | external payable | Submit storage intent via LayerZero |
-| `quote(dstEid, payload, deadline, options)` | view | Estimate LayerZero fee |
-| `confirmExecution(intentId, proof)` | onlyOwner | Emergency fallback to confirm execution |
-| `_lzReceive(origin, guid, message, executor, extraData)` | internal (LZ) | Primary proof path: type 1 message with (intentId, blobId, endEpoch) |
-| `setRelayer(relayer)` | onlyOwner | Update trusted relayer |
-| `getIntentId(sender, chainId, payload, nonce, deadline)` | pure | Compute intent ID |
-
-### Events
-
-- `IntentSubmitted(intentId, sender, targetChainId, payload, nonce, deadline)` -- emitted on submit
-- `IntentExecuted(intentId, proof)` -- emitted on confirmed execution
-- `RelayerUpdated(oldRelayer, newRelayer)` -- emitted on relayer change
-
-### Intent ID Computation
-
-```
-intentId = keccak256(abi.encodePacked(sender, uint64(dstEid), payload, nonce, deadline))
-```
-
-Nonce is per-sender, auto-incremented. Deadline is a Unix timestamp; expired intents revert.
-
-### Trust Boundary
-
-- **Trustless**: Intent registration, nonce enforcement, deadline checks, LZ message delivery (DVN-verified)
-- **Trusted**: Relayer triggers `lz_send_proof` on Sui, but proof delivery is DVN-verified via LayerZero. `confirmExecution` is owner-only emergency fallback.
+For the complete interface reference, function signatures, events, errors, and code examples, see [Contract Interface](contract-interface.md).
 
 ## Sui Walrus Executor
 

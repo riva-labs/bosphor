@@ -148,7 +148,7 @@ event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 import { ethers } from "ethers";
 
 const provider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL);
-const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+const signer = new ethers.Wallet(process.env.EVM_RELAYER_KEY, provider);
 
 const adapter = new ethers.Contract(
   ADAPTER_ADDRESS,
