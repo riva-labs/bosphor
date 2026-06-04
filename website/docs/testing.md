@@ -42,7 +42,7 @@ Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `Endp
 
 - `EndpointV2Mock` simulates LZ `send` and `lzReceive` without DVN verification
 - Type 1 wire format: 97 bytes (1 byte type + 32 intentId + 32 blobId + 32 endEpoch)
-- DST_EID in tests: `30378`
+- DST_EID in tests: `30378` (a mock value used only in unit tests; the real Sui testnet EID is `40378`, see [Deployment](deployment.md))
 
 ## Move tests (Sui)
 

@@ -30,6 +30,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
+          routeBasePath: '/',
           editUrl:
             'https://github.com/AliErcanOzgokce/bosphor/tree/main/website/',
         },
@@ -53,14 +54,12 @@ const config: Config = {
 
   themeConfig: {
     colorMode: {
+      defaultMode: 'dark',
       respectPrefersColorScheme: true,
     },
     navbar: {
       title: 'Bosphor',
-      logo: {
-        alt: 'Bosphor Logo',
-        src: 'img/logo.svg',
-      },
+      logo: undefined,
       items: [
         {
           type: 'docSidebar',
@@ -69,7 +68,7 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          to: '/docs/quickstart',
+          to: '/quickstart',
           label: 'Quickstart',
           position: 'left',
         },
@@ -95,15 +94,15 @@ const config: Config = {
           items: [
             {
               label: 'Introduction',
-              to: '/docs/',
+              to: '/',
             },
             {
               label: 'Architecture',
-              to: '/docs/architecture',
+              to: '/architecture',
             },
             {
               label: 'Deployment',
-              to: '/docs/deployment',
+              to: '/deployment',
             },
           ],
         },
@@ -129,7 +128,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright ${new Date().getFullYear()} Bosphor. Built with Docusaurus.`,
+      copyright: `Copyright ${new Date().getFullYear()} Bosphor.`,
     },
     prism: {
       theme: prismThemes.github,

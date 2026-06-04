@@ -19,13 +19,13 @@ export default function NotFound(): ReactNode {
             <p>Here are some helpful links to get you back on track:</p>
             <ul>
               <li>
-                <Link to="/docs/">Introduction</Link>
+                <Link to="/">Introduction</Link>
               </li>
               <li>
-                <Link to="/docs/quickstart">Quickstart</Link>
+                <Link to="/quickstart">Quickstart</Link>
               </li>
               <li>
-                <Link to="/docs/architecture">Architecture</Link>
+                <Link to="/architecture">Architecture</Link>
               </li>
             </ul>
           </div>

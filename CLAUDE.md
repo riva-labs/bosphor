@@ -81,6 +81,22 @@ Claude must enforce this rule continuously, without being asked.
 
 - NEVER create, update, or interact with Linear issues. We do NOT use Linear for task tracking. All issues and task tracking happen on GitHub Issues exclusively.
 
+# Commit frequency
+
+Commit early and often. Every meaningful unit of progress should be its own commit. Prefer many small, focused commits over few large ones. Examples of when to commit:
+
+- After adding or modifying a single function or method
+- After adding or updating a test
+- After fixing a single bug, even a one-liner
+- After updating a config file
+- After adding/updating a doc page
+- After each refactoring step (rename, extract, move), not after all of them at once
+- After adding a dependency
+
+The goal is a thick, readable commit history where each commit tells a clear story. A commit that changes one file and five lines is perfectly fine. Do not batch unrelated changes into a single commit.
+
+Still wait for the user to say "commit" before committing, but when they do, look for opportunities to split the work into multiple atomic commits rather than one big one.
+
 # Commit message rules
 
 - NEVER add `Co-Authored-By` trailers to commit messages.
