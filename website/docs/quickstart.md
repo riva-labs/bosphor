@@ -60,7 +60,7 @@ Or use the [Sui Testnet Faucet](https://faucet.testnet.sui.io/).
 ## Setup
 
 ```bash
-git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor.git
+git clone --recurse-submodules https://github.com/riva-labs/bosphor.git
 cd bosphor
 nvm use
 npm install

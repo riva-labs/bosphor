@@ -1,6 +1,13 @@
 {
   "name": "bosphor-relayer",
   "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/riva-labs/bosphor.git",
+    "directory": "relayer"
+  },
+  "homepage": "https://bosphor.xyz",
   "private": true,
   "engines": {
     "node": ">=22 <23"

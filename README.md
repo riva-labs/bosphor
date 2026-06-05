@@ -1,6 +1,6 @@
 # Bosphor
 
-[![CI](https://github.com/AliErcanOzgokce/bosphor/actions/workflows/ci.yml/badge.svg)](https://github.com/AliErcanOzgokce/bosphor/actions/workflows/ci.yml)
+[![CI](https://github.com/riva-labs/bosphor/actions/workflows/ci.yml/badge.svg)](https://github.com/riva-labs/bosphor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-22-brightgreen.svg)](https://nodejs.org/)
 
@@ -34,10 +34,17 @@ EVM ◄──_lzReceive──◄── LayerZero v2 (DVN) ◄── lz_send_proo
 | LZ Executor | Verified (DELIVERED) |
 | Mainnet | Planned |
 
+## Prerequisites
+
+- [Node.js 22](https://nodejs.org/) (pinned via `.nvmrc`)
+- [Foundry](https://book.getfoundry.sh/getting-started/installation) for Solidity compilation and testing
+- [Sui CLI](https://docs.sui.io/guides/developer/getting-started/sui-install) for Move compilation and deployment
+- [Docker](https://docs.docker.com/get-docker/) (optional, for containerized relayer)
+
 ## Quickstart
 
 ```bash
-git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor
+git clone --recurse-submodules https://github.com/riva-labs/bosphor
 cd bosphor && nvm use && npm install
 cp .env.example .env  # fill in keys
 npm run new-deployment
@@ -56,11 +63,11 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 
 ## Documentation
 
-- [Architecture](website/docs/architecture.md) -- system design and message flow
-- [Contract Interface](website/docs/contract-interface.md) -- EVM and Sui function reference
-- [Deployment](website/docs/deployment.md) -- setup and deployment guide
-- [Relayer](website/docs/relayer.md) -- operator guide, configuration, health endpoint
-- [Testing](website/docs/testing.md) -- test suites, CI pipeline, E2E verification
+- [Architecture](https://docs.bosphor.xyz/architecture) — system design and message flow
+- [Contract Interface](https://docs.bosphor.xyz/contract-interface) — EVM and Sui function reference
+- [Deployment](https://docs.bosphor.xyz/deployment) — setup and deployment guide
+- [Relayer](https://docs.bosphor.xyz/relayer) — operator guide, configuration, health endpoint
+- [Testing](https://docs.bosphor.xyz/testing) — test suites, CI pipeline, E2E verification
 
 ## Testnet Evidence
 

@@ -41,7 +41,10 @@ relayer/sui-sent-proofs.json
 
 # tooling
 .gstack/
-.claude/worktrees/
+.claude/
+.cursor/
+CLAUDE.md
+codex.md
 
 # misc
 .DS_Store
