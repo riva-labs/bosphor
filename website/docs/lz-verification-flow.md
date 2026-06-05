@@ -17,14 +17,7 @@ Both paths are independently verified by LayerZero's Decentralized Verifier Netw
 
 ## Forward path: EVM to Sui
 
-```
-User                    EVM                     LayerZero DVN           Sui
-  |                      |                          |                    |
-  |-- submitIntent() --> |                          |                    |
-  |                      |-- _lzSend(message) ----> |                    |
-  |                      |                          |-- lz_receive() --> |
-  |                      |                          |                    |-- emit IntentReceived
-```
+![Forward Path: EVM to Sui](./diagrams/forward-path.svg)
 
 ### Step by step
 
@@ -46,14 +39,7 @@ Total: 1 + 32 + 32 + len(payload) + 32 bytes.
 
 ## Return path: Sui to EVM
 
-```
-Relayer                 Sui                     LayerZero DVN           EVM
-  |                      |                          |                    |
-  |-- lz_send_proof() -> |                          |                    |
-  |                      |-- PTB via LZ endpoint -> |                    |
-  |                      |                          |-- _lzReceive() --> |
-  |                      |                          |                    |-- mark executed
-```
+![Return Path: Sui to EVM](./diagrams/return-path.svg)
 
 ### Step by step
 
