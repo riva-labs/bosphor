@@ -2,6 +2,12 @@
   "name": "bosphor",
   "version": "0.1.0",
   "description": "Cross-chain storage intent routing for Walrus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/riva-labs/bosphor.git"
+  },
+  "homepage": "https://bosphor.xyz",
   "private": true,
   "type": "module",
   "engines": {

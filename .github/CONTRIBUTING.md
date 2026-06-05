@@ -11,7 +11,7 @@
 ### Local Environment
 
 ```bash
-git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor
+git clone --recurse-submodules https://github.com/riva-labs/bosphor
 cd bosphor
 nvm use
 npm install
@@ -62,4 +62,4 @@ Scope examples: `contracts`, `sui`, `relayer`, `scripts`, `ci`, `docs`.
 
 ## Questions
 
-Open a [GitHub Discussion](https://github.com/AliErcanOzgokce/bosphor/discussions) for questions about usage or architecture.
+Open a [GitHub Discussion](https://github.com/riva-labs/bosphor/discussions) for questions about usage or architecture.

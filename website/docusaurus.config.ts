@@ -11,10 +11,10 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://AliErcanOzgokce.github.io',
-  baseUrl: '/bosphor/',
+  url: 'https://docs.bosphor.xyz',
+  baseUrl: '/',
 
-  organizationName: 'AliErcanOzgokce',
+  organizationName: 'riva-labs',
   projectName: 'bosphor',
 
   onBrokenLinks: 'throw',
@@ -32,7 +32,7 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl:
-            'https://github.com/AliErcanOzgokce/bosphor/tree/main/website/',
+            'https://github.com/riva-labs/bosphor/tree/main/website/',
         },
         blog: false,
         theme: {
@@ -89,7 +89,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/AliErcanOzgokce/bosphor',
+          href: 'https://github.com/riva-labs/bosphor',
           label: 'GitHub',
           position: 'right',
         },
@@ -127,7 +127,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/AliErcanOzgokce/bosphor',
+              href: 'https://github.com/riva-labs/bosphor',
             },
             {
               label: 'Walrus',
