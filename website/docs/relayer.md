@@ -7,12 +7,11 @@ title: Relayer Operator Guide
 
 The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both chains for events, uploads payloads to Walrus, executes storage intents on Sui, and sends execution proofs back to EVM via LayerZero.
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Set up and run the Bosphor relayer service. Copy `relayer/.env.example` to `relayer/.env` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run `cd relayer && npm install && npm run start:dev` and verify the health endpoint responds at GET /health.
-
-:::
+<AiPrompt>
+{`Set up and run the Bosphor relayer service. Copy \`relayer/.env.example\` to \`relayer/.env\` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run \`cd relayer && npm install && npm run start:dev\` and verify the health endpoint responds at GET /health.`}
+</AiPrompt>
 
 ## How it works
 
