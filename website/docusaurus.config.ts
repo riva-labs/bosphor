@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'Bosphor',
   tagline: 'Cross-chain storage intent routing for Walrus',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/favicon.png',
 
   future: {
     v4: true,
@@ -70,7 +70,12 @@ const config: Config = {
     },
     navbar: {
       title: 'Bosphor',
-      logo: undefined,
+      logo: {
+        alt: 'Bosphor',
+        src: 'img/logo.png',
+        width: 32,
+        height: 32,
+      },
       items: [
         {
           type: 'docSidebar',
