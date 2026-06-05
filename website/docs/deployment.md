@@ -5,12 +5,11 @@ title: Deployment Guide
 
 # Deployment Guide
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Deploy the Bosphor contracts to Sepolia and Sui testnet. My .env file is already configured with RPC URLs and private keys. Run `npm run deploy:sui` first, then `npm run deploy:evm`, then `npm run wire` to set peers on both chains. After deployment, verify the contracts on Etherscan and SuiScan, and run `npm run test:e2e` to confirm the full round-trip works.
-
-:::
+<AiPrompt>
+{`Deploy the Bosphor contracts to Sepolia and Sui testnet. My .env file is already configured with RPC URLs and private keys. Run \`npm run deploy:sui\` first, then \`npm run deploy:evm\`, then \`npm run wire\` to set peers on both chains. After deployment, verify the contracts on Etherscan and SuiScan, and run \`npm run test:e2e\` to confirm the full round-trip works.`}
+</AiPrompt>
 
 ## Prerequisites
 

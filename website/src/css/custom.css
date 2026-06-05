@@ -151,6 +151,15 @@ body::before {
   border-top: 1px solid #1A2540;
 }
 
+/* Diagram sizing */
+.markdown img[alt*="Architecture"],
+.markdown img[alt*="Forward Path"],
+.markdown img[alt*="Return Path"] {
+  max-height: 350px;
+  width: 100%;
+  object-fit: contain;
+}
+
 /* Scrollbar styling for dark mode */
 [data-theme='dark'] ::-webkit-scrollbar {
   width: 8px;
