@@ -1,0 +1,70 @@
+direction: right
+
+user: User {
+  shape: person
+}
+
+evm: EVM (Sepolia) {
+  adapter: BosphorAdapter {
+    submit: submitIntent()
+    lzSend: _lzSend()
+    lzReceive: _lzReceive()
+    executed: IntentExecuted
+  }
+}
+
+lz1: LayerZero v2 {
+  shape: cloud
+  style.fill: "#E8F0FE"
+  style.font-color: "#333"
+  dvn: DVN Verification
+}
+
+sui: Sui (Testnet) {
+  receiver: lz_receiver {
+    lzReceive: lz_receive()
+    event: IntentReceived
+    sendProof: lz_send_proof()
+  }
+  executor: walrus_executor {
+    store: execute_store()
+  }
+  walrus: Walrus Blob {
+    shape: cylinder
+    style.fill: "#E3F2FD"
+    style.font-color: "#333"
+  }
+}
+
+relayer: Relayer {
+  shape: hexagon
+  style.fill: "#FFF3E0"
+  style.font-color: "#333"
+}
+
+lz2: LayerZero v2 {
+  shape: cloud
+  style.fill: "#E8F0FE"
+  style.font-color: "#333"
+  dvn: DVN Verification
+}
+
+# Forward path
+user -> evm.adapter.submit: 1. Submit intent
+evm.adapter.submit -> evm.adapter.lzSend
+evm.adapter.lzSend -> lz1.dvn: 2. abi.encode\n(intentId, sender,\npayload, deadline)
+lz1.dvn -> sui.receiver.lzReceive: 3. Deliver message
+sui.receiver.lzReceive -> sui.receiver.event
+
+# Relayer processing
+sui.receiver.event -> relayer: 4. Poll events {
+  style.stroke-dash: 3
+}
+relayer -> sui.executor.store: 5. Execute storage
+sui.executor.store -> sui.walrus: Store blob
+
+# Return path
+relayer -> sui.receiver.sendProof: 6. Send proof
+sui.receiver.sendProof -> lz2.dvn: |md type 1 msg\n(blobId, endEpoch)|
+lz2.dvn -> evm.adapter.lzReceive: 7. Deliver proof
+evm.adapter.lzReceive -> evm.adapter.executed

@@ -7,33 +7,7 @@ title: Architecture
 
 ## System Overview
 
-```
-                    EVM (Sepolia)                           Sui (Testnet)
-               +------------------+                   +------------------+
-               | BosphorAdapter   |                   | lz_receiver      |
-  User ------->| submitIntent()   |                   | lz_receive()     |
-               |                  |   abi.encode      |                  |
-               | _lzSend() ------+--(intentId,--------+--> IntentReceived|
-               |                  |   sender,         |      event       |
-               |                  |   payload,        +--------+---------+
-               |                  |   deadline)                |
-               |                  |                            | Relayer
-               |                  |                            v
-               |                  |                   +------------------+
-               |                  |                   | walrus_executor  |
-               |                  |                   | execute_store()  |
-               |                  |                   |       |          |
-               |                  |                   |       v          |
-               |                  |                   |  Walrus blob     |
-               |                  |                   |  (deletable)     |
-               |                  |                   +--------+---------+
-               |                  |                            | Relayer
-               |                  |                   +--------+---------+
-               |                  |                   | lz_send_proof()  |
-               | _lzReceive()  <--+-------------------| LZ type 1 msg   |
-               | IntentExecuted   |   {blobId,endEpoch}+------------------+
-               +------------------+
-```
+![Bosphor System Architecture](./diagrams/architecture.svg)
 
 ### Message Flow
 
