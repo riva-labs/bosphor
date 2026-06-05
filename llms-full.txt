@@ -1,0 +1,2110 @@
+# Bosphor
+
+> Cross-chain storage intent routing for Walrus
+
+This file contains all documentation content in a single document following the llmstxt.org standard.
+
+## Architecture
+
+# Bosphor Architecture
+
+## System Overview
+
+![Bosphor System Architecture](./diagrams/architecture.svg)
+
+### Message Flow
+
+1. **EVM -> Sui** (LayerZero): `submitIntent` encodes `(intentId, sender, payload, deadline)` via `abi.encode` and sends through LayerZero v2 OApp messaging.
+2. **Sui lz_receive**: LZ executor builds a PTB using `ptb_builder::build_lz_receive_ptb`, calls `lz_receiver::lz_receive` which validates peer + endpoint and emits `IntentReceived`.
+3. **Relayer**: Polls `IntentReceived` events on Sui, uploads payload to Walrus, calls `execute_store`.
+4. **Sui -> EVM** (LayerZero): Relayer calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero back to EVM. The EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks the intent as executed.
+
+## EVM Adapter Contract (BosphorAdapter.sol)
+
+The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (emergency fallback). Intent IDs are deterministic hashes of sender, chain, payload, nonce, and deadline.
+
+For the complete interface reference, function signatures, events, errors, and code examples, see [Contract Interface](contract-interface.md).
+
+## Sui Walrus Executor
+
+### lz_receiver.move
+
+Receives cross-chain messages from EVM via LayerZero v2 executor.
+
+- `lz_receive(config, oapp, call, ctx)`: Validates LZ Call hot-potato, extracts intent ID from ABI-encoded message (first 32 bytes), records in `received_intents` table, emits `IntentReceived`.
+- `register_oapp(config, oapp, endpoint, info, ctx)`: Entry function that registers the OApp with the LZ endpoint using the internal CallCap.
+- `is_received(config, intent_id)`: View function to check if an intent was received.
+
+### walrus_executor.move
+
+Executes storage operations on Walrus.
+
+- `execute_store(config, intent_id, blob, deadline_ms, clock, sender, ctx)`: Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, transfers blob and receipt to original sender.
+- All blobs are stored as **deletable** per project policy.
+
+### ptb_builder.move
+
+Generates PTB metadata for the LZ executor.
+
+- `lz_receive_info(config, oapp)`: Returns `OAppInfoV1`-encoded bytes containing the PTB construction instructions. The executor uses this to dynamically build `lz_receive` transactions.
+- `build_lz_receive_ptb(config, oapp, call)`: Called by the executor during simulation to produce the actual `MoveCall` vector for `lz_receive`.
+
+**Critical**: `lz_receive_info` must return `OAppInfoV1`-formatted bytes (not raw MoveCall bytes). The LZ executor deserializes the response as `OAppInfoV1 { oapp_object, next_nonce_info, lz_receive_info, extra_info }`.
+
+## Two-Step Verification Pipeline
+
+### Step 1: Intent Delivery (EVM -> Sui)
+
+1. `submitIntent` calls `_lzSend` with 4-field ABI-encoded message
+2. LayerZero DVN (LayerZero Labs) verifies the message on Sui endpoint
+3. Confirmation depth: 2 blocks
+4. LZ executor reads `OAppInfoV1` from endpoint registry, builds PTB, executes `lz_receive`
+
+### Step 2: Proof Verification (Sui -> EVM)
+
+DVN-verified proof delivery:
+1. Relayer observes `IntentReceived` event on Sui
+2. Uploads payload to Walrus (deletable blob)
+3. Calls `execute_store` on Sui
+4. Calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero
+5. EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks intent as executed
+
+Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
+
+Emergency fallback: owner can call `confirmExecution` directly on EVM.
+
+### OAppInfoV1 Registration
+
+The OApp must register with the LZ endpoint using `OAppInfoV1::encode()` format:
+
+```
+[version: u16 = 1][BCS(OAppInfoV1 {
+    oapp_object: address,
+    next_nonce_info: vector<u8>,
+    lz_receive_info: vector<u8>,
+    extra_info: vector<u8>,
+})]
+```
+
+Where `lz_receive_info` itself contains:
+```
+[version: u16 = 1][BCS(vector<MoveCall>)]
+```
+
+## Known Limitations
+
+| Limitation | Severity | Resolution Plan |
+|-----------|----------|-----------------|
+| Relayer is centralized (trusted operator) | Medium | Permissionless relayer auction (Milestone 4) |
+| No origin-chain payment flow | Medium | Escrow-based payment (Milestone 4) |
+| Sui testnet only | Low | Mainnet after Milestone 2 |
+| Single DVN (LZ Labs) | Low | Multi-DVN in hardening phase |
+| Relayer triggers proof verification | Low | Permissionless relayer auction (Milestone 4) |
+
+---
+
+## Changelog
+
+
+## v0.1.0, Milestone 1: Cross-Chain Execution Core
+
+The initial release establishing the complete cross-chain storage intent pipeline from EVM to Walrus and back.
+
+### Added
+
+- **EVM Adapter** (`BosphorAdapter.sol`): Solidity contract on Sepolia for submitting storage intents via LayerZero v2. Includes fee quoting, deadline enforcement, nonce-based intent IDs, and owner-only emergency `confirmExecution`. See [Contract Interface](contract-interface.md).
+
+- **Sui Walrus Executor** (`lz_receiver`, `walrus_executor`, `ptb_builder`): Move package on Sui testnet that receives cross-chain intents, executes Walrus blob storage, and sends DVN-verified proofs back to EVM. See [Sui Executor](sui-executor.md).
+
+- **Two-step LayerZero verification**: Both legs of the message flow (intent delivery EVM to Sui, proof return Sui to EVM) are verified by LayerZero DVNs. See [LZ Verification Flow](lz-verification-flow.md).
+
+- **Relayer service**: NestJS service that bridges Sui and EVM. Polls for events, uploads payloads to Walrus, executes storage, and sends proofs. Includes health monitoring, TTL-based deduplication, fee quoting with 10% buffer, and retry logic. See [Relayer](relayer.md).
+
+- **E2E test suite**: Full round-trip test that submits an intent on Sepolia, waits for LayerZero delivery to Sui, and confirms proof receipt back on EVM. See [Testing](testing.md).
+
+- **CI pipeline**: Automated testing on every push: Forge tests, Move tests, and relayer build and unit tests.
+
+- **Documentation site**: Docusaurus-powered docs with architecture guides, contract reference, deployment instructions, and operator guides.
+
+### Deployed contracts (testnet)
+
+| Component | Address |
+|-----------|---------|
+| BosphorAdapter (Sepolia) | `0xbC7EF2F021F517d871282C2bb512C741ad2958c3` |
+| Sui Package | `0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656` |
+| Sui OApp Object | `0x9631910c0bc687a74f0b99dd88d2f0033c393aa36735095de8cce67d5eeb27b0` |
+
+### Key technical decisions
+
+- **OAppInfoV1 format**: `lz_receive_info` must be wrapped in `OAppInfoV1::encode()`, not returned as raw MoveCall bytes. This was the critical fix in v5.
+- **Deletable blobs**: All Walrus blobs are stored as deletable per project policy.
+- **OpenZeppelin v4.9.6**: LayerZero v2 OApp requires OZ v4, not v5, due to `msg.sender`-based `Ownable`.
+- **Node.js 22**: Required for `tsx` and `@mysten/sui` compatibility.
+
+---
+
+## Contract Interface Reference
+
+
+## IBosphorAdapter (Interface)
+
+Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface includes all external function signatures, events, errors, and structs needed for integration.
+
+```solidity
+import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
+```
+
+## BosphorAdapter.sol (EVM)
+
+`BosphorAdapter` implements `IBosphorAdapter` and extends the LayerZero `OApp`.
+
+### submitIntent
+
+Submit a storage intent to be routed to Walrus via LayerZero.
+
+```solidity
+function submitIntent(
+    uint32 _dstEid,
+    bytes calldata _payload,
+    uint256 _deadline,
+    bytes calldata _options
+) external payable returns (bytes32 intentId);
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `_dstEid` | uint32 | Destination chain EID. Sui testnet: `40378` |
+| `_payload` | bytes | Arbitrary data to store on Walrus |
+| `_deadline` | uint256 | Unix timestamp after which the intent expires |
+| `_options` | bytes | LayerZero execution options (gas limit, etc.) |
+
+**Returns**: `intentId`, a deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
+
+**Emits**: `IntentSubmitted(intentId, sender, targetChainId, payload, nonce, deadline)`
+
+### quote
+
+Estimate the LayerZero fee for submitting an intent.
+
+```solidity
+function quote(
+    uint32 _dstEid,
+    bytes calldata _payload,
+    uint256 _deadline,
+    bytes calldata _options
+) external view returns (MessagingFee memory);
+```
+
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }` -- pass `nativeFee` as `msg.value` to `submitIntent`.
+
+### confirmExecution
+
+Emergency fallback to manually confirm intent execution. Owner-only, for disaster recovery.
+The primary proof path is `_lzReceive` with a type 1 message from Sui.
+
+```solidity
+function confirmExecution(
+    bytes32 _intentId,
+    bytes calldata _proof
+) external; // onlyOwner
+```
+
+**Emits**: `IntentExecuted(intentId, proof)`
+
+### _lzReceive (internal)
+
+Handles incoming LayerZero messages from the remote chain. The first byte is a message type discriminator.
+
+**Type 1 (execution proof):** Remaining bytes are ABI-encoded as `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The intent is marked as executed and `IntentExecuted` is emitted with `abi.encode(blobId, endEpoch)` as proof.
+
+Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
+
+### setRelayer
+
+Update the trusted relayer address. Owner-only.
+
+```solidity
+function setRelayer(address _relayer) external; // onlyOwner
+```
+
+**Emits**: `RelayerUpdated(oldRelayer, newRelayer)`
+
+### getIntentId
+
+Compute the deterministic intent ID for a given set of parameters.
+
+```solidity
+function getIntentId(
+    address _sender,
+    uint64 _targetChainId,
+    bytes calldata _payload,
+    uint256 _nonce,
+    uint256 _deadline
+) external pure returns (bytes32);
+```
+
+### View Functions
+
+```solidity
+function trustedRelayer() external view returns (address);
+function intents(bytes32 intentId) external view returns (bool);
+function executed(bytes32 intentId) external view returns (bool);
+function intentDeadlines(bytes32 intentId) external view returns (uint256);
+function nonces(address sender) external view returns (uint256);
+```
+
+### Errors
+
+```solidity
+error DeadlineExpired();
+error IntentAlreadyExists();
+error IntentNotFound();
+error AlreadyExecuted();
+error ZeroAddress();
+error UnknownMessageType();
+```
+
+## Events
+
+```solidity
+event IntentSubmitted(
+    bytes32 indexed intentId,
+    address indexed sender,
+    uint64 targetChainId,
+    bytes payload,
+    uint256 nonce,
+    uint256 deadline
+);
+
+event IntentExecuted(bytes32 indexed intentId, bytes proof);
+
+event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
+```
+
+## Usage Examples (ethers.js)
+
+### Submit an intent
+
+```typescript
+import { ethers } from "ethers";
+
+const provider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL);
+const signer = new ethers.Wallet(process.env.EVM_RELAYER_KEY, provider);
+
+const adapter = new ethers.Contract(
+  ADAPTER_ADDRESS,
+  [
+    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+  ],
+  signer
+);
+
+const dstEid = 40378; // Sui testnet
+const payload = ethers.toUtf8Bytes("Hello Walrus");
+const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+const options = "0x00030100110100000000000000000000000000030d40";
+
+// Get fee estimate
+const fee = await adapter.quote(dstEid, payload, deadline, options);
+
+// Submit intent
+const tx = await adapter.submitIntent(dstEid, payload, deadline, options, {
+  value: fee.nativeFee,
+});
+const receipt = await tx.wait();
+console.log("Intent submitted:", receipt.hash);
+```
+
+### Listen for events
+
+```typescript
+// Listen for new intents
+adapter.on("IntentSubmitted", (intentId, sender, targetChainId, payload, nonce, deadline) => {
+  console.log("New intent:", intentId);
+  console.log("Sender:", sender);
+  console.log("Payload:", ethers.toUtf8String(payload));
+});
+
+// Listen for execution confirmations
+adapter.on("IntentExecuted", (intentId, proof) => {
+  const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
+    ["bytes32", "uint256"],
+    proof
+  );
+  console.log("Intent executed:", intentId);
+  console.log("Walrus blob ID:", blobId);
+  console.log("Expiry epoch:", endEpoch.toString());
+});
+```
+
+## Usage Examples (@mysten/sui)
+
+### Call execute_store
+
+The relayer calls `execute_store` after uploading the payload to Walrus and receiving a certified blob.
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+const keypair = Ed25519Keypair.fromSecretKey(RELAYER_SECRET_KEY);
+
+const tx = new Transaction();
+
+tx.moveCall({
+  target: `${PACKAGE_ID}::walrus_executor::execute_store`,
+  arguments: [
+    tx.object(EXECUTOR_CONFIG_ID),
+    tx.pure.vector("u8", intentIdBytes),   // 32-byte intent ID
+    tx.object(certifiedBlobId),            // Walrus Blob object
+    tx.pure.u64(deadlineMs),               // deadline in milliseconds
+    tx.object("0x6"),                      // Sui Clock object
+    tx.pure.address(senderAddress),        // original sender
+  ],
+});
+
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+});
+console.log("execute_store tx:", result.digest);
+```
+
+### Query intent status
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+
+// Query IntentReceived events
+const events = await client.queryEvents({
+  query: {
+    MoveEventType: `${PACKAGE_ID}::lz_receiver::IntentReceived`,
+  },
+  limit: 10,
+  order: "descending",
+});
+
+for (const event of events.data) {
+  const { intent_id, src_eid, nonce } = event.parsedJson as {
+    intent_id: number[];
+    src_eid: number;
+    nonce: string;
+  };
+  console.log("Intent:", Buffer.from(intent_id).toString("hex"));
+  console.log("Source EID:", src_eid, "Nonce:", nonce);
+}
+```
+
+## Sui Modules
+
+### lz_receiver
+
+Receives cross-chain intent messages from EVM and sends execution proofs back.
+
+#### lz_receive
+
+Called by the LZ executor via PTB. Consumes the hot-potato `Call`, validates the message through the OApp (peer + endpoint checks), extracts the intent ID, records the intent, and emits `IntentReceived`.
+
+```move
+public fun lz_receive(
+    config: &mut LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<LzReceiveParam, Void>,
+    ctx: &mut TxContext,
+)
+```
+
+Message format from EVM (`abi.encode`):
+
+| Offset | Length | Field |
+|--------|--------|-------|
+| 0:32 | 32 | intentId (bytes32) |
+| 32:64 | 32 | sender (address, left-padded) |
+| 64:96 | 32 | offset to payload data |
+| 96:128 | 32 | deadline (uint256) |
+| 128:160 | 32 | payload length |
+| 160:... | variable | payload data |
+
+**Aborts**: `EInvalidMessageLength` (1) if message < 32 bytes, `EIntentAlreadyReceived` (0) if duplicate.
+
+#### lz_send_proof
+
+Initiates an LZ send of the execution proof back to EVM. Builds the type-1 proof message and calls `oapp::lz_send()`. Returns a hot-potato `Call` that must be routed through the LZ endpoint in the same PTB, then finalized via `confirm_lz_send_proof`.
+
+```move
+public fun lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    intent_id: vector<u8>,    // 32 bytes
+    blob_id: vector<u8>,      // 32 bytes
+    end_epoch: u64,
+    dst_eid: u32,             // e.g. 40161 for Sepolia
+    options: vector<u8>,
+    native_fee: Coin<SUI>,
+    ctx: &mut TxContext,
+): Call<SendParam, MessagingReceipt>
+```
+
+**Aborts**: `EUnauthorizedRelayer` (2) if caller is not the relayer, `EIntentNotReceived` (6) if intent not recorded.
+
+#### confirm_lz_send_proof
+
+Finalizes the LZ send and handles coin refunds. Must be called after the `Call` from `lz_send_proof` has been executed by the LZ endpoint. Emits `ProofSent`.
+
+```move
+public fun confirm_lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    call: Call<SendParam, MessagingReceipt>,
+    ctx: &mut TxContext,
+)
+```
+
+#### quote_proof
+
+Estimates the LZ fee for sending a proof message. Returns a hot-potato `Call` that must be routed through the endpoint, then finalized via `confirm_quote_proof`.
+
+```move
+public fun quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    options: vector<u8>,
+    ctx: &mut TxContext,
+): Call<QuoteParam, MessagingFee>
+```
+
+#### confirm_quote_proof
+
+Finalizes a quote and returns the estimated messaging fee.
+
+```move
+public fun confirm_quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<QuoteParam, MessagingFee>,
+): MessagingFee
+```
+
+#### set_relayer
+
+Updates the authorized relayer address. Admin-only (requires `AdminCap`).
+
+```move
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+)
+```
+
+**Aborts**: `EZeroAddress` (5) if `new_relayer` is `@0x0`.
+
+#### is_received
+
+Returns `true` if an intent with the given ID has been received.
+
+```move
+public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool
+```
+
+### lz_receiver Events
+
+#### IntentReceived
+
+Emitted when `lz_receive` processes an incoming LZ message.
+
+```move
+public struct IntentReceived has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes, matches EVM intentId
+    payload: vector<u8>,     // Full ABI-encoded message
+    src_eid: u32,            // Source chain EID (40161 for Sepolia)
+    nonce: u64,              // LZ message nonce
+    guid: Bytes32,           // LZ message GUID
+}
+```
+
+#### ProofSent
+
+Emitted when `confirm_lz_send_proof` completes a proof send back to EVM.
+
+```move
+public struct ProofSent has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes
+    blob_id: vector<u8>,     // 32 bytes
+    end_epoch: u64,          // Walrus blob expiry epoch
+    dst_eid: u32,            // Destination EID (40161 for Sepolia)
+    nonce: u64,              // LZ message nonce
+    guid: Bytes32,           // LZ message GUID
+}
+```
+
+### lz_receiver Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | `EIntentAlreadyReceived` | Intent with this ID was already received |
+| 1 | `EInvalidMessageLength` | Message payload shorter than 32 bytes |
+| 2 | `EUnauthorizedRelayer` | Caller is not the authorized relayer |
+| 3 | `EInvalidIntentIdLength` | intent_id must be exactly 32 bytes |
+| 4 | `EInvalidBlobIdLength` | blob_id must be exactly 32 bytes |
+| 5 | `EZeroAddress` | Relayer address must not be zero |
+| 6 | `EIntentNotReceived` | Intent must exist before sending proof |
+
+### walrus_executor
+
+#### execute_store
+
+Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
+
+```move
+entry fun execute_store(
+    config: &mut ExecutorConfig,
+    intent_id: vector<u8>,
+    blob: Blob,
+    deadline_ms: u64,
+    clock: &Clock,
+    sender: address,
+    ctx: &mut TxContext,
+)
+```
+
+**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3).
+
+#### StorageExecuted
+
+Emitted when `execute_store` records a Walrus blob.
+
+```move
+public struct StorageExecuted has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes
+    walrus_blob_id: u256,    // Walrus blob identifier
+    end_epoch: u32,          // Blob expiry epoch
+    executor: address,       // Relayer address
+}
+```
+
+## Wire Formats
+
+### Step 1: Intent Delivery (EVM to Sui)
+
+`abi.encode(intentId, sender, payload, deadline)` sent via `_lzSend`.
+
+### Step 2: Proof Verification (Sui to EVM)
+
+Type 1 proof message: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
+
+Total: 97 bytes (1 type byte + 32 intentId + 32 blobId + 32 endEpoch).
+
+## LZ Options
+
+Default options for Sui delivery:
+
+```
+0x00030100110100000000000000000000000000030d40
+```
+
+This encodes: execution type 3 (lzReceive), gas limit 200,000.
+
+---
+
+## dApp Integration Tutorial
+
+
+Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and listen for execution confirmations.
+
+:::tip AI-Assisted Setup
+Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+
+> Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the `quote` function, (2) submit a storage intent via `submitIntent` with the quoted fee as msg.value, and (3) listen for the `IntentExecuted` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under `contracts/evm/`. The destination EID for Sui testnet is 40378.
+
+:::
+
+## ethers.js v6
+
+### Setup
+
+```typescript
+import { ethers } from "ethers";
+
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+
+const ADAPTER_ADDRESS = "0x..."; // Your deployed BosphorAdapter address
+const DST_EID = 40378; // Sui testnet
+
+const adapter = new ethers.Contract(
+  ADAPTER_ADDRESS,
+  [
+    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+    "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
+  ],
+  signer
+);
+```
+
+### Estimate fees
+
+Always call `quote` before submitting to get the exact LayerZero fee:
+
+```typescript
+const payload = ethers.toUtf8Bytes("data to store on Walrus");
+const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+const options = "0x00030100110100000000000000000000000000030d40"; // default LZ options
+
+const fee = await adapter.quote(DST_EID, payload, deadline, options);
+console.log("LZ fee:", ethers.formatEther(fee.nativeFee), "ETH");
+```
+
+### Submit an intent
+
+```typescript
+const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
+  value: fee.nativeFee,
+});
+const receipt = await tx.wait();
+
+// Extract intentId from the event
+const event = receipt.logs
+  .map((log) => {
+    try { return adapter.interface.parseLog(log); } catch { return null; }
+  })
+  .find((e) => e?.name === "IntentSubmitted");
+
+if (!event) throw new Error("IntentSubmitted event not found in receipt");
+const intentId = event.args.intentId;
+console.log("Intent submitted:", intentId);
+```
+
+### Listen for execution confirmation
+
+```typescript
+adapter.on("IntentExecuted", (intentId, proof) => {
+  const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
+    ["bytes32", "uint256"],
+    proof
+  );
+  console.log("Intent executed:", intentId);
+  console.log("Walrus blob ID:", blobId);
+  console.log("Storage expires at epoch:", endEpoch.toString());
+});
+```
+
+### Full example: submit and wait
+
+```typescript
+async function submitAndWait(data: string, deadlineSeconds: number = 3600) {
+  const payload = ethers.toUtf8Bytes(data);
+  const deadline = Math.floor(Date.now() / 1000) + deadlineSeconds;
+  const options = "0x00030100110100000000000000000000000000030d40";
+
+  // 1. Estimate fee
+  const fee = await adapter.quote(DST_EID, payload, deadline, options);
+
+  // 2. Submit intent
+  const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
+    value: fee.nativeFee,
+  });
+  const receipt = await tx.wait();
+
+  const event = receipt.logs
+    .map((log) => {
+      try { return adapter.interface.parseLog(log); } catch { return null; }
+    })
+    .find((e) => e?.name === "IntentSubmitted");
+
+  if (!event) throw new Error("IntentSubmitted event not found in receipt");
+  const intentId = event.args.intentId;
+
+  // 3. Wait for execution confirmation (with timeout)
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      adapter.removeAllListeners("IntentExecuted");
+      reject(new Error("Timed out waiting for IntentExecuted event"));
+    }, deadlineSeconds * 1000);
+
+    const filter = adapter.filters.IntentExecuted(intentId);
+    adapter.once(filter, (intentId, proof) => {
+      clearTimeout(timeout);
+      const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
+        ["bytes32", "uint256"],
+        proof
+      );
+      resolve({ intentId, blobId, endEpoch: endEpoch.toString() });
+    });
+  });
+}
+```
+
+## viem
+
+### Setup
+
+```typescript
+import { createPublicClient, createWalletClient, http, custom, parseAbi, toHex } from "viem";
+import { sepolia } from "viem/chains";
+
+const ADAPTER_ADDRESS = "0x..." as const; // Your deployed BosphorAdapter address
+const DST_EID = 40378; // Sui testnet
+
+const abi = parseAbi([
+  "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+  "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
+  "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+  "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
+]);
+
+const publicClient = createPublicClient({
+  chain: sepolia,
+  transport: http(),
+});
+
+const walletClient = createWalletClient({
+  chain: sepolia,
+  transport: custom(window.ethereum),
+});
+```
+
+### Estimate fees
+
+```typescript
+const payload = new TextEncoder().encode("data to store on Walrus");
+const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
+const options = "0x00030100110100000000000000000000000000030d40" as `0x${string}`;
+
+const fee = await publicClient.readContract({
+  address: ADAPTER_ADDRESS,
+  abi,
+  functionName: "quote",
+  args: [DST_EID, toHex(payload), deadline, options],
+});
+
+console.log("LZ fee:", fee.nativeFee, "wei");
+```
+
+### Submit an intent
+
+```typescript
+const [account] = await walletClient.getAddresses();
+
+const hash = await walletClient.writeContract({
+  address: ADAPTER_ADDRESS,
+  abi,
+  functionName: "submitIntent",
+  args: [DST_EID, toHex(payload), deadline, options],
+  value: fee.nativeFee,
+  account,
+});
+
+const receipt = await publicClient.waitForTransactionReceipt({ hash });
+console.log("Intent submitted in block:", receipt.blockNumber);
+```
+
+### Watch for execution confirmation
+
+```typescript
+const unwatch = publicClient.watchContractEvent({
+  address: ADAPTER_ADDRESS,
+  abi,
+  eventName: "IntentExecuted",
+  onLogs: (logs) => {
+    for (const log of logs) {
+      console.log("Intent executed:", log.args.intentId);
+      console.log("Proof:", log.args.proof);
+    }
+  },
+});
+
+// Call unwatch() to stop listening
+```
+
+## Displaying intent status to users
+
+A typical UI flow for showing intent status:
+
+1. **Pending**: User clicks "Store", transaction is submitted. Show a spinner.
+2. **Submitted**: Transaction is confirmed on EVM. Show the intent ID and a link to [LayerZero Scan](https://testnet.layerzeroscan.com).
+3. **Delivering**: LayerZero is verifying and delivering the message. Poll LZ Scan or wait for the event.
+4. **Storing**: The relayer is uploading to Walrus and executing storage on Sui.
+5. **Confirmed**: `IntentExecuted` event received. Show the Walrus blob ID and expiry epoch.
+
+The full round-trip from submission to confirmation typically takes 2-10 minutes on testnet, depending on LayerZero DVN verification time and relayer processing speed.
+
+## Related
+
+- [Contract Interface](contract-interface.md) for complete function signatures and Sui examples
+- [Integration Checklist](integration-checklist.md) for the full integration workflow
+- [Troubleshooting](troubleshooting.md) for common issues
+
+---
+
+## Deployment Guide
+
+
+:::tip AI-Assisted Setup
+Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+
+> Deploy the Bosphor contracts to Sepolia and Sui testnet. My .env file is already configured with RPC URLs and private keys. Run `npm run deploy:sui` first, then `npm run deploy:evm`, then `npm run wire` to set peers on both chains. After deployment, verify the contracts on Etherscan and SuiScan, and run `npm run test:e2e` to confirm the full round-trip works.
+
+:::
+
+## Prerequisites
+
+- **Node.js 22** -- pinned via `.nvmrc` (`nvm use`)
+- **Foundry** -- `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Sui CLI** -- https://docs.sui.io/build/install
+- **Sepolia ETH** -- for EVM contract deployment and LZ fees
+- **Sui testnet SUI** -- for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
+
+## Environment Setup
+
+```bash
+cp .env.example .env
+```
+
+### Required Variables
+
+| Variable | Description |
+|----------|-------------|
+| `EVM_RPC_URL` | Sepolia RPC endpoint (e.g. `https://ethereum-sepolia-rpc.publicnode.com`) |
+| `EVM_RELAYER_KEY` | Private key for EVM deployer/relayer (must have Sepolia ETH) |
+| `SUI_DEPLOYER_KEY` | Sui private key in `suiprivkey1...` format (AdminCap owner) |
+| `SUI_RELAYER_KEY` | Sui private key for relayer operations |
+
+### Auto-populated Variables
+
+These are written by deployment scripts -- leave empty:
+
+| Variable | Populated by |
+|----------|-------------|
+| `EVM_ADAPTER_ADDRESS` | `deploy-evm.ts` |
+| `SUI_LZ_PACKAGE_ID` | `deploy-sui.ts` |
+| `SUI_LZ_CONFIG_ID` | `deploy-sui.ts` |
+| `SUI_LZ_OAPP_ID` | `deploy-sui.ts` |
+| `SUI_LZ_ADMIN_CAP_ID` | `deploy-sui.ts` |
+| `SUI_LZ_MESSAGING_CHANNEL` | `deploy-sui.ts` |
+
+## Full Deployment
+
+```bash
+npm install
+npm run new-deployment
+```
+
+This runs sequentially:
+
+### 1. `npm run deploy:sui`
+
+1. Removes `Published.toml` for fresh publish
+2. Runs `sui client publish` with 500M gas budget
+3. Waits for transaction finality
+4. Calls `register_oapp` with `OAppInfoV1`-formatted metadata
+5. Sets send/receive libraries to ULN302
+6. Configures DVN (LayerZero Labs) and executor
+7. If `EVM_ADAPTER_ADDRESS` is set, calls `set_peer`
+8. Updates `.env` with all new object IDs
+
+### 2. `npm run deploy:evm`
+
+1. Runs `forge build`
+2. Deploys `BosphorAdapter` with LZ endpoint and deployer as delegate + relayer
+3. If `SUI_LZ_PACKAGE_ID` is set, calls `setPeer(40378, suiPackageId)`
+4. Updates `.env` with `EVM_ADAPTER_ADDRESS`
+
+### 3. `npm run wire`
+
+1. EVM `setPeer(40378, suiPackageId)` -- uses PACKAGE ID, not OApp object
+2. Sui `set_peer(40161, evmAdapterAddress)`
+
+### 4. `npm run test:e2e`
+
+Two-step verification of the full round-trip:
+
+**Phase 1 (Forward):**
+1. Builds a test payload and quotes LZ fee
+2. Calls `submitIntent` on EVM
+3. Polls LZ Scan API for forward delivery (EVM -> Sui)
+
+**Phase 2 (Return):**
+4. Waits for the relayer to process the intent (Walrus upload + execute_store)
+5. Polls EVM for `IntentExecuted` event (proof delivered back via LZ)
+6. Decodes proof data (blob ID, end epoch) from the event
+
+The test outputs a 6-checkpoint summary with TX hashes and explorer links for both chains. Set `SUI_PACKAGE_ID` and `SUI_LZ_PACKAGE_ID` in `.env` for full Sui event details (Walrus blob, proof TX).
+
+## Docker (Relayer)
+
+```bash
+docker-compose up -d
+```
+
+The relayer container:
+- Polls EVM `IntentSubmitted` events
+- Polls Sui `IntentReceived` events (LZ path)
+- Uploads payloads to Walrus (deletable blobs)
+- Calls `execute_store` on Sui
+- Sends proof back to EVM via LayerZero (`lz_send_proof` on Sui)
+
+## Verification
+
+After deployment, verify:
+
+1. **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` -- status should be DELIVERED
+2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` -- verify OApp exists
+3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` -- verify contract
+4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>` -- verify blob retrieval
+5. **Move Registry**: search `@bosphor/core` at https://www.moveregistry.com or run `mvr resolve @bosphor/core --network testnet`
+
+### Move Registry
+
+| Item | Value |
+|------|-------|
+| MVR Name | `@bosphor/core` |
+| SuiNS Name | `bosphor.sui` |
+| Testnet PackageInfo | `0x1927186c77ee261f67f6646efb1403b08643c912cbd1fdcfea6b60d4e1627360` |
+| Mainnet AppCap | `0x12f12b1135dc87b262d937c4c878ea5b54df0c036e2a00675bc448427f9f1aff` |
+| MVR Registry | `0x0e5d473a055b6b7d014af557a13ad9075157fdc19b6d51562a18511afd397727` |
+
+---
+
+## Glossary
+
+
+Key terms used throughout the Bosphor documentation.
+
+## Blob
+
+A unit of data stored on [Walrus](https://www.walrus.xyz/). Bosphor stores intent payloads as deletable blobs. Each blob has a unique blob ID and an expiry epoch. See [Architecture](architecture.md) for how blobs fit into the message flow.
+
+## Cross-chain message
+
+A message sent between chains via [LayerZero v2](#layerzero-v2). Bosphor uses two cross-chain messages per intent: one to deliver the intent (EVM to Sui) and one to return the execution proof (Sui to EVM). Both are verified by DVNs.
+
+## DVN (Decentralized Verifier Network)
+
+A set of independent verifiers in LayerZero v2 that validate cross-chain messages before delivery. Bosphor currently uses the LayerZero Labs DVN with a confirmation depth of 2 blocks. DVN verification is what makes the message flow trustless. See [LZ Verification Flow](lz-verification-flow.md).
+
+## EID (Endpoint ID)
+
+A numeric identifier for a chain in LayerZero v2. Sui testnet is `40378`, Sepolia is `40161`. EIDs are used in peer configuration and message routing. Unit tests use a mock EID `30378`. See [Deployment](deployment.md) for peer setup.
+
+## Epoch
+
+A time period in Walrus that determines how long a blob is stored. Bosphor stores blobs for `WALRUS_STORE_EPOCHS` epochs (default: 5). The `endEpoch` value in execution proofs indicates when the blob expires.
+
+## Intent
+
+A storage request submitted on an EVM chain. An intent contains a payload (the data to store), a deadline (expiry timestamp), and a destination chain EID. Each intent gets a deterministic `intentId` computed from the sender, chain, payload, nonce, and deadline. See [Contract Interface](contract-interface.md).
+
+## LayerZero v2
+
+The cross-chain messaging protocol Bosphor uses for both directions of the message flow. LayerZero v2 provides DVN-verified message delivery between EVM and Sui. See [LZ Verification Flow](lz-verification-flow.md).
+
+## OApp (Omnichain Application)
+
+A LayerZero v2 application contract that can send and receive cross-chain messages. Bosphor's `BosphorAdapter` on EVM and `lz_receiver` on Sui are both OApps. OApps must register peers to accept messages from each other.
+
+## Peer
+
+A cross-chain OApp counterpart. Each OApp must configure the address of its peer on the remote chain using `setPeer` (EVM) or `set_peer` (Sui). On EVM, the Sui peer is set to the Sui package ID (not the OApp object ID). See [Deployment](deployment.md).
+
+## Proof
+
+An execution receipt sent from Sui back to EVM after a storage intent is fulfilled. The proof contains the Walrus `blobId` and `endEpoch`, encoded as a type 1 message: `0x01 ++ abi.encode(intentId, blobId, endEpoch)`. Proofs are DVN-verified by LayerZero.
+
+## Relayer
+
+The off-chain service that processes intents. The relayer polls for `IntentReceived` events on Sui, uploads payloads to Walrus, calls `execute_store`, and sends the proof back to EVM via `lz_send_proof`. The relayer triggers execution but cannot forge proofs. See [Relayer](relayer.md).
+
+---
+
+## Integration Checklist
+
+
+Step-by-step checklist for integrating with Bosphor. Complete each item before moving to the next.
+
+:::tip AI-Assisted Setup
+Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+
+> Walk me through the Bosphor integration checklist step by step. I need to: (1) understand the architecture and security model, (2) deploy contracts to Sepolia and Sui testnet, (3) verify deployment on Etherscan and SuiScan, (4) run the E2E test, (5) integrate fee estimation and intent submission into my dApp using ethers.js or viem, (6) verify relayer health, and (7) review trust assumptions for production readiness. Guide me through each step and flag anything that needs my input.
+
+:::
+
+## Prerequisites
+
+- [ ] Node.js 22 installed (see [Quickstart](quickstart.md))
+- [ ] Foundry installed (`forge --version` works)
+- [ ] Sui CLI installed (`sui --version` works)
+- [ ] Sepolia ETH in your wallet for gas and LayerZero fees
+- [ ] Sui testnet SUI in your wallet for gas
+
+## 1. Understand the protocol
+
+- [ ] Read the [Architecture](architecture.md) page to understand the two-step message flow
+- [ ] Read the [Security Model](security-model.md) to understand trust assumptions
+- [ ] Review [Known Limitations](known-limitations.md) for constraints that may affect your use case
+
+## 2. Deploy contracts
+
+- [ ] Clone the repository with `--recurse-submodules`
+- [ ] Copy `.env.example` to `.env` and fill in required variables
+- [ ] Run `npm run new-deployment` for a full deploy, or run individual steps:
+  - [ ] `npm run deploy:sui` deploys the Sui package and registers the OApp
+  - [ ] `npm run deploy:evm` deploys the EVM adapter
+  - [ ] `npm run wire` sets peers on both chains
+
+## 3. Verify deployment
+
+- [ ] EVM adapter address is printed in deploy output
+- [ ] Sui package ID and OApp object ID are printed in deploy output
+- [ ] Peers are set correctly:
+  - EVM: `setPeer(40378, suiPackageId)` (uses **package ID**, not OApp object ID)
+  - Sui: `set_peer(40161, evmAdapterAddress)`
+- [ ] Check [Etherscan](https://sepolia.etherscan.io) for the EVM contract
+- [ ] Check [SuiScan](https://suiscan.xyz/testnet) for the Sui package
+
+## 4. Test the integration
+
+- [ ] Run `npm run test:e2e` to verify the full round-trip
+- [ ] E2E test submits an intent on Sepolia and waits for:
+  1. LayerZero delivery to Sui (`IntentReceived` event)
+  2. Relayer processing (Walrus upload, `execute_store`, `lz_send_proof`)
+  3. Proof delivery back to EVM (`IntentExecuted` event)
+
+## 5. Fee estimation
+
+- [ ] Call `quote(dstEid, payload, deadline, options)` before `submitIntent` to get the LZ fee
+- [ ] Pass the returned `nativeFee` as `msg.value` to `submitIntent`
+- [ ] Use the default LZ options (`0x00030100110100000000000000000000000000030d40`) unless your use case requires custom gas limits
+- [ ] Understand that the relayer adds a 10% fee buffer on the return path
+
+## 6. Submit intents from your dApp
+
+- [ ] Import `IBosphorAdapter` interface for type-safe interaction
+- [ ] Set deadlines with enough buffer for cross-chain delivery (at least 15 minutes recommended)
+- [ ] Handle the `IntentSubmitted` event to get the `intentId`
+- [ ] Listen for `IntentExecuted` event to confirm fulfillment and decode the proof (blobId, endEpoch)
+- [ ] See [dApp Tutorial](dapp-tutorial.md) for complete ethers.js and viem examples
+
+## 7. Relayer health
+
+- [ ] Verify the relayer is running: `GET /health` should return `{"status": "ok"}`
+- [ ] Monitor relayer wallet balances (both Sepolia ETH and Sui testnet SUI)
+- [ ] Review [Relayer](relayer.md) for configuration and error handling details
+
+## 8. Pre-production review
+
+- [ ] Confirm all trust assumptions are documented and acceptable for your use case
+- [ ] Understand the emergency `confirmExecution` fallback and who holds the owner key
+- [ ] Review gas costs and fee sustainability
+- [ ] Plan for relayer monitoring and alerting
+- [ ] Note that mainnet deployment is not yet supported (Sui testnet only)
+
+## Related
+
+- [Contract Interface](contract-interface.md) for function signatures and wire formats
+- [dApp Tutorial](dapp-tutorial.md) for frontend integration examples
+- [Troubleshooting](troubleshooting.md) for common issues
+
+---
+
+## Introduction
+
+# Bosphor
+
+**Bosphor makes Walrus accessible from any chain.** Submit a storage intent on EVM, and Bosphor routes it cross-chain to Walrus on Sui, returning a DVN-verified proof back to your origin chain.
+
+## What it does
+
+1. **Submit**: Your EVM contract calls `submitIntent` with an arbitrary payload and a deadline.
+2. **Route**: LayerZero v2 delivers the message cross-chain to Sui, verified by DVNs.
+3. **Store**: The relayer uploads the payload to Walrus as a deletable blob.
+4. **Prove**: An execution proof (blob ID, expiry epoch) returns to EVM via LayerZero, again DVN-verified.
+
+Both legs of the round-trip are trustless. The relayer triggers execution but cannot forge proofs.
+
+## Why Bosphor
+
+EVM developers cannot use Walrus natively. Walrus lives on Sui, so storing data from Ethereum, Arbitrum, or any EVM chain requires bridging, transaction construction on Sui, and proof management across chains. Bosphor handles all of this behind a single Solidity function call.
+
+Without Bosphor, an EVM developer would need to:
+
+- Run a Sui wallet and manage SUI tokens
+- Build and sign Sui transactions for Walrus blob uploads
+- Implement their own cross-chain message verification
+- Track storage proofs manually across two chains
+
+With Bosphor, the developer calls `submitIntent` on EVM and receives a verified `IntentExecuted` event when the data is stored.
+
+## Ecosystem
+
+Bosphor connects three protocols:
+
+- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent payloads as Walrus blobs.
+- **[LayerZero v2](https://layerzero.network/)**: Cross-chain messaging. Both message directions are DVN-verified.
+- **[Sui](https://sui.io/)**: The execution layer where Walrus storage and proof generation happen.
+
+## Current status
+
+**Milestone 1 complete.** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow.
+
+Components shipped:
+
+- EVM adapter contract with intent submission, fee quoting, and proof receipt
+- Sui executor with Walrus blob storage and LayerZero proof return
+- Two-step DVN-verified message flow (forward and return)
+- NestJS relayer with health monitoring, deduplication, and retry logic
+- E2E test suite and CI pipeline
+- Documentation site
+
+## Next steps
+
+- [Quickstart](quickstart.md): Deploy and run the full pipeline in 15 minutes.
+- [Architecture](architecture.md): Understand the system design and message flow.
+- [Security Model](security-model.md): Review trust assumptions before integrating.
+- [Contract Interface](contract-interface.md): Function signatures and code examples.
+
+---
+
+## Known Limitations
+
+
+Current constraints and limitations of the Bosphor protocol as of Milestone 1.
+
+## Single relayer trust model
+
+The current architecture uses a single authorized relayer for both the Walrus executor and the LZ return path. This means:
+
+- The relayer is a trusted operator. If the relayer goes offline, intents will not be fulfilled until it recovers.
+- The relayer can choose not to fulfill an intent (censorship), though it cannot forge proofs due to DVN verification.
+- There is no competition or fallback mechanism. A single relayer failure blocks all intent processing.
+
+The roadmap includes a competing relayer model where multiple relayers can race to fulfill intents.
+
+## Supported chains
+
+- **EVM origin:** Sepolia testnet only. Mainnet deployment support exists but is not yet activated.
+- **Storage destination:** Walrus on Sui testnet only.
+- **Cross-chain messaging:** LayerZero v2 with a single DVN configuration.
+
+Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. Solana origin support is planned for Milestone 3.
+
+## Gas and fee limitations
+
+- LZ messaging fees are estimated via `quoteLzFee` with a 10% buffer. In periods of high gas volatility, the buffer may be insufficient, causing the LZ send to fail. The relayer retries with updated fee quotes on failure.
+- The relayer pays all LZ fees and Sui gas costs. There is no on-chain fee recovery mechanism from the intent sender. Fee sustainability depends on off-chain arrangements.
+- The default LZ executor gas limit for `_lzReceive` on EVM is 200,000 gas, configured via LZ options. Complex `_lzReceive` handlers on EVM may require increasing this value.
+
+## Deadline enforcement
+
+- Intent deadlines are enforced in both directions: on the EVM adapter (`submitIntent` rejects expired deadlines) and on the Sui executor (`execute_store` checks the on-chain clock).
+- There is a race window: an intent submitted close to its deadline may be accepted on EVM but expire before the relayer can execute it on Sui. The relayer skips expired intents rather than wasting gas.
+- Deadlines use Unix timestamps in seconds (EVM) and milliseconds (Sui). The relayer converts between them.
+
+## Walrus storage
+
+- All blobs are stored as deletable. The relayer configures this at upload time. The protocol does not currently support permanent (non-deletable) storage.
+- Blob storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs). There is no per-intent storage duration customization.
+- If the Walrus publisher is unavailable, the relayer retries with exponential backoff up to 3 attempts. Persistent publisher outages block intent fulfillment.
+
+## Object version conflicts on Sui
+
+Consecutive Sui transactions that modify the same shared object (like `ExecutorConfig` or the LZ OApp) can fail with object version conflicts if submitted too quickly. The relayer uses `waitForTransaction` between consecutive transactions to avoid this, but under high throughput, sequential processing becomes a bottleneck.
+
+## No on-chain intent cancellation
+
+Once an intent is submitted on EVM, there is no mechanism for the sender to cancel it. The intent will either be fulfilled (if the relayer processes it before the deadline) or expire silently.
+
+## Testnet vs. mainnet differences
+
+- Testnet deployments use the LayerZero Labs DVN. Mainnet deployments may use different DVN configurations.
+- Walrus testnet blob availability and durability guarantees differ from mainnet.
+- Sui testnet may have different epoch durations and gas pricing than mainnet.
+- The `EVM_DST_EID` config default targets Sepolia testnet (EID 40161). Mainnet requires changing this to the appropriate chain EID.
+
+## Related
+
+- [Architecture](architecture.md) for the system design
+- [Relayer](relayer.md) for operational details and configuration
+- [Deployment](deployment.md) for setup instructions
+
+---
+
+## LayerZero Two-Step Verification Flow
+
+
+Bosphor uses LayerZero v2 for both directions of its cross-chain protocol. This page describes the message flow, encoding formats, and trust boundaries.
+
+## Overview
+
+The protocol has two verified message paths:
+
+1. **Forward path (EVM to Sui):** User submits an intent on EVM, LayerZero DVN verifies and delivers it to Sui.
+2. **Return path (Sui to EVM):** After execution, the relayer sends a proof back through LayerZero to confirm on EVM.
+
+Both paths are independently verified by LayerZero's Decentralized Verifier Network (DVN).
+
+## Forward path: EVM to Sui
+
+![Forward Path: EVM to Sui](./diagrams/forward-path.svg)
+
+### Step by step
+
+1. User calls `submitIntent(payload, deadline)` on the `BosphorAdapter` contract (Sepolia).
+2. The adapter ABI-encodes the message: `(bytes32 intentId, address sender, bytes payload, uint256 deadline)`.
+3. The message is prefixed with type byte `0x00` and sent via `_lzSend()` to LayerZero.
+4. LayerZero's DVN verifies the message and delivers it to the Sui endpoint.
+5. The LZ executor calls `lz_receive` on the Bosphor OApp on Sui.
+6. The OApp decodes the message, stores an `IntentRecord`, and emits an `IntentReceived` event.
+
+### Message format (type 0, forward)
+
+```
+[0x00] [intentId (32 bytes)] [sender (32 bytes, left-padded address)]
+       [payload (dynamic)]   [deadline (32 bytes, uint256)]
+```
+
+Total: 1 + 32 + 32 + len(payload) + 32 bytes.
+
+## Return path: Sui to EVM
+
+![Return Path: Sui to EVM](./diagrams/return-path.svg)
+
+### Step by step
+
+1. The relayer uploads data to Walrus and calls `execute_store` on Sui.
+2. The relayer calls `lz_send_proof()` on the Bosphor OApp, passing the intent ID, blob ID, end epoch, and destination EID.
+3. The function builds a type-1 proof message and initiates a LayerZero send via a Programmable Transaction Block (PTB).
+4. The PTB routes through the LZ endpoint, ULN302, executor fee lib, DVN fee lib, and treasury.
+5. `confirm_lz_send_proof()` finalizes the send, handles coin refunds, and emits a `ProofSent` event.
+6. LayerZero's DVN verifies the proof message and delivers it to the EVM endpoint.
+7. The `BosphorAdapter._lzReceive()` on EVM decodes the type-1 message and marks the intent as executed.
+
+### Message format (type 1, proof)
+
+```
+[0x01] [intentId (32 bytes)] [blobId (32 bytes)] [endEpoch (32 bytes, uint256)]
+```
+
+Total: 97 bytes. The EVM `_lzReceive` decoder matches on the `0x01` prefix.
+
+## OAppInfoV1 format
+
+When registering the OApp with the LayerZero endpoint on Sui, the `ptb_builder` module generates execution metadata in OAppInfoV1 format:
+
+```
+[version byte] [BCS-encoded: (address, vec<u8>, vec<u8>, vec<u8>)]
+```
+
+This tells the LZ executor how to build the PTB that delivers messages to this OApp. The executor replays the MoveCall sequence in the actual `lz_receive` transaction.
+
+This was a key fix in v5: `lz_receive_info` was initially returning raw MoveCall bytes, but the LZ executor expects OAppInfoV1 format wrapped via `oapp_info_v1::create().encode()`.
+
+## PTB structure (Sui LZ send)
+
+The return path requires a 16-step PTB to route through all LZ infrastructure contracts:
+
+| Step | Operation |
+|------|-----------|
+| 0 | `lz_receiver::lz_send_proof` (build message, initiate send) |
+| 1 | `endpoint_v2::send` |
+| 2 | `uln_302::send` |
+| 3 | `executor_fee_lib::quote_executor` |
+| 4 | `uln_302::quote_worker_fee` (executor) |
+| 5 | `dvn_fee_lib::quote_dvn` |
+| 6 | `uln_302::quote_worker_fee` (DVN) |
+| 7 | `price_feed::get_fee` |
+| 8 | `dvn_fee_lib::quote_dvn` (second DVN) |
+| 9 | `uln_302::quote_worker_fee` (second DVN) |
+| 10 | `price_feed::get_fee` (second) |
+| 11 | `uln_302::confirm_quote` |
+| 12 | `treasury::pay_fee` |
+| 13 | `endpoint_v2::confirm_send` |
+| 14 | `lz_receiver::confirm_lz_send_proof` |
+
+A similar PTB structure is used for fee quoting (`quote_proof` / `confirm_quote_proof`).
+
+## Trust boundaries
+
+| Boundary | Trust model |
+|----------|-------------|
+| EVM to LZ | User trusts LayerZero DVN to deliver the message faithfully |
+| LZ to Sui | Sui OApp verifies the message came from the LZ endpoint |
+| Relayer | Trusted operator. Only the configured relayer can trigger `lz_send_proof` and `execute_store` |
+| Sui to LZ | Relayer initiates the send, DVN verifies independently |
+| LZ to EVM | EVM adapter verifies the message came from the configured Sui peer via LZ |
+| Walrus | Blob certification is verified on-chain before execution |
+
+The DVN provides independent verification in both directions. The relayer cannot forge messages that bypass DVN verification.
+
+## Fee handling
+
+The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer calls `quoteLzFee` to estimate the cost, then adds a 10% buffer. After the send, any unused SUI is refunded to the relayer's address.
+
+## Related
+
+- [Architecture](architecture.md) for the system overview
+- [Sui Executor](sui-executor.md) for the Walrus execution step
+- [Contract Interface](contract-interface.md) for EVM function signatures
+- [Relayer](relayer.md) for the operator that drives both paths
+
+---
+
+## Quickstart
+
+
+Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
+
+:::tip AI-Assisted Setup
+Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+
+> Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run `npm run new-deployment` to deploy everything and verify with the E2E test.
+
+:::
+
+## Prerequisites
+
+### Node.js 22
+
+Bosphor requires Node.js 22 (pinned via `.nvmrc`).
+
+```bash
+nvm install 22
+nvm use 22
+```
+
+### Foundry
+
+Install Foundry for EVM contract compilation and deployment:
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+Verify with `forge --version`.
+
+### Sui CLI
+
+Install the Sui CLI for Sui contract deployment. See the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install) for full instructions.
+
+After installation, configure for testnet:
+
+```bash
+sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
+sui client switch --env testnet
+```
+
+### Testnet tokens
+
+- **Sepolia ETH** for EVM gas and LayerZero fees. Use the [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud Sepolia Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia).
+- **Sui testnet SUI** for Sui gas:
+
+```bash
+sui client faucet
+```
+
+Or use the [Sui Testnet Faucet](https://faucet.testnet.sui.io/).
+
+## Setup
+
+```bash
+git clone --recurse-submodules https://github.com/AliErcanOzgokce/bosphor.git
+cd bosphor
+nvm use
+npm install
+```
+
+## Environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in the required variables:
+
+| Variable | Description |
+|----------|-------------|
+| `EVM_RPC_URL` | Sepolia RPC endpoint |
+| `EVM_RELAYER_KEY` | Private key with Sepolia ETH |
+| `SUI_DEPLOYER_KEY` | Sui private key (`suiprivkey1...` format) |
+| `SUI_RELAYER_KEY` | Sui private key for relayer operations |
+
+## One-command deployment
+
+```bash
+npm run new-deployment
+```
+
+This runs the full sequence: deploy Sui contracts, deploy EVM contracts, wire peers, and run the E2E test.
+
+## Individual steps
+
+If you prefer to run each step separately:
+
+```bash
+npm run deploy:sui      # Deploy Sui package + register OApp + set peer
+npm run deploy:evm      # Deploy EVM adapter + set peer
+npm run wire            # Update peers only
+npm run test:e2e        # Run E2E test with LZ polling
+```
+
+## What success looks like
+
+After a successful deployment, you should see:
+
+1. **Sui deploy** prints the package ID and OApp object ID.
+2. **EVM deploy** prints the BosphorAdapter contract address.
+3. **Wire** confirms peers are set on both chains.
+4. **E2E test** submits an intent on Sepolia, waits for LayerZero delivery, and confirms the `IntentReceived` event on Sui. Output ends with a success message and transaction hashes for both chains.
+
+## Verify deployment
+
+After deployment, check:
+
+- **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` for message status DELIVERED
+- **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` for OApp object
+- **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` for contract verification
+
+## Troubleshooting
+
+If you run into issues during setup or deployment, see the [Troubleshooting](troubleshooting.md) page for solutions to common problems including setup errors, deployment failures, relayer issues, and cross-chain debugging.
+
+---
+
+## Relayer Operator Guide
+
+
+The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both chains for events, uploads payloads to Walrus, executes storage intents on Sui, and sends execution proofs back to EVM via LayerZero.
+
+:::tip AI-Assisted Setup
+Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+
+> Set up and run the Bosphor relayer service. Copy `relayer/.env.example` to `relayer/.env` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run `cd relayer && npm install && npm run start:dev` and verify the health endpoint responds at GET /health.
+
+:::
+
+## How it works
+
+1. Polls Sui for `IntentReceived` events (delivered by LayerZero from EVM)
+2. Uploads the intent payload to Walrus as a deletable blob
+3. Calls `execute_store` on Sui with the certified blob
+4. Quotes the LZ fee for proof verification (adds 10% buffer)
+5. Calls `lz_send_proof` on Sui to send the proof back to EVM
+6. EVM `_lzReceive` marks the intent as executed
+
+The relayer does not have custody of user funds. It triggers execution and proof delivery, but all proof messages are DVN-verified by LayerZero.
+
+## Configuration
+
+### Required environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `EVM_RPC_URL` | Sepolia RPC endpoint |
+| `EVM_RELAYER_KEY` | Private key (0x-prefixed) with Sepolia ETH for gas |
+| `EVM_ADAPTER_ADDRESS` | Deployed BosphorAdapter contract address |
+| `SUI_RELAYER_KEY` | Sui private key (`suiprivkey1...` or base64 Ed25519) |
+| `SUI_PACKAGE_ID` | walrus_executor package ID |
+| `SUI_CONFIG_ID` | ExecutorConfig shared object ID |
+| `WALRUS_PUBLISHER_URL` | Walrus publisher endpoint |
+| `WALRUS_AGGREGATOR_URL` | Walrus aggregator endpoint |
+
+### Optional environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EVM_DST_EID` | `40161` | EVM destination endpoint ID for proof verification |
+| `SUI_RPC_URL` | `https://fullnode.testnet.sui.io:443` | Sui RPC endpoint |
+| `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
+| `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
+| `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
+| `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |
+| `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
+| `INTENT_TTL_MS` | `3600000` | TTL for processed intent deduplication (ms) |
+| `PORT` | `3000` | HTTP server port |
+| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+
+### LZ infrastructure variables
+
+The relayer needs references to 18 LayerZero v2 shared objects on Sui testnet. These are pre-filled in `relayer/.env.example` and rarely change:
+
+- `SUI_LZ_ENDPOINT_V2`, `SUI_LZ_ENDPOINT_V2_OBJ`
+- `SUI_LZ_ULN302`, `SUI_LZ_ULN302_OBJ`
+- `SUI_LZ_EXECUTOR_PKG`, `SUI_LZ_EXECUTOR_OBJ`
+- `SUI_LZ_EXEC_FEE_LIB`, `SUI_LZ_EXEC_FEE_LIB_OBJ`
+- `SUI_LZ_DVN_PKG`, `SUI_LZ_DVN_OBJ`
+- `SUI_LZ_DVN_FEE_LIB`, `SUI_LZ_DVN_FEE_LIB_OBJ`
+- `SUI_LZ_PRICE_FEED`, `SUI_LZ_PRICE_FEED_OBJ`
+- `SUI_LZ_TREASURY`, `SUI_LZ_TREASURY_OBJ`
+
+Copy `relayer/.env.example` for testnet defaults.
+
+## Running
+
+### Local development
+
+```bash
+cd relayer
+npm install
+cp .env.example .env
+# Fill in required variables
+npm run start:dev
+```
+
+### Docker
+
+```bash
+docker-compose up -d
+```
+
+The Docker container runs the relayer with the environment from `.env`.
+
+## Polling and deduplication
+
+The relayer polls both chains every 5 seconds. Processed intents are tracked in an in-memory `Map<intentId, timestamp>` to prevent duplicate processing.
+
+### TTL-based pruning
+
+Processed intent entries expire after `INTENT_TTL_MS` (default: 1 hour). Expired entries are pruned on each poll cycle. This means:
+
+- An intent processed at 10:00 will be pruned at 11:00
+- If the same intent event appears again after pruning, the relayer will attempt to re-process it
+- On-chain guards (`EIntentAlreadyExecuted`, `AlreadyExecuted`) prevent actual double-execution
+
+Set `INTENT_TTL_MS` higher if your relayer restarts frequently and you see unnecessary retry attempts.
+
+## Fee quoting
+
+Before sending a proof back to EVM, the relayer quotes the LZ fee using `devInspect` simulation on Sui. The quoted fee gets a 10% buffer to account for gas price fluctuations.
+
+If the fee quote fails (e.g. LZ config variables not set), the relayer falls back to a default fee of 0.5 SUI (500,000,000 MIST).
+
+The relayer wallet on Sui must have enough SUI balance to cover these fees.
+
+## Health endpoint
+
+The relayer exposes a health check at `GET /health` on the configured `PORT` (default 3000).
+
+Response format:
+
+```json
+{
+  "status": "ok",
+  "evm": {
+    "connected": true,
+    "blockNumber": 12345678
+  },
+  "sui": {
+    "connected": true,
+    "checkpoint": "54321"
+  },
+  "uptime": 3600
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `status` | `"ok"` if both chains connected, `"degraded"` otherwise |
+| `evm.connected` | Whether the EVM RPC responds |
+| `evm.blockNumber` | Latest EVM block number |
+| `sui.connected` | Whether the Sui RPC responds |
+| `sui.checkpoint` | Latest Sui checkpoint |
+| `uptime` | Seconds since the relayer started |
+
+## Walrus upload
+
+The relayer uploads intent payloads to Walrus with retry logic:
+
+- Max 3 attempts per upload
+- 5xx errors trigger exponential backoff (2, 4, 8 seconds)
+- 4xx errors fail immediately (no retry)
+- 30-second timeout per attempt
+- All blobs are stored as **deletable** with `send_object_to` set to the relayer's Sui address
+
+## Error handling
+
+| Scenario | Behavior |
+|----------|----------|
+| Intent deadline expired | Skipped, marked as processed |
+| ABI decode failure | Marked as processed, not retried |
+| Walrus upload failure | NOT marked as processed, retried on next poll |
+| Sui TX failure | NOT marked as processed, retried on next poll |
+| LZ fee quote failure | Falls back to default 0.5 SUI fee |
+
+## Related
+
+- [Architecture](architecture.md) for the full message flow
+- [Contract Interface](contract-interface.md) for Sui function signatures
+- [Deployment](deployment.md) for initial setup
+- [Testing](testing.md) for running relayer unit tests
+
+---
+
+## Security Model
+
+
+Bosphor's security relies on LayerZero v2 DVN verification for both legs of the cross-chain message flow, with the relayer acting as an untrusted executor that cannot forge proofs.
+
+## Trust boundaries
+
+### Trustless (DVN-verified)
+
+These operations are verified by LayerZero's Decentralized Verifier Network and do not require trust in any single party:
+
+- **Intent delivery (EVM to Sui)**: The `submitIntent` message is sent through LayerZero and verified by DVNs before delivery to Sui. No party can forge or modify the message in transit.
+- **Proof verification (Sui to EVM)**: The execution proof (`blobId`, `endEpoch`) is sent through LayerZero and verified by DVNs before delivery to EVM. The relayer initiates this send, but the proof content is verified on-chain.
+- **Intent registration**: Nonce enforcement, deadline checks, and intent ID computation are all on-chain.
+- **Execution recording**: `execute_store` on Sui verifies blob certification, checks deadlines against the Sui clock, and prevents double-execution.
+
+### Trusted (relayer-dependent)
+
+These operations depend on the relayer behaving correctly:
+
+- **Triggering execution**: The relayer decides when to upload to Walrus and call `execute_store`. If the relayer is offline or unresponsive, intents will not be fulfilled until it recovers.
+- **Timing**: The relayer controls how quickly intents are processed. A slow relayer may cause intents to expire before fulfillment.
+
+## What the relayer can do
+
+| Action | Possible? | Impact |
+|--------|-----------|--------|
+| Delay fulfillment | Yes | Intents may expire if not processed before deadline |
+| Censor specific intents | Yes | The relayer can skip intents selectively |
+| Go offline | Yes | All intent processing stops until recovery |
+| Choose processing order | Yes | The relayer decides which intents to process first |
+
+## What the relayer cannot do
+
+| Action | Why not |
+|--------|---------|
+| Forge execution proofs | Proofs are DVN-verified by LayerZero. The relayer cannot create a valid proof without actually storing the data on Walrus. |
+| Steal user funds | Bosphor does not custody user funds. The relayer pays gas and LZ fees from its own wallet. |
+| Modify intent payloads | Intent payloads are encoded on-chain at submission time and verified on Sui via ABI decoding. |
+| Double-execute an intent | Both `execute_store` (Sui) and `_lzReceive` (EVM) reject duplicate executions. |
+| Bypass deadline checks | Deadlines are enforced on-chain by both the EVM adapter and the Sui executor. |
+
+## Emergency fallback
+
+The contract owner can call `confirmExecution(intentId, proof)` directly on the EVM adapter to manually confirm an intent's execution. This is an owner-only emergency function intended for disaster recovery (e.g., if LayerZero message delivery fails permanently).
+
+This function bypasses the DVN-verified proof path. It should only be used when the normal `_lzReceive` path is unavailable and the owner has independently verified that the intent was fulfilled.
+
+## DVN configuration
+
+Bosphor currently uses a single DVN: **LayerZero Labs DVN**.
+
+- Confirmation depth: 2 blocks (EVM to Sui)
+- Verification: both message directions (forward and return) pass through DVN verification
+- The DVN configuration is set during OApp registration and can be updated through LayerZero's endpoint
+
+A single-DVN setup means that DVN compromise would compromise message verification. Multi-DVN support (requiring multiple independent verifiers to agree) is planned for the hardening phase.
+
+## Attack surface summary
+
+| Vector | Mitigation |
+|--------|-----------|
+| Relayer compromise | Relayer cannot forge proofs (DVN-verified). Can only delay or censor. Owner fallback available. |
+| DVN compromise | Single DVN risk. Multi-DVN planned. |
+| Walrus publisher outage | Relayer retries with exponential backoff. Intents expire gracefully. |
+| LZ endpoint compromise | Protocol-level risk shared with all LayerZero applications. |
+| Contract owner key compromise | Owner can call `confirmExecution` and `setRelayer`. Standard key management practices apply. |
+
+## Related
+
+- [Architecture](architecture.md) for the full message flow
+- [Known Limitations](known-limitations.md) for operational constraints
+- [LZ Verification Flow](lz-verification-flow.md) for DVN verification details
+
+---
+
+## Sui Walrus Executor
+
+
+The walrus executor module (`sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
+
+## Overview
+
+After the relayer uploads a user's payload to Walrus and receives a certified blob, it calls `execute_store` on this module. The executor verifies the blob is certified, checks the deadline, prevents double-execution, and transfers both the blob and a `StorageReceipt` to the original sender.
+
+## Module structure
+
+```
+sui/executor/
+  Move.toml          # Package manifest (depends on Walrus)
+  sources/
+    walrus_executor.move   # Core executor logic
+  tests/
+    walrus_executor_tests.move
+```
+
+## ExecutorConfig
+
+A shared object created at module initialization. Holds the authorized relayer address and a deduplication table.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `relayer` | `address` | The only address allowed to call `execute_store` |
+| `executed_intents` | `Table<vector<u8>, bool>` | Tracks which intent IDs have been executed |
+
+The deployer is set as the initial relayer. Use `update_relayer` to change it.
+
+## execute_store flow
+
+```
+Relayer calls execute_store(config, intent_id, blob, deadline_ms, clock, original_sender)
+  1. Assert caller == config.relayer
+  2. Assert blob.certified_epoch().is_some()   (Walrus certification check)
+  3. Assert intent_id not in executed_intents   (deduplication)
+  4. Assert clock.timestamp_ms() <= deadline_ms (deadline enforcement)
+  5. Record intent_id in executed_intents
+  6. Emit StorageExecuted event
+  7. Create StorageReceipt
+  8. Transfer blob to original_sender
+  9. Transfer receipt to original_sender
+```
+
+## Blob verification
+
+The executor does not trust the relayer's claim that data was stored. It checks `blob.certified_epoch().is_some()`, which is only true after Walrus storage nodes have certified the blob. A blob that has been uploaded but not yet certified will be rejected.
+
+All blobs are stored as deletable (enforced at upload time in the relayer, not in the executor).
+
+## StorageReceipt
+
+An on-chain object transferred to the original sender as proof of execution.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `intent_id` | `vector<u8>` | The 32-byte intent identifier |
+| `walrus_blob_id` | `u256` | Content-addressed hash of the stored data |
+| `end_epoch` | `u32` | Walrus epoch when the blob expires |
+| `sender` | `address` | The original intent sender (mapped from EVM) |
+
+## Events
+
+**StorageExecuted**: Emitted on every successful execution. Contains `intent_id`, `walrus_blob_id`, `end_epoch`, and `executor` address.
+
+**ConfigCreated**: Emitted once at module initialization with the config object ID and initial relayer address.
+
+## Error codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | `ENotRelayer` | Caller is not the authorized relayer |
+| 1 | `EBlobNotCertified` | Blob has not been certified by Walrus |
+| 2 | `EIntentAlreadyExecuted` | This intent ID was already executed |
+| 3 | `EDeadlineExpired` | Current time exceeds the intent deadline |
+
+## Trust assumptions
+
+- The relayer is a trusted operator. Only the configured relayer address can call `execute_store`.
+- Blob certification is verified on-chain. The executor does not blindly trust the relayer's claim.
+- The `original_sender` address is provided by the relayer. In production, this comes from the ABI-decoded intent message received via LayerZero.
+- Deadline enforcement uses Sui's on-chain clock, not the relayer's local time.
+
+## Related
+
+- [Architecture](architecture.md) for where the executor fits in the overall flow
+- [Contract Interface](contract-interface.md) for the EVM side of the protocol
+- [LayerZero Verification Flow](lz-verification-flow.md) for the cross-chain message path
+
+---
+
+## Testing Guide
+
+
+Bosphor has four test layers: Solidity unit tests, Move unit tests, relayer unit tests, and an end-to-end cross-chain test. All four must pass before merging.
+
+## Quick reference
+
+```bash
+# Run everything (except e2e, which needs live testnet)
+(cd contracts/evm && forge test -vvv)
+(cd sui/lz-receiver && sui move test --build-env testnet)
+(cd relayer && npm test)
+
+# Full round-trip (requires deployed contracts + running relayer)
+npm run test:e2e
+```
+
+## Solidity tests (Forge)
+
+```bash
+cd contracts/evm
+forge test -vvv
+```
+
+Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `EndpointV2Mock` (not the full LZ TestHelper) to simulate LayerZero message delivery.
+
+### What is covered
+
+| Area | Tests |
+|------|-------|
+| `submitIntent` | Deadline validation, nonce increment, intent ID computation, duplicate rejection |
+| `_lzReceive` | Type 1 message decoding (intentId, blobId, endEpoch), unknown type revert, empty message revert |
+| `confirmExecution` | Owner-only access, replay prevention, deadline expiry check |
+| `quote` | Fee estimation passthrough |
+| `setRelayer` | Zero-address rejection, event emission |
+
+### Key test details
+
+- `EndpointV2Mock` simulates LZ `send` and `lzReceive` without DVN verification
+- Type 1 wire format: 97 bytes (1 byte type + 32 intentId + 32 blobId + 32 endEpoch)
+- DST_EID in tests: `30378` (a mock value used only in unit tests; the real Sui testnet EID is `40378`, see [Deployment](deployment.md))
+
+## Move tests (Sui)
+
+```bash
+cd sui/lz-receiver
+sui move test --build-env testnet
+```
+
+Tests are in `sui/lz-receiver/tests/lz_receiver_tests.move`.
+
+### What is covered
+
+| Area | Tests |
+|------|-------|
+| `lz_receive` | Intent recording, deduplication, message parsing |
+| `build_proof_message` | Type-1 encoding, length validation, big-endian u256 encoding |
+| `is_received` | View function correctness |
+
+### Build environment
+
+The `--build-env testnet` flag is required because the Move package depends on LayerZero v2 testnet packages published at specific addresses. Without this flag, the build fails on address resolution.
+
+## Relayer unit tests (Jest)
+
+```bash
+cd relayer
+npm test
+```
+
+Tests are in `relayer/src/**/*.spec.ts`. All external dependencies (Sui client, ethers provider, Walrus HTTP) are mocked.
+
+### Test suites
+
+| Suite | File | What is covered |
+|-------|------|-----------------|
+| IntentProcessor | `intent/intent.processor.spec.ts` | Full pipeline (upload, executeStore, lzSendProof), deduplication, TTL expiry, fee quote fallback, custom EVM_DST_EID |
+| WalrusService | `walrus/walrus.service.spec.ts` | newlyCreated/alreadyCertified responses, 5xx retry with backoff, 4xx no-retry, timeout handling |
+| EvmService | `chain/evm/evm.service.spec.ts` | Event polling, log parsing, confirmExecution retry (3 attempts, 2s delay) |
+| SuiService | `chain/sui/sui.service.spec.ts` | lzSendProof PTB construction, quoteLzFee BCS parsing, error on missing LZ config |
+| HealthService | `health/health.service.spec.ts` | ok/degraded status, uptime calculation |
+
+### Key patterns
+
+- **Deduplication TTL**: `IntentProcessor` tests verify that processed intents are re-processed after TTL expiration (`INTENT_TTL_MS`, default 1 hour)
+- **Fee fallback**: When `quoteLzFee` fails, the relayer uses 500,000,000 MIST (0.5 SUI) as default
+- **10% fee buffer**: The quoted fee is multiplied by 1.1 before passing to `lzSendProof`
+
+## End-to-end test
+
+```bash
+npm run test:e2e
+```
+
+Requires deployed contracts on Sepolia + Sui testnet and a running relayer. The test verifies the full cross-chain round-trip in two phases.
+
+### Phase 1: Forward (EVM to Sui)
+
+1. Quotes the LZ fee on EVM
+2. Calls `submitIntent` on BosphorAdapter
+3. Polls the LayerZero Scan API until the message shows as DELIVERED on Sui
+
+### Phase 2: Return (Sui to EVM)
+
+4. Waits for the relayer to process the intent (Walrus upload + `execute_store` + `lz_send_proof`)
+5. Polls EVM for `IntentExecuted` event
+6. Decodes proof data (blob ID, end epoch) from the event
+
+### Output
+
+The test prints a 6-checkpoint summary with TX hashes and explorer links:
+
+1. EVM intent submission TX
+2. LZ Scan delivery status
+3. Sui StorageExecuted event (optional, needs `SUI_PACKAGE_ID`)
+4. Sui ProofSent event (optional, needs `SUI_LZ_PACKAGE_ID`)
+5. EVM IntentExecuted event
+6. Proof data verification (blob ID, end epoch decoded)
+
+### Required environment variables
+
+| Variable | Required |
+|----------|----------|
+| `EVM_RPC_URL` | Yes |
+| `EVM_ADAPTER_ADDRESS` | Yes |
+| `EVM_RELAYER_KEY` | Yes |
+| `SUI_RPC_URL` | Optional (for Sui event details) |
+| `SUI_PACKAGE_ID` | Optional (for StorageExecuted events) |
+| `SUI_LZ_PACKAGE_ID` | Optional (for ProofSent events) |
+
+### Timeouts
+
+- Forward phase: 15 minutes
+- Return phase: 15 minutes
+- Poll interval: 15 seconds
+
+## CI pipeline
+
+The CI runs on every push to `main` and every pull request. See `.github/workflows/ci.yml`.
+
+### Jobs
+
+| Job | What it does |
+|-----|-------------|
+| `forge-tests` | Checks out with submodules, installs Foundry, runs `forge test -vvv` in `contracts/evm/` |
+| `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `sui/lz-receiver/` |
+| `relayer-build-and-test` | Sets up Node.js 22, installs, builds, and tests the relayer |
+
+All three jobs run in parallel. The E2E test is not included in CI because it requires live testnet deployments and a running relayer.
+
+## Related
+
+- [Contract Interface](contract-interface.md) for function signatures referenced in tests
+- [Relayer](relayer.md) for the relayer configuration that tests mock
+- [Deployment](deployment.md) for setting up the environment needed by E2E tests
+
+---
+
+## Troubleshooting
+
+
+Common issues and their solutions when working with Bosphor.
+
+## Setup issues
+
+### `nvm: command not found`
+
+Install nvm first: see [nvm install instructions](https://github.com/nvm-sh/nvm#installing-and-updating). After installation, restart your terminal or run `source ~/.bashrc`.
+
+### `forge: command not found`
+
+Foundry is not installed or not in PATH. Run `foundryup` and restart your terminal. If you have not installed Foundry, run:
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+```
+
+### `sui: command not found`
+
+The Sui CLI is not installed. Follow the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install).
+
+## Deployment issues
+
+### Deployment fails with "insufficient funds"
+
+Your wallet does not have enough testnet tokens. Request more from:
+
+- **Sepolia ETH**: [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud Sepolia Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia)
+- **Sui testnet SUI**: Run `sui client faucet` or use the [Sui Testnet Faucet](https://faucet.testnet.sui.io/)
+
+### Sui deploy fails with "Published.toml already exists"
+
+Remove the existing `Published.toml` before redeploying:
+
+```bash
+rm sui/lz-receiver/Published.toml
+```
+
+This file is generated during deployment and must be removed for a fresh deploy.
+
+### Sui deploy fails with gas budget errors
+
+Increase the gas budget in the deploy script, or ensure your Sui wallet has enough SUI. The default budget is usually sufficient, but complex deployments may need more.
+
+### EVM `setPeer` fails
+
+Verify you are using the Sui **package ID** (not the OApp object ID) as the peer address. This is a common mistake. The package ID is the value printed during `npm run deploy:sui`.
+
+## Relayer issues
+
+### Relayer cannot connect to Sui RPC
+
+Check that `SUI_RPC_URL` is set correctly. The default is `https://fullnode.testnet.sui.io:443`. If using a custom RPC, verify the URL is accessible.
+
+### Relayer shows "fee quote failed, using default"
+
+The LZ fee quote requires all `SUI_LZ_*` environment variables to be set. Copy the values from `relayer/.env.example`. When the quote fails, the relayer falls back to 0.5 SUI (500,000,000 MIST).
+
+### Relayer wallet runs out of SUI
+
+The relayer pays LZ fees and Sui gas from its own wallet. Monitor the balance and top up using `sui client faucet` on testnet. Each proof send costs approximately 0.05-0.5 SUI depending on gas prices and LZ fees.
+
+### Relayer processes the same intent twice
+
+This is expected behavior after TTL expiration. Processed intents are pruned from memory after `INTENT_TTL_MS` (default: 1 hour). On-chain guards prevent actual double-execution, so the retry is harmless. Increase `INTENT_TTL_MS` if you see excessive retries.
+
+### Relayer health endpoint returns "degraded"
+
+The `/health` endpoint returns `"degraded"` when one or both chain connections fail. Check:
+
+1. `EVM_RPC_URL` is responding (try `curl <your-rpc-url>`)
+2. `SUI_RPC_URL` is responding
+3. Network connectivity from the relayer host
+
+## Cross-chain debugging
+
+### How to check LayerZero message status
+
+After submitting an intent on EVM, use the transaction hash to check delivery status:
+
+1. Go to [LayerZero Testnet Scan](https://testnet.layerzeroscan.com)
+2. Search for the EVM transaction hash
+3. The message should show status `DELIVERED` once DVN verification is complete
+
+Delivery typically takes 1-5 minutes on testnet.
+
+### E2E test times out waiting for LZ delivery
+
+LayerZero testnet delivery can take 1 to 5 minutes. If the test times out, check [LayerZero Testnet Scan](https://testnet.layerzeroscan.com) for the transaction status. The message may still be in flight.
+
+### Intent submitted but no `IntentReceived` event on Sui
+
+1. Check LZ Scan for the message status. If it shows `INFLIGHT`, wait for delivery.
+2. If it shows `FAILED`, the LZ executor could not build the PTB. Verify the OApp is registered correctly with `register_oapp`.
+3. Verify peers are set correctly on both chains: EVM `setPeer` uses the Sui package ID, and Sui `set_peer` uses the EVM adapter address.
+
+### `IntentReceived` emitted but no proof returned to EVM
+
+The relayer may not be running, or it may have missed the event. Check:
+
+1. Relayer logs for errors
+2. Relayer health endpoint (`GET /health`)
+3. Sui wallet balance (relayer needs SUI for gas and LZ fees)
+4. That all `SUI_LZ_*` environment variables are set
+
+### Sui transaction fails with "object version conflict"
+
+This happens when two Sui transactions reference the same object in quick succession. The deploy scripts include `waitForTransaction` calls to prevent this. If you run manual transactions too quickly, wait a few seconds and retry.
+
+## Build issues
+
+### `npm run docs:build` fails with broken links
+
+If you see "Docusaurus found broken links", check that all internal links use paths relative to `routeBasePath: '/'`. For example, link to `/architecture` instead of `/docs/architecture`.
+
+### Forge tests fail with missing submodules
+
+Run `git submodule update --init --recursive` to fetch all dependencies. The EVM contracts depend on LayerZero and OpenZeppelin via git submodules.
+
+## Related
+
+- [Quickstart](quickstart.md) for initial setup
+- [Deployment](deployment.md) for deployment steps
+- [Relayer](relayer.md) for relayer configuration
+- [Known Limitations](known-limitations.md) for protocol constraints
