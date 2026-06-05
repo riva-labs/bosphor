@@ -1,0 +1,33 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Enable auto-merge on any release PRs created by release-please.
+      # Requires "Allow auto-merge" enabled in repo Settings > General.
+      # If branch protection requires status checks, the merge waits for CI.
+      - name: Auto-merge release PRs
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRS_JSON: ${{ steps.release.outputs.prs }}
+        run: |
+          echo "$PRS_JSON" | jq -r '.[].number' | while read pr; do
+            echo "Enabling auto-merge for PR #$pr"
+            gh pr merge "$pr" --auto --merge --repo "${{ github.repository }}" || true
+          done
