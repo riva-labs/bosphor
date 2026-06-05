@@ -623,12 +623,11 @@ This encodes: execution type 3 (lzReceive), gas limit 200,000.
 
 Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and listen for execution confirmations.
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the `quote` function, (2) submit a storage intent via `submitIntent` with the quoted fee as msg.value, and (3) listen for the `IntentExecuted` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under `contracts/evm/`. The destination EID for Sui testnet is 40378.
-
-:::
+<AiPrompt>
+{`Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the \`quote\` function, (2) submit a storage intent via \`submitIntent\` with the quoted fee as msg.value, and (3) listen for the \`IntentExecuted\` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under \`contracts/evm/\`. The destination EID for Sui testnet is 40378.`}
+</AiPrompt>
 
 ## ethers.js v6
 
@@ -853,12 +852,11 @@ The full round-trip from submission to confirmation typically takes 2-10 minutes
 ## Deployment Guide
 
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Deploy the Bosphor contracts to Sepolia and Sui testnet. My .env file is already configured with RPC URLs and private keys. Run `npm run deploy:sui` first, then `npm run deploy:evm`, then `npm run wire` to set peers on both chains. After deployment, verify the contracts on Etherscan and SuiScan, and run `npm run test:e2e` to confirm the full round-trip works.
-
-:::
+<AiPrompt>
+{`Deploy the Bosphor contracts to Sepolia and Sui testnet. My .env file is already configured with RPC URLs and private keys. Run \`npm run deploy:sui\` first, then \`npm run deploy:evm\`, then \`npm run wire\` to set peers on both chains. After deployment, verify the contracts on Etherscan and SuiScan, and run \`npm run test:e2e\` to confirm the full round-trip works.`}
+</AiPrompt>
 
 ## Prerequisites
 
@@ -1035,12 +1033,11 @@ The off-chain service that processes intents. The relayer polls for `IntentRecei
 
 Step-by-step checklist for integrating with Bosphor. Complete each item before moving to the next.
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Walk me through the Bosphor integration checklist step by step. I need to: (1) understand the architecture and security model, (2) deploy contracts to Sepolia and Sui testnet, (3) verify deployment on Etherscan and SuiScan, (4) run the E2E test, (5) integrate fee estimation and intent submission into my dApp using ethers.js or viem, (6) verify relayer health, and (7) review trust assumptions for production readiness. Guide me through each step and flag anything that needs my input.
-
-:::
+<AiPrompt>
+{`Walk me through the Bosphor integration checklist step by step. I need to: (1) understand the architecture and security model, (2) deploy contracts to Sepolia and Sui testnet, (3) verify deployment on Etherscan and SuiScan, (4) run the E2E test, (5) integrate fee estimation and intent submission into my dApp using ethers.js or viem, (6) verify relayer health, and (7) review trust assumptions for production readiness. Guide me through each step and flag anything that needs my input.`}
+</AiPrompt>
 
 ## Prerequisites
 
@@ -1367,12 +1364,11 @@ The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer c
 
 Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run `npm run new-deployment` to deploy everything and verify with the E2E test.
-
-:::
+<AiPrompt>
+{`Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run \`npm run new-deployment\` to deploy everything and verify with the E2E test.`}
+</AiPrompt>
 
 ## Prerequisites
 
@@ -1489,12 +1485,11 @@ If you run into issues during setup or deployment, see the [Troubleshooting](tro
 
 The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both chains for events, uploads payloads to Walrus, executes storage intents on Sui, and sends execution proofs back to EVM via LayerZero.
 
-:::tip AI-Assisted Setup
-Copy this prompt into your AI coding assistant (Claude Code, Cursor, Codex):
+import AiPrompt from '@site/src/components/AiPrompt';
 
-> Set up and run the Bosphor relayer service. Copy `relayer/.env.example` to `relayer/.env` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run `cd relayer && npm install && npm run start:dev` and verify the health endpoint responds at GET /health.
-
-:::
+<AiPrompt>
+{`Set up and run the Bosphor relayer service. Copy \`relayer/.env.example\` to \`relayer/.env\` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run \`cd relayer && npm install && npm run start:dev\` and verify the health endpoint responds at GET /health.`}
+</AiPrompt>
 
 ## How it works
 
