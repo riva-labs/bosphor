@@ -1,0 +1,70 @@
+---
+description: Bosphor coding conventions, commit format, and build commands
+globs:
+---
+
+# Bosphor Conventions
+
+## Commit Messages
+
+Conventional Commits format: `type(scope): description`
+
+### Types
+- `feat` — New feature
+- `fix` — Bug fix
+- `docs` — Documentation only
+- `chore` — Tooling, config, dependencies
+- `refactor` — Code restructuring without behavior change
+- `test` — Adding or fixing tests
+- `perf` — Performance improvement
+- `ci` — CI/CD changes
+
+### Scopes
+- `contracts`, `sui`, `relayer`, `scripts`, `docs`, `website`, `ci`, `config`
+
+### Rules
+- Imperative mood: "add feature" not "added feature"
+- First line under 72 characters
+- No period at end of description
+
+## Branch Naming
+
+`type/short-description` — e.g. `feature/batch-intents`, `fix/relayer-reconnect`
+
+Feature work, multi-file changes, and multi-commit work must go on a dedicated branch. Hotfixes may go directly on main.
+
+## Product Name
+
+Always "Bosphor" (PascalCase). Only lowercase `bosphor` in file paths and package names.
+
+## No Em Dashes
+
+Never use em dashes in any generated text. Use a period or comma instead.
+
+## Runtime
+
+Node 22 required (.nvmrc pinned). tsx + @mysten/sui incompatible with Node 24.
+
+## Build and Test Commands
+
+```bash
+# Solidity build + tests
+cd contracts/evm && forge build && forge test -vvv
+
+# Move tests
+cd sui/lz-receiver && sui move test --build-env testnet
+
+# Relayer build
+cd relayer && npm run build
+
+# End-to-end cross-chain test
+npm run test:e2e
+```
+
+## npm Scripts
+
+- `npm run deploy:sui` — Sui deploy + register_oapp + set_peer
+- `npm run deploy:evm` — EVM deploy + setPeer
+- `npm run wire` — peer update only
+- `npm run test:e2e` — E2E test with LZ polling
+- `npm run new-deployment` — full: deploy-sui + deploy-evm + wire + e2e
