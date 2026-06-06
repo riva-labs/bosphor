@@ -20,17 +20,12 @@ describe('IntentProcessor.processIntent', () => {
     };
 
     mockSui = {
-      pollLzEvents: jest.fn().mockResolvedValue({
-        events: [],
-        newCursor: null,
-        hasMore: false,
-      }),
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
       lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
       quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
       getClient: jest.fn().mockReturnValue({
-        waitForTransaction: jest.fn().mockResolvedValue({}),
+        core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
     };
 
@@ -192,6 +187,132 @@ describe('IntentProcessor.processIntent', () => {
   });
 });
 
+describe('IntentProcessor.handleSuiLzEvent', () => {
+  let processor: IntentProcessor;
+  let mockSui: Partial<SuiService>;
+  let mockWalrus: Partial<WalrusService>;
+
+  // ABI-encode a valid LZ payload: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
+  function makeAbiPayload(sender: string, payload: string, deadlineUnix: number): number[] {
+    const { ethers } = require('ethers');
+    const intentIdBytes32 = '0x' + 'ab'.repeat(32);
+    const encoded = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['bytes32', 'address', 'bytes', 'uint256'],
+      [intentIdBytes32, sender, payload, deadlineUnix],
+    );
+    return Array.from(ethers.getBytes(encoded));
+  }
+
+  beforeEach(async () => {
+    mockSui = {
+      executeStore: jest.fn().mockResolvedValue('suidigest'),
+      lzSendProof: jest.fn().mockResolvedValue('lzdigest'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
+      getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
+      getAddress: jest.fn().mockReturnValue('0xsuiaddr'),
+      setOnEventCallback: jest.fn(),
+      getClient: jest.fn().mockReturnValue({
+        core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
+      }),
+    };
+
+    mockWalrus = {
+      upload: jest.fn().mockResolvedValue({
+        blobId: 'blob123',
+        suiObjectId: '0xblobobj',
+        endEpoch: 50,
+      }),
+      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
+      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntentProcessor,
+        {
+          provide: EvmService,
+          useValue: {
+            getBlockNumber: jest.fn().mockResolvedValue(100),
+            pollEvents: jest.fn().mockResolvedValue({ events: [], newFromBlock: 101 }),
+          },
+        },
+        { provide: SuiService, useValue: mockSui },
+        { provide: WalrusService, useValue: mockWalrus },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'EVM_DST_EID') return 40161;
+              return undefined;
+            }),
+            getOrThrow: jest.fn(() => 40161),
+          },
+        },
+      ],
+    }).compile();
+
+    processor = module.get<IntentProcessor>(IntentProcessor);
+  });
+
+  it('should process a valid Sui LZ event and call lzSendProof', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const futureDeadline = Math.floor(Date.now() / 1000) + 3600;
+    const payload = makeAbiPayload(sender, '0x' + Buffer.from('hello').toString('hex'), futureDeadline);
+
+    await processor.handleSuiLzEvent({
+      intentId: '0x' + 'ab'.repeat(32),
+      payload,
+      srcEid: 40161,
+    });
+
+    expect(mockWalrus.upload).toHaveBeenCalledTimes(1);
+    expect(mockSui.lzSendProof).toHaveBeenCalledTimes(1);
+  });
+
+  it('should skip already-processed intents (dedup)', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const futureDeadline = Math.floor(Date.now() / 1000) + 3600;
+    const payload = makeAbiPayload(sender, '0x1234', futureDeadline);
+    const event = { intentId: '0x' + 'ab'.repeat(32), payload, srcEid: 40161 };
+
+    await processor.handleSuiLzEvent(event);
+    await processor.handleSuiLzEvent(event); // second call
+
+    expect(mockWalrus.upload).toHaveBeenCalledTimes(1); // only once
+  });
+
+  it('should mark as processed and return on ABI decode failure', async () => {
+    await processor.handleSuiLzEvent({
+      intentId: '0x' + 'cc'.repeat(32),
+      payload: [0, 1, 2], // invalid ABI
+      srcEid: 40161,
+    });
+
+    expect(mockWalrus.upload).not.toHaveBeenCalled();
+
+    // Should be deduped on retry
+    await processor.handleSuiLzEvent({
+      intentId: '0x' + 'cc'.repeat(32),
+      payload: [0, 1, 2],
+      srcEid: 40161,
+    });
+  });
+
+  it('should skip expired deadlines', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const pastDeadline = Math.floor(Date.now() / 1000) - 3600; // 1h ago
+    const payload = makeAbiPayload(sender, '0x1234', pastDeadline);
+
+    await processor.handleSuiLzEvent({
+      intentId: '0x' + 'dd'.repeat(32),
+      payload,
+      srcEid: 40161,
+    });
+
+    expect(mockWalrus.upload).not.toHaveBeenCalled();
+  });
+});
+
 describe('IntentProcessor.poll', () => {
   let processor: IntentProcessor;
   let mockEvm: Partial<EvmService>;
@@ -205,11 +326,6 @@ describe('IntentProcessor.poll', () => {
     };
 
     mockSui = {
-      pollLzEvents: jest.fn().mockResolvedValue({
-        events: [],
-        newCursor: null,
-        hasMore: false,
-      }),
       getAddress: jest.fn().mockReturnValue('0xsuiaddr'),
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
     };
@@ -236,40 +352,33 @@ describe('IntentProcessor.poll', () => {
     jest.restoreAllMocks();
   });
 
-  it('should poll Sui and EVM events when called', async () => {
+  it('should poll EVM events when called', async () => {
     await processor.poll();
 
-    expect(mockSui.pollLzEvents).toHaveBeenCalled();
+    // Sui events are now pushed via checkpoint streaming, only EVM is polled
     expect(mockEvm.pollEvents).toHaveBeenCalled();
   });
 
   it('should not poll when stopped', async () => {
-    // Trigger shutdown
     await processor.onModuleDestroy();
-
     await processor.poll();
 
-    expect(mockSui.pollLzEvents).not.toHaveBeenCalled();
     expect(mockEvm.pollEvents).not.toHaveBeenCalled();
   });
 
   it('should skip poll if already processing', async () => {
-    // Make the first poll hang
-    (mockSui.pollLzEvents as jest.Mock).mockImplementation(
+    // Make the first poll hang on EVM
+    (mockEvm.pollEvents as jest.Mock).mockImplementation(
       () =>
         new Promise((resolve) =>
-          setTimeout(() => resolve({ events: [], newCursor: null, hasMore: false }), 200),
+          setTimeout(() => resolve({ events: [], newFromBlock: 101 }), 200),
         ),
     );
 
-    // Start first poll (will be in-flight)
     const first = processor.poll();
-
-    // Second poll should be skipped since first is still processing
     await processor.poll();
 
-    // Only one call to pollLzEvents
-    expect(mockSui.pollLzEvents).toHaveBeenCalledTimes(1);
+    expect(mockEvm.pollEvents).toHaveBeenCalledTimes(1);
 
     await first;
   });
@@ -302,7 +411,7 @@ describe('IntentProcessor.poll', () => {
       lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
       quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getClient: jest.fn().mockReturnValue({
-        waitForTransaction: jest.fn().mockResolvedValue({}),
+        core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
     });
 
@@ -382,7 +491,7 @@ describe('IntentProcessor.poll', () => {
       lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
       quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getClient: jest.fn().mockReturnValue({
-        waitForTransaction: jest.fn().mockResolvedValue({}),
+        core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
     });
 
