@@ -6,11 +6,9 @@ title: Integration Checklist
 
 Step-by-step checklist for integrating with Bosphor. Complete each item before moving to the next.
 
-import AiPrompt from '@site/src/components/AiPrompt';
+import AgentPrompt from '@site/src/components/AgentPrompt';
 
-<AiPrompt>
-{`Walk me through the Bosphor integration checklist step by step. I need to: (1) understand the architecture and security model, (2) deploy contracts to Sepolia and Sui testnet, (3) verify deployment on Etherscan and SuiScan, (4) run the E2E test, (5) integrate fee estimation and intent submission into my dApp using ethers.js or viem, (6) verify relayer health, and (7) review trust assumptions for production readiness. Guide me through each step and flag anything that needs my input.`}
-</AiPrompt>
+<AgentPrompt prompt="Walk me through the Bosphor integration checklist step by step. I need to: (1) understand the architecture and security model, (2) deploy contracts to Sepolia and Sui testnet, (3) verify deployment on Etherscan and SuiScan, (4) run the E2E test, (5) integrate fee estimation and intent submission into my dApp using ethers.js or viem, (6) verify relayer health, and (7) review trust assumptions for production readiness. Guide me through each step and flag anything that needs my input." />
 
 ## Prerequisites
 

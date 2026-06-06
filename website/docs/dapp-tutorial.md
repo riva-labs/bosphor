@@ -6,11 +6,9 @@ title: dApp Integration Tutorial
 
 Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and listen for execution confirmations.
 
-import AiPrompt from '@site/src/components/AiPrompt';
+import AgentPrompt from '@site/src/components/AgentPrompt';
 
-<AiPrompt>
-{`Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the \`quote\` function, (2) submit a storage intent via \`submitIntent\` with the quoted fee as msg.value, and (3) listen for the \`IntentExecuted\` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under \`contracts/evm/\`. The destination EID for Sui testnet is 40378.`}
-</AiPrompt>
+<AgentPrompt prompt="Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the `quote` function, (2) submit a storage intent via `submitIntent` with the quoted fee as msg.value, and (3) listen for the `IntentExecuted` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under `contracts/evm/`. The destination EID for Sui testnet is 40378." />
 
 ## ethers.js v6
 

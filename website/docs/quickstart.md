@@ -7,11 +7,9 @@ title: Quickstart
 
 Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
 
-import AiPrompt from '@site/src/components/AiPrompt';
+import AgentPrompt from '@site/src/components/AgentPrompt';
 
-<AiPrompt>
-{`Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run \`npm run new-deployment\` to deploy everything and verify with the E2E test.`}
-</AiPrompt>
+<AgentPrompt prompt="Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run `npm run new-deployment` to deploy everything and verify with the E2E test." />
 
 ## Prerequisites
 
