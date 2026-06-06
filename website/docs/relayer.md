@@ -5,7 +5,7 @@ title: Relayer Operator Guide
 
 # Relayer Operator Guide
 
-The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both chains for events, uploads payloads to Walrus, executes storage intents on Sui, and sends execution proofs back to EVM via LayerZero.
+The Bosphor relayer is a NestJS service that bridges Sui and EVM. It watches both chains for events (EVM via polling, Sui via gRPC checkpoint streaming), uploads payloads to Walrus, executes storage intents on Sui, and sends execution proofs back to EVM via LayerZero.
 
 import AgentPrompt from '@site/src/components/AgentPrompt';
 
@@ -13,7 +13,7 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 ## How it works
 
-1. Polls Sui for `IntentReceived` events (delivered by LayerZero from EVM)
+1. Receives `IntentReceived` events from Sui via gRPC checkpoint streaming (delivered by LayerZero from EVM)
 2. Uploads the intent payload to Walrus as a deletable blob
 3. Calls `execute_store` on Sui with the certified blob
 4. Quotes the LZ fee for proof verification (adds 10% buffer)
@@ -42,7 +42,7 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EVM_DST_EID` | `40161` | EVM destination endpoint ID for proof verification |
-| `SUI_RPC_URL` | `https://fullnode.testnet.sui.io:443` | Sui RPC endpoint |
+| `SUI_GRPC_URL` | `https://sui-testnet.mystenlabs.com` | Sui gRPC endpoint |
 | `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
@@ -87,9 +87,14 @@ docker-compose up -d
 
 The Docker container runs the relayer with the environment from `.env`.
 
-## Polling and deduplication
+## Event detection and deduplication
 
-The relayer polls both chains every 5 seconds. Processed intents are tracked in an in-memory `Map<intentId, timestamp>` to prevent duplicate processing.
+The relayer uses two different mechanisms for event detection:
+
+- **EVM**: Polls every 5 seconds via `@Interval`
+- **Sui**: Receives events in near-real-time via gRPC checkpoint streaming with automatic backfill on startup and exponential backoff reconnection
+
+Processed intents are tracked in an in-memory `Map<intentId, timestamp>` to prevent duplicate processing.
 
 ### TTL-based pruning
 
@@ -103,7 +108,7 @@ Set `INTENT_TTL_MS` higher if your relayer restarts frequently and you see unnec
 
 ## Fee quoting
 
-Before sending a proof back to EVM, the relayer quotes the LZ fee using `devInspect` simulation on Sui. The quoted fee gets a 10% buffer to account for gas price fluctuations.
+Before sending a proof back to EVM, the relayer quotes the LZ fee using `simulateTransaction` via gRPC on Sui. The quoted fee gets a 10% buffer to account for gas price fluctuations.
 
 If the fee quote fails (e.g. LZ config variables not set), the relayer falls back to a default fee of 0.5 SUI (500,000,000 MIST).
 

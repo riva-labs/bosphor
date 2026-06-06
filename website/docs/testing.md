@@ -81,7 +81,7 @@ Tests are in `relayer/src/**/*.spec.ts`. All external dependencies (Sui client, 
 | IntentProcessor | `intent/intent.processor.spec.ts` | Full pipeline (upload, executeStore, lzSendProof), deduplication, TTL expiry, fee quote fallback, custom EVM_DST_EID |
 | WalrusService | `walrus/walrus.service.spec.ts` | newlyCreated/alreadyCertified responses, 5xx retry with backoff, 4xx no-retry, timeout handling |
 | EvmService | `chain/evm/evm.service.spec.ts` | Event polling, log parsing, confirmExecution retry (3 attempts, 2s delay) |
-| SuiService | `chain/sui/sui.service.spec.ts` | lzSendProof PTB construction, quoteLzFee BCS parsing, error on missing LZ config |
+| SuiService | `chain/sui/sui.service.spec.ts` | lzSendProof PTB construction, quoteLzFee BCS parsing, checkpoint event processing, error on missing LZ config |
 | HealthService | `health/health.service.spec.ts` | ok/degraded status, uptime calculation |
 
 ### Key patterns
@@ -128,7 +128,7 @@ The test prints a 6-checkpoint summary with TX hashes and explorer links:
 | `EVM_RPC_URL` | Yes |
 | `EVM_ADAPTER_ADDRESS` | Yes |
 | `EVM_RELAYER_KEY` | Yes |
-| `SUI_RPC_URL` | Optional (for Sui event details) |
+| `SUI_GRPC_URL` | Optional (for Sui event details) |
 | `SUI_PACKAGE_ID` | Optional (for StorageExecuted events) |
 | `SUI_LZ_PACKAGE_ID` | Optional (for ProofSent events) |
 
