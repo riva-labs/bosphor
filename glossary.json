@@ -1,0 +1,61 @@
+[
+  {
+    "term": "Blob",
+    "id": "blob",
+    "description": "A unit of data stored on Walrus. Bosphor stores intent payloads as deletable blobs."
+  },
+  {
+    "term": "Cross-chain message",
+    "id": "cross-chain-message",
+    "description": "A message sent between chains via LayerZero v2."
+  },
+  {
+    "term": "DVN",
+    "id": "dvn",
+    "aliases": ["Decentralized Verifier Network"],
+    "description": "A set of independent verifiers in LayerZero v2 that validate cross-chain messages before delivery."
+  },
+  {
+    "term": "EID",
+    "id": "eid",
+    "aliases": ["Endpoint ID"],
+    "description": "A numeric identifier for a chain in LayerZero v2."
+  },
+  {
+    "term": "Epoch",
+    "id": "epoch",
+    "description": "A time period in Walrus that determines how long a blob is stored."
+  },
+  {
+    "term": "Intent",
+    "id": "intent",
+    "description": "A storage request submitted on an EVM chain containing payload, deadline, and destination chain EID."
+  },
+  {
+    "term": "LayerZero v2",
+    "id": "layerzero-v2",
+    "aliases": ["LayerZero", "LZ"],
+    "description": "The cross-chain messaging protocol Bosphor uses for both directions of the message flow."
+  },
+  {
+    "term": "OApp",
+    "id": "oapp",
+    "aliases": ["Omnichain Application"],
+    "description": "A LayerZero v2 application contract that can send and receive cross-chain messages."
+  },
+  {
+    "term": "Peer",
+    "id": "peer",
+    "description": "A cross-chain OApp counterpart configured via setPeer (EVM) or set_peer (Sui)."
+  },
+  {
+    "term": "Proof",
+    "id": "proof",
+    "description": "An execution receipt sent from Sui back to EVM after a storage intent is fulfilled."
+  },
+  {
+    "term": "Relayer",
+    "id": "relayer",
+    "description": "The off-chain service that processes intents: polls events, uploads to Walrus, sends proof back to EVM."
+  }
+]
