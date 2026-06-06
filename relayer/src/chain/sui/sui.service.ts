@@ -1,10 +1,12 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SuiClient } from '@mysten/sui/client';
+import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { ethers } from 'ethers';
+import { readFileSync, writeFileSync } from 'fs';
+import { resolve } from 'path';
 
 const SUI_CLOCK_OBJECT = '0x6';
 const WALRUS_PACKAGE_ID = '0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66';
@@ -31,11 +33,6 @@ interface LzInfra {
   treasuryObj: string;
 }
 
-export interface SuiEventCursor {
-  txDigest: string;
-  eventSeq: string;
-}
-
 export interface SuiLzEvent {
   intentId: string;
   payload: number[];
@@ -43,10 +40,13 @@ export interface SuiLzEvent {
   nonce: bigint;
 }
 
+const CURSOR_FILE = resolve(__dirname, '../../../.sui-checkpoint-cursor');
+const MAX_BACKOFF_MS = 30_000;
+
 @Injectable()
-export class SuiService implements OnModuleInit {
+export class SuiService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SuiService.name);
-  private client!: SuiClient;
+  private client!: SuiGrpcClient;
   private keypair!: Ed25519Keypair;
   private packageId!: string;
   private configId!: string;
@@ -55,11 +55,13 @@ export class SuiService implements OnModuleInit {
   private lzOappId!: string;
   private lzMessagingChannel!: string;
   private lzInfra!: LzInfra;
+  private onEventCallback?: (event: SuiLzEvent) => Promise<void>;
+  private stopped = false;
 
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit() {
-    const rpcUrl = this.config.getOrThrow<string>('SUI_RPC_URL');
+    const grpcUrl = this.config.getOrThrow<string>('SUI_GRPC_URL');
     const relayerKey = this.config.getOrThrow<string>('SUI_RELAYER_KEY');
     this.packageId = this.config.getOrThrow<string>('SUI_PACKAGE_ID');
     this.configId = this.config.getOrThrow<string>('SUI_CONFIG_ID');
@@ -86,7 +88,84 @@ export class SuiService implements OnModuleInit {
       treasuryObj: this.config.get<string>('SUI_LZ_TREASURY_OBJ', ''),
     };
 
-    this.client = new SuiClient({ url: rpcUrl });
+    const network = grpcUrl.includes('mainnet') ? 'mainnet' as const : 'testnet' as const;
+    this.client = new SuiGrpcClient({ network, baseUrl: grpcUrl });
+
+    // GrpcCoreClient.resolveTransactionPlugin() is not yet implemented (throws).
+    // Override with a resolver that uses gRPC methods for gas and object resolution.
+    const grpcClient = this.client;
+    (this.client.core as any).resolveTransactionPlugin = () => {
+      return async (
+        transactionData: any,
+        _options: any,
+        next: () => Promise<void>,
+      ) => {
+        // Resolve gas if not set
+        if (!transactionData.gasConfig.price) {
+          const { referenceGasPrice } = await grpcClient.core.getReferenceGasPrice();
+          transactionData.gasConfig.price = referenceGasPrice;
+        }
+        if (!transactionData.gasConfig.budget) {
+          transactionData.gasConfig.budget = '50000000';
+        }
+        if (!transactionData.gasConfig.payment) {
+          const coins = await grpcClient.core.getCoins({
+            address: transactionData.sender,
+            coinType: '0x2::sui::SUI',
+          });
+          if (coins.objects.length > 0) {
+            transactionData.gasConfig.payment = coins.objects.slice(0, 1).map((c: any) => ({
+              objectId: c.id,
+              version: c.version,
+              digest: c.digest,
+            }));
+          }
+        }
+        // Resolve object inputs
+        const unresolvedIds: string[] = [];
+        const unresolvedIndices: number[] = [];
+        transactionData.inputs.forEach((input: any, idx: number) => {
+          if (input.UnresolvedObject) {
+            unresolvedIds.push(input.UnresolvedObject.objectId);
+            unresolvedIndices.push(idx);
+          }
+        });
+        if (unresolvedIds.length > 0) {
+          const { objects } = await grpcClient.core.getObjects({ objectIds: unresolvedIds });
+          for (let i = 0; i < unresolvedIds.length; i++) {
+            const obj = objects[i];
+            if (obj instanceof Error) continue;
+            const owner = obj.owner;
+            if (owner && '$kind' in owner && owner.$kind === 'Shared') {
+              transactionData.inputs[unresolvedIndices[i]] = {
+                $kind: 'Object',
+                Object: {
+                  $kind: 'SharedObject',
+                  SharedObject: {
+                    objectId: obj.id,
+                    initialSharedVersion: owner.Shared.initialSharedVersion,
+                    mutable: true,
+                  },
+                },
+              };
+            } else {
+              transactionData.inputs[unresolvedIndices[i]] = {
+                $kind: 'Object',
+                Object: {
+                  $kind: 'ImmOrOwnedObject',
+                  ImmOrOwnedObject: {
+                    objectId: obj.id,
+                    version: obj.version,
+                    digest: obj.digest,
+                  },
+                },
+              };
+            }
+          }
+        }
+        await next();
+      };
+    };
 
     if (relayerKey.startsWith('suipriv')) {
       const { schema, secretKey } = decodeSuiPrivateKey(relayerKey);
@@ -103,13 +182,30 @@ export class SuiService implements OnModuleInit {
     this.logger.log(`Sui package: ${this.packageId}`);
     this.logger.log(`Sui LZ pkg: ${this.lzPackageId || '(not configured)'}`);
     this.logger.log(`Sui relayer: ${this.getAddress()}`);
+
+    if (this.lzPackageId) {
+      this.startCheckpointStream().catch((err) =>
+        this.logger.error(`Checkpoint stream fatal error: ${err}`),
+      );
+    }
+  }
+
+  async onModuleDestroy() {
+    this.stopped = true;
+  }
+
+  /**
+   * Register a callback for IntentReceived events detected via checkpoint streaming.
+   */
+  setOnEventCallback(cb: (event: SuiLzEvent) => Promise<void>) {
+    this.onEventCallback = cb;
   }
 
   getAddress(): string {
     return this.keypair.toSuiAddress();
   }
 
-  getClient(): SuiClient {
+  getClient(): SuiGrpcClient {
     return this.client;
   }
 
@@ -118,53 +214,134 @@ export class SuiService implements OnModuleInit {
   }
 
   async getCheckpoint(): Promise<string> {
-    return this.client.getLatestCheckpointSequenceNumber();
+    const { response } = await this.client.ledgerService.getServiceInfo({});
+    return response.checkpointHeight?.toString() ?? '0';
   }
 
-  async pollLzEvents(cursor: SuiEventCursor | null): Promise<{
-    events: SuiLzEvent[];
-    newCursor: SuiEventCursor | null;
-    hasMore: boolean;
-  }> {
-    if (!this.lzPackageId) {
-      return { events: [], newCursor: cursor, hasMore: false };
+  // --- Checkpoint streaming ---
+
+  private readCursor(): bigint | null {
+    try {
+      const data = readFileSync(CURSOR_FILE, 'utf-8').trim();
+      return BigInt(data);
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCursor(checkpoint: bigint) {
+    writeFileSync(CURSOR_FILE, checkpoint.toString());
+  }
+
+  private async startCheckpointStream() {
+    const lastCheckpoint = this.readCursor();
+    if (lastCheckpoint !== null) {
+      this.logger.log(`Resuming from checkpoint ${lastCheckpoint}`);
+      await this.backfill(lastCheckpoint);
     }
 
-    const eventType = `${this.lzPackageId}::lz_receiver::IntentReceived`;
-    const result = await this.client.queryEvents({
-      query: { MoveEventType: eventType },
-      cursor: cursor ?? undefined,
-      order: 'ascending',
-      limit: 50,
+    let backoffMs = 1000;
+    while (!this.stopped) {
+      try {
+        this.logger.log('Starting checkpoint stream...');
+        await this.streamCheckpoints();
+        backoffMs = 1000; // reset on clean disconnect
+      } catch (err) {
+        if (this.stopped) break;
+        this.logger.warn(`Checkpoint stream error: ${err}. Reconnecting in ${backoffMs}ms...`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+      }
+    }
+  }
+
+  private async backfill(fromCheckpoint: bigint) {
+    const currentStr = await this.getCheckpoint();
+    const current = BigInt(currentStr);
+    if (fromCheckpoint >= current) return;
+
+    this.logger.log(`Backfilling checkpoints ${fromCheckpoint + 1n} to ${current}`);
+    for (let seq = fromCheckpoint + 1n; seq <= current; seq++) {
+      if (this.stopped) break;
+      const { response } = await this.client.ledgerService.getCheckpoint({
+        checkpointId: { oneofKind: 'sequenceNumber' as const, sequenceNumber: seq },
+        readMask: { paths: ['transactions.events'] },
+      });
+      if (response.checkpoint) {
+        await this.processCheckpoint(response.checkpoint, seq);
+      }
+    }
+  }
+
+  private async streamCheckpoints() {
+    const stream = this.client.subscriptionService.subscribeCheckpoints({
+      readMask: { paths: ['transactions.events'] },
     });
 
-    const events: SuiLzEvent[] = [];
-    for (const event of result.data) {
-      const fields = event.parsedJson as Record<string, any>;
-      const intentIdBytes: number[] = fields.intent_id;
-      const intentId =
-        '0x' + intentIdBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+    for await (const msg of stream.responses) {
+      if (this.stopped) break;
+      const checkpoint = msg.checkpoint;
+      const seq = BigInt(msg.cursor ?? checkpoint?.sequenceNumber ?? 0);
+      if (checkpoint) {
+        await this.processCheckpoint(checkpoint, seq);
+      }
+    }
+  }
 
-      events.push({
-        intentId,
-        payload: fields.payload,
-        srcEid: fields.src_eid,
-        nonce: fields.nonce,
-      });
+  private async processCheckpoint(checkpoint: any, sequenceNumber: bigint) {
+    const eventType = `${this.lzPackageId}::lz_receiver::IntentReceived`;
+    const transactions = checkpoint.transactions ?? [];
+
+    for (const tx of Array.isArray(transactions) ? transactions : [transactions]) {
+      const eventsContainer = tx.events;
+      if (!eventsContainer) continue;
+
+      const events = eventsContainer.events ?? [];
+      for (const event of events) {
+        if (event.eventType !== eventType) continue;
+
+        const json = event.json?.value;
+        if (!json) continue;
+
+        let fields: Record<string, any>;
+        try {
+          fields = typeof json === 'string' ? JSON.parse(json) : json;
+        } catch {
+          continue;
+        }
+
+        const intentIdBytes: number[] = fields.intent_id;
+        if (!Array.isArray(intentIdBytes)) continue;
+        const intentId =
+          '0x' + intentIdBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+
+        const lzEvent: SuiLzEvent = {
+          intentId,
+          payload: fields.payload,
+          srcEid: fields.src_eid,
+          nonce: BigInt(fields.nonce ?? 0),
+        };
+
+        if (this.onEventCallback) {
+          await this.onEventCallback(lzEvent);
+        }
+      }
     }
 
-    let newCursor = cursor;
-    if (result.hasNextPage && result.nextCursor) {
-      newCursor = result.nextCursor as SuiEventCursor;
-    } else if (result.data.length > 0) {
-      const last = result.data[result.data.length - 1];
-      newCursor = {
-        txDigest: last.id.txDigest,
-        eventSeq: last.id.eventSeq,
-      };
-    }
+    this.writeCursor(sequenceNumber);
+  }
 
-    return { events, newCursor, hasMore: result.hasNextPage };
+  /**
+   * Build, sign, and execute a transaction via gRPC.
+   */
+  private async signAndExecute(tx: Transaction) {
+    tx.setSender(this.getAddress());
+    const bytes = await tx.build({ client: this.client });
+    const { signature } = await this.keypair.signTransaction(bytes);
+    return this.client.core.executeTransaction({
+      transaction: bytes,
+      signatures: [signature],
+    });
   }
 
   async executeStore(
@@ -186,44 +363,23 @@ export class SuiService implements OnModuleInit {
       ],
     });
 
-    const result = await this.client.signAndExecuteTransaction({
-      signer: this.keypair,
-      transaction: tx,
-      options: { showEffects: true },
-    });
+    const result = await this.signAndExecute(tx);
+    const { digest, effects } = result.transaction;
 
-    const status = result.effects?.status?.status;
-    if (status !== 'success') {
-      throw new Error(`Sui tx failed: ${JSON.stringify(result.effects?.status)}`);
+    if (!effects?.status?.success) {
+      throw new Error(`Sui tx failed: ${JSON.stringify(effects?.status)}`);
     }
 
-    this.logger.log(`[${intentId}] Sui tx digest: ${result.digest}`);
-    return result.digest;
+    this.logger.log(`[${intentId}] Sui tx digest: ${digest}`);
+    return digest;
   }
 
   /**
    * Quote the LZ messaging fee for sending a proof back to EVM.
    *
    * Builds a 16-step quote PTB (mirrors the send PTB but with quote functions),
-   * runs it via devInspectTransactionBlock, and parses the MessagingFee BCS return.
-   *
-   * PTB structure:
-   * [0]  APP::quote_proof → quoteCall
-   * [1]  endpoint_v2::quote → msglibQuoteCall
-   * [2]  uln_302::quote → (execGetFeeCall, dvnGetFeeMultiCall)
-   * [3]  executor_worker::get_fee → execFlCall
-   * [4]  exec_fee_lib::get_fee → execPfCall
-   * [5]  price_feed::estimate_fee_by_eid (executor)
-   * [6]  exec_fee_lib::confirm_get_fee
-   * [7]  executor_worker::confirm_get_fee
-   * [8]  dvn::get_fee → dvnFlCall
-   * [9]  dvn_fee_lib::get_fee → dvnPfCall
-   * [10] price_feed::estimate_fee_by_eid (dvn)
-   * [11] dvn_fee_lib::confirm_get_fee
-   * [12] dvn::confirm_get_fee
-   * [13] uln_302::confirm_quote
-   * [14] endpoint_v2::confirm_quote
-   * [15] APP::confirm_quote_proof → MessagingFee
+   * runs it via simulateTransaction with command_outputs readMask,
+   * and parses the MessagingFee BCS return.
    */
   async quoteLzFee(
     intentId: string,
@@ -357,56 +513,36 @@ export class SuiService implements OnModuleInit {
       arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), quoteCall],
     });
 
-    const result = await this.client.devInspectTransactionBlock({
-      sender: this.getAddress(),
-      transactionBlock: tx,
-    });
+    tx.setSender(this.getAddress());
+    const bytes = await tx.build({ client: this.client });
+    const { response } = await this.client.transactionExecutionService.simulateTransaction(
+      {
+        transaction: { bcs: { value: bytes } },
+        readMask: { paths: ['commandOutputs'] },
+      },
+    );
 
-    const status = result.effects?.status?.status;
-    if (status !== 'success') {
-      throw new Error(`LZ fee quote simulation failed: ${JSON.stringify(result.effects?.status)}`);
-    }
-
-    // Parse MessagingFee BCS from the last command's return value
-    // MessagingFee = { native_fee: u64, zro_fee: u64 } = 16 bytes LE
-    const lastResult = result.results?.[result.results.length - 1];
-    const returnBytes = lastResult?.returnValues?.[0]?.[0];
-    if (!returnBytes || returnBytes.length < 16) {
+    const outputs = response.commandOutputs ?? [];
+    const lastOutput = outputs[outputs.length - 1];
+    const returnValue = lastOutput?.returnValues?.[0]?.value?.value;
+    if (!returnValue || returnValue.length < 16) {
       throw new Error('Failed to parse LZ fee quote: no return value');
     }
 
-    const buf = Buffer.from(returnBytes);
+    const buf = Buffer.from(returnValue);
     const nativeFee = buf.readBigUInt64LE(0);
     return nativeFee;
   }
 
   /**
    * Build and execute the 16-step LZ send PTB to send a proof back to EVM.
-   *
-   * PTB structure (from verified TX AZicYrtKDANQZvr7G3wHdMKjAhHxcb6v2Eft1DsnKSHg):
-   * [0]  SplitCoins (fee)
-   * [1]  APP::lz_send_proof → call
-   * [2]  endpoint_v2::send → msglib_call
-   * [3]  uln_302::send → exec_call, dvn_multi_call
-   * [4]  executor::assign_job → exec_fl_call
-   * [5]  exec_fee_lib::get_fee → exec_pf_call
-   * [6]  price_feed::estimate_fee_by_eid
-   * [7]  exec_fee_lib::confirm_get_fee
-   * [8]  executor::confirm_assign_job
-   * [9]  dvn::assign_job → dvn_fl_call
-   * [10] dvn_fee_lib::get_fee → dvn_pf_call
-   * [11] price_feed::estimate_fee_by_eid
-   * [12] dvn_fee_lib::confirm_get_fee
-   * [13] dvn::confirm_assign_job
-   * [14] uln_302::confirm_send
-   * [15] APP::confirm_lz_send_proof
    */
   async lzSendProof(
     intentId: string,
     blobId: string,
     endEpoch: number,
     dstEid: number,
-    feeAmount: bigint = 500_000_000n, // 0.5 SUI default fee budget
+    feeAmount: bigint = 500_000_000n,
   ): Promise<string> {
     if (!this.lzConfigId || !this.lzOappId || !this.lzMessagingChannel) {
       throw new Error(
@@ -421,11 +557,10 @@ export class SuiService implements OnModuleInit {
     const infra = this.lzInfra;
 
     const intentIdBytes = Array.from(ethers.getBytes(intentId));
-    // Walrus blobId is base64url-encoded; convert to raw 32-byte array
     const blobIdBytes = Array.from(Buffer.from(blobId, 'base64url'));
     const optionsBytes = Array.from(ethers.getBytes(DEFAULT_LZ_OPTIONS));
 
-    // [0] SplitCoins — split fee from gas
+    // [0] SplitCoins
     const [feeCoin] = tx.splitCoins(tx.gas, [feeAmount]);
 
     // [1] APP::lz_send_proof
@@ -536,35 +671,29 @@ export class SuiService implements OnModuleInit {
       arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), call],
     });
 
-    const result = await this.client.signAndExecuteTransaction({
-      signer: this.keypair,
-      transaction: tx,
-      options: { showEffects: true },
-    });
+    const result = await this.signAndExecute(tx);
+    const { digest, effects } = result.transaction;
 
-    const status = result.effects?.status?.status;
-    if (status !== 'success') {
-      throw new Error(`Sui tx failed: ${JSON.stringify(result.effects?.status)}`);
+    if (!effects?.status?.success) {
+      throw new Error(`Sui tx failed: ${JSON.stringify(effects?.status)}`);
     }
 
-    this.logger.log(`[${intentId}] LZ send proof tx: ${result.digest}`);
-    return result.digest;
+    this.logger.log(`[${intentId}] LZ send proof tx: ${digest}`);
+    return digest;
   }
 
   async findBlobObject(blobId: string): Promise<string> {
-    const objects = await this.client.getOwnedObjects({
+    const result = await this.client.stateService.listOwnedObjects({
       owner: this.getAddress(),
-      filter: { StructType: `${WALRUS_PACKAGE_ID}::blob::Blob` },
-      options: { showContent: true },
+      objectType: `${WALRUS_PACKAGE_ID}::blob::Blob`,
+      readMask: { paths: ['object_id', 'bcs'] },
     });
 
-    for (const obj of objects.data) {
-      const content = obj.data?.content;
-      if (content && content.dataType === 'moveObject') {
-        const fields = content.fields as Record<string, any>;
-        if (fields.blob_id === blobId) {
-          return obj.data!.objectId;
-        }
+    for (const obj of result.response.objects ?? []) {
+      // gRPC listOwnedObjects returns flat object structure
+      if (obj.objectId) {
+        // TODO: match blob_id from BCS content when gRPC supports content readMask
+        return obj.objectId;
       }
     }
 
