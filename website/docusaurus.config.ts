@@ -66,7 +66,8 @@ const config: Config = {
   themeConfig: {
     colorMode: {
       defaultMode: 'dark',
-      respectPrefersColorScheme: true,
+      disableSwitch: true,
+      respectPrefersColorScheme: false,
     },
     navbar: {
       title: 'Bosphor',
@@ -91,6 +92,11 @@ const config: Config = {
         {
           href: 'https://github.com/riva-labs/bosphor',
           label: 'GitHub',
+          position: 'right',
+        },
+        {
+          href: 'https://bosphor.xyz',
+          label: 'Website',
           position: 'right',
         },
       ],
@@ -125,6 +131,10 @@ const config: Config = {
         {
           title: 'Resources',
           items: [
+            {
+              label: 'Bosphor Website',
+              href: 'https://bosphor.xyz',
+            },
             {
               label: 'GitHub',
               href: 'https://github.com/riva-labs/bosphor',
