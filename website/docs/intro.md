@@ -3,9 +3,9 @@ slug: /
 title: Introduction
 ---
 
-# Bosphor
+import HomepageHero from '@site/src/components/HomepageHero';
 
-**Bosphor makes Walrus accessible from any chain.** Submit a storage intent on EVM, and Bosphor routes it cross-chain to Walrus on Sui, returning a DVN-verified proof back to your origin chain.
+<HomepageHero />
 
 ## What it does
 
