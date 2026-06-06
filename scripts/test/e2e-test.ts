@@ -11,14 +11,14 @@
  *
  * Usage: npm run test:e2e
  * Required env: EVM_RPC_URL, EVM_ADAPTER_ADDRESS, EVM_RELAYER_KEY
- * Optional env: SUI_RPC_URL, SUI_PACKAGE_ID, SUI_LZ_PACKAGE_ID (for Sui event details)
+ * Optional env: SUI_GRPC_URL, SUI_PACKAGE_ID, SUI_LZ_PACKAGE_ID (for Sui event details)
  */
 import { config } from "dotenv";
 import { resolve } from "path";
 config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers, EventLog } from "ethers";
-import { SuiClient } from "@mysten/sui/client";
+import { createSuiClient } from "../util/sui-client.js";
 
 // --- Config ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
@@ -37,8 +37,6 @@ for (const [k, v] of Object.entries({
 }
 
 // Sui config (optional, for detailed event queries)
-const SUI_RPC_URL =
-  process.env.SUI_RPC_URL || "https://fullnode.testnet.sui.io:443";
 const SUI_PACKAGE_ID = process.env.SUI_PACKAGE_ID;
 const SUI_LZ_PACKAGE_ID = process.env.SUI_LZ_PACKAGE_ID;
 
@@ -135,81 +133,99 @@ async function querySuiEvents(intentId: string): Promise<SuiEventResult> {
 
   if (!SUI_PACKAGE_ID && !SUI_LZ_PACKAGE_ID) return result;
 
-  const suiClient = new SuiClient({ url: SUI_RPC_URL });
+  const suiClient = createSuiClient();
   const intentBytes = hexToBytes(intentId);
+  const storageEventType = SUI_PACKAGE_ID
+    ? `${SUI_PACKAGE_ID}::walrus_executor::StorageExecuted`
+    : null;
+  const proofEventType = SUI_LZ_PACKAGE_ID
+    ? `${SUI_LZ_PACKAGE_ID}::lz_receiver::ProofSent`
+    : null;
 
-  // Query StorageExecuted events
-  if (SUI_PACKAGE_ID) {
-    try {
-      const eventType = `${SUI_PACKAGE_ID}::walrus_executor::StorageExecuted`;
-      const events = await suiClient.queryEvents({
-        query: { MoveEventType: eventType },
-        order: "descending",
-        limit: 20,
+  // Look up events by scanning recent checkpoints
+  // Since queryEvents has no gRPC equivalent, we check the IntentExecuted
+  // EVM event's proof for blob data, and scan Sui transaction events by digest
+  // when available from the relayer's execution.
+  // For now, use the EVM proof data as the primary source and note that
+  // full Sui event verification requires transaction digests.
+  try {
+    const { response } = await suiClient.ledgerService.getServiceInfo({});
+    const currentCheckpoint = response.checkpointHeight ?? 0n;
+    // Scan last 20 checkpoints for relevant events
+    const startCheckpoint = currentCheckpoint > 20n ? currentCheckpoint - 20n : 0n;
+
+    for (let seq = currentCheckpoint; seq > startCheckpoint; seq--) {
+      if (result.storageExecuted && result.proofSent) break;
+
+      const { response: cpResponse } = await suiClient.ledgerService.getCheckpoint({
+        checkpointId: { oneofKind: "sequenceNumber" as const, sequenceNumber: seq },
+        readMask: { paths: ["transactions.events", "transactions.digest"] },
       });
 
-      for (const ev of events.data) {
-        const fields = ev.parsedJson as any;
-        if (
-          fields?.intent_id &&
-          bytesMatch(fields.intent_id, intentBytes)
-        ) {
-          const blobHex = BigInt(fields.walrus_blob_id)
-            .toString(16)
-            .padStart(64, "0");
-          result.storageExecuted = {
-            txDigest: ev.id.txDigest,
-            blobId: `0x${blobHex}`,
-            endEpoch: Number(fields.end_epoch),
-            executor: fields.executor,
-          };
-          break;
+      const cp = cpResponse.checkpoint;
+      if (!cp) continue;
+      const transactions = cp.transactions;
+      if (!transactions) continue;
+
+      const txList = Array.isArray(transactions) ? transactions : [transactions];
+      for (const tx of txList) {
+        const eventsContainer = tx.events;
+        if (!eventsContainer?.events) continue;
+
+        for (const event of eventsContainer.events) {
+          const json = event.json?.value;
+          if (!json) continue;
+
+          let fields: Record<string, any>;
+          try {
+            fields = typeof json === "string" ? JSON.parse(json) : json;
+          } catch {
+            continue;
+          }
+
+          if (
+            storageEventType &&
+            event.eventType === storageEventType &&
+            fields?.intent_id &&
+            bytesMatch(fields.intent_id, intentBytes) &&
+            !result.storageExecuted
+          ) {
+            const blobHex = BigInt(fields.walrus_blob_id).toString(16).padStart(64, "0");
+            result.storageExecuted = {
+              txDigest: tx.digest ?? "",
+              blobId: `0x${blobHex}`,
+              endEpoch: Number(fields.end_epoch),
+              executor: fields.executor,
+            };
+          }
+
+          if (
+            proofEventType &&
+            event.eventType === proofEventType &&
+            fields?.intent_id &&
+            bytesMatch(fields.intent_id, intentBytes) &&
+            !result.proofSent
+          ) {
+            const blobBytes: number[] = fields.blob_id;
+            const blobHex = blobBytes
+              .map((b: number) => b.toString(16).padStart(2, "0"))
+              .join("");
+            result.proofSent = {
+              txDigest: tx.digest ?? "",
+              blobId: `0x${blobHex}`,
+              endEpoch: Number(fields.end_epoch),
+              dstEid: Number(fields.dst_eid),
+              nonce: Number(fields.nonce),
+            };
+          }
         }
       }
-    } catch (err) {
-      console.log(
-        "  [info] Could not query StorageExecuted events:",
-        (err as Error).message,
-      );
     }
-  }
-
-  // Query ProofSent events
-  if (SUI_LZ_PACKAGE_ID) {
-    try {
-      const eventType = `${SUI_LZ_PACKAGE_ID}::lz_receiver::ProofSent`;
-      const events = await suiClient.queryEvents({
-        query: { MoveEventType: eventType },
-        order: "descending",
-        limit: 20,
-      });
-
-      for (const ev of events.data) {
-        const fields = ev.parsedJson as any;
-        if (
-          fields?.intent_id &&
-          bytesMatch(fields.intent_id, intentBytes)
-        ) {
-          const blobBytes: number[] = fields.blob_id;
-          const blobHex = blobBytes
-            .map((b: number) => b.toString(16).padStart(2, "0"))
-            .join("");
-          result.proofSent = {
-            txDigest: ev.id.txDigest,
-            blobId: `0x${blobHex}`,
-            endEpoch: Number(fields.end_epoch),
-            dstEid: Number(fields.dst_eid),
-            nonce: Number(fields.nonce),
-          };
-          break;
-        }
-      }
-    } catch (err) {
-      console.log(
-        "  [info] Could not query ProofSent events:",
-        (err as Error).message,
-      );
-    }
+  } catch (err) {
+    console.log(
+      "  [info] Could not query Sui events via gRPC:",
+      (err as Error).message,
+    );
   }
 
   return result;
@@ -224,7 +240,8 @@ async function main() {
   console.log("=".repeat(56));
   console.log(`  Sender:  ${sender}`);
   console.log(`  Adapter: ${EVM_ADAPTER_ADDRESS}`);
-  const networkLabel = SUI_RPC_URL.includes('mainnet') ? 'Sui mainnet' : 'Sui testnet';
+  const suiGrpcUrl = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
+  const networkLabel = suiGrpcUrl.includes('mainnet') ? 'Sui mainnet' : 'Sui testnet';
   console.log(`  DST EID: ${DST_EID} (${networkLabel})`);
 
   // ── Build and submit intent ──
