@@ -11,11 +11,9 @@ import { resolve } from "path";
 config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers } from "ethers";
-import { SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { bcs } from "@mysten/sui/bcs";
+import { createSuiClient, createSuiSigner, signAndExecute } from "./sui-client.js";
 
 // --- LayerZero Labs DVN addresses ---
 const LZ_LABS_DVN_ETH = "0x589dEDbD617e0CBcB916A9223F4d1300c294236b";
@@ -29,7 +27,7 @@ const EVM_ADAPTER = process.env.EVM_ADAPTER_ADDRESS!;
 const SUI_EID = Number(process.env.SUI_EID) || 30378;
 
 // --- Sui config ---
-const SUI_RPC_URL = process.env.SUI_RPC_URL!;
+const SUI_GRPC_URL = process.env.SUI_GRPC_URL || process.env.SUI_RPC_URL!;
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY!;
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
 const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
@@ -123,23 +121,19 @@ async function updateSuiDvn() {
   console.log(`  DVN:      ${LZ_LABS_DVN_SUI}`);
   console.log(`  Dst EID:  ${EVM_EID}`);
 
-  const suiClient = new SuiClient({ url: SUI_RPC_URL });
-  const { secretKey } = decodeSuiPrivateKey(SUI_DEPLOYER_KEY);
-  const keypair = Ed25519Keypair.fromSecretKey(secretKey);
+  const suiClient = createSuiClient(SUI_GRPC_URL);
+  const keypair = createSuiSigner(SUI_DEPLOYER_KEY);
   console.log(`  Deployer: ${keypair.toSuiAddress()}`);
 
   async function exec(tx: Transaction, label: string) {
-    const result = await suiClient.signAndExecuteTransaction({
-      signer: keypair,
-      transaction: tx,
-      options: { showEffects: true },
-    });
-    if (result.effects?.status?.status !== "success") {
-      console.error(`  [FAIL] ${label}:`, result.effects?.status);
+    const result = await signAndExecute(suiClient, tx, keypair);
+    const { digest, effects } = result.transaction;
+    if (!effects?.status?.success) {
+      console.error(`  [FAIL] ${label}:`, effects?.status);
       throw new Error(`${label} failed`);
     }
-    console.log(`  [OK] ${label}: ${result.digest}`);
-    await suiClient.waitForTransaction({ digest: result.digest });
+    console.log(`  [OK] ${label}: ${digest}`);
+    await suiClient.core.waitForTransaction({ digest });
     return result;
   }
 

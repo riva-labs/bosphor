@@ -35,6 +35,7 @@ AGREEMENT*.md
 # relayer runtime state
 relayer/sui-cursor.json
 relayer/sui-sent-proofs.json
+relayer/.sui-checkpoint-cursor
 
 # logs
 *.log

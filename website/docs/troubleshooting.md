@@ -54,9 +54,9 @@ Verify you are using the Sui **package ID** (not the OApp object ID) as the peer
 
 ## Relayer issues
 
-### Relayer cannot connect to Sui RPC
+### Relayer cannot connect to Sui gRPC
 
-Check that `SUI_RPC_URL` is set correctly. The default is `https://fullnode.testnet.sui.io:443`. If using a custom RPC, verify the URL is accessible.
+Check that `SUI_GRPC_URL` is set correctly. The default is `https://sui-testnet.mystenlabs.com`. If using a custom endpoint, verify the URL is accessible and supports the Sui gRPC API.
 
 ### Relayer shows "fee quote failed, using default"
 
@@ -75,7 +75,7 @@ This is expected behavior after TTL expiration. Processed intents are pruned fro
 The `/health` endpoint returns `"degraded"` when one or both chain connections fail. Check:
 
 1. `EVM_RPC_URL` is responding (try `curl <your-rpc-url>`)
-2. `SUI_RPC_URL` is responding
+2. `SUI_GRPC_URL` is responding
 3. Network connectivity from the relayer host
 
 ## Cross-chain debugging

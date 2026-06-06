@@ -16,10 +16,8 @@ import { readFileSync } from "fs";
 config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { ethers } from "ethers";
-import { SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { createSuiClient, createSuiSigner, signAndExecute } from "./sui-client.js";
 
 // --- LZ constants (from .env) ---
 const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
@@ -37,7 +35,7 @@ const SUI_LZ_OAPP_ID = process.env.SUI_LZ_OAPP_ID!;
 const SUI_LZ_ADMIN_CAP_ID = process.env.SUI_LZ_ADMIN_CAP_ID!;
 const SUI_LZ_MESSAGING_CHANNEL = process.env.SUI_LZ_MESSAGING_CHANNEL!;
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY!;
-const SUI_RPC_URL = process.env.SUI_RPC_URL || "https://fullnode.testnet.sui.io:443";
+const SUI_GRPC_URL = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
 
 for (const [k, v] of Object.entries({
   EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_LZ_PACKAGE_ID,
@@ -58,11 +56,8 @@ const evmWallet = new ethers.Wallet(EVM_RELAYER_KEY, evmProvider);
 const adapter = new ethers.Contract(EVM_ADAPTER_ADDRESS, ADAPTER_ABI, evmWallet);
 
 // --- Sui ---
-const suiClient = new SuiClient({ url: SUI_RPC_URL });
-const suiKeypair = (() => {
-  const { secretKey } = decodeSuiPrivateKey(SUI_DEPLOYER_KEY);
-  return Ed25519Keypair.fromSecretKey(secretKey);
-})();
+const suiClient = createSuiClient(SUI_GRPC_URL);
+const suiKeypair = createSuiSigner(SUI_DEPLOYER_KEY);
 
 function addressToBytes32(addr: string): number[] {
   const clean = addr.replace("0x", "").toLowerCase().padStart(64, "0");
@@ -72,17 +67,14 @@ function addressToBytes32(addr: string): number[] {
 }
 
 async function suiExec(tx: Transaction, label: string) {
-  const result = await suiClient.signAndExecuteTransaction({
-    signer: suiKeypair,
-    transaction: tx,
-    options: { showEffects: true },
-  });
-  if (result.effects?.status?.status !== "success") {
-    console.error(`[FAIL] ${label}:`, result.effects?.status);
+  const result = await signAndExecute(suiClient, tx, suiKeypair);
+  const { digest, effects } = result.transaction;
+  if (!effects?.status?.success) {
+    console.error(`[FAIL] ${label}:`, effects?.status);
     throw new Error(`${label} failed`);
   }
-  console.log(`[OK] ${label}: ${result.digest}`);
-  await suiClient.waitForTransaction({ digest: result.digest });
+  console.log(`[OK] ${label}: ${digest}`);
+  await suiClient.core.waitForTransaction({ digest });
 }
 
 async function main() {
