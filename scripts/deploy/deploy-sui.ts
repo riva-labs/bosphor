@@ -18,7 +18,7 @@ config({ path: resolve(import.meta.dirname, "../../.env") });
 
 import { Transaction } from "@mysten/sui/transactions";
 import { bcs } from "@mysten/sui/bcs";
-import { createSuiClient, createSuiSigner, signAndExecute } from "../util/sui-client.js";
+import { createSuiClient, createSuiSigner, signAndExecute } from "../util/sui-client.ts";
 
 // --- LZ Infrastructure (from .env) ---
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
