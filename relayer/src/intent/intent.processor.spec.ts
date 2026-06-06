@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import { IntentProcessor } from './intent.processor';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
@@ -282,6 +283,9 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
   });
 
   it('should mark as processed and return on ABI decode failure', async () => {
+    // Silence the expected error log for this test
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+
     await processor.handleSuiLzEvent({
       intentId: '0x' + 'cc'.repeat(32),
       payload: [0, 1, 2], // invalid ABI
