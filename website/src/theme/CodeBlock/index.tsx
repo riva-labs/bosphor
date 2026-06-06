@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import CodeBlock from '@theme-original/CodeBlock';
 import type { WrapperProps } from '@docusaurus/types';
 import OpenInAgentButton from '@site/src/components/OpenInAgentButton';
