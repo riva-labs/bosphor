@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Backgrounds */
+  --color-bg-primary: #0B1221;
+  --color-bg-deep: #060C17;
+
+  /* Surfaces */
+  --color-surface-1: #0F1729;
+  --color-surface-2: #141D32;
+  --color-surface-3: #1A2540;
+
+  /* Text */
+  --color-text-heading: #FFFFFF;
+  --color-text-body: #B8C1CE;
+  --color-text-muted: #5E6E82;
+  --color-text-faint: #334158;
+
+  /* Functional */
+  --color-link: #4A8EC7;
+
+  /* Semantic */
+  --color-success: #3D8B6B;
+  --color-warning: #9E8540;
+  --color-error: #A84D4A;
+
+  /* Fonts */
+  --font-display: var(--font-satoshi);
+  --font-body: var(--font-instrument-sans);
+  --font-serif: var(--font-instrument-serif);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+html {
+  background-color: #0B1221;
+  color: #B8C1CE;
+}
+
+body {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-body);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Grain texture overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+}
