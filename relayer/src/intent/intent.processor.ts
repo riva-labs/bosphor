@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
-import { SuiService, SuiEventCursor } from '../chain/sui/sui.service';
+import { SuiService } from '../chain/sui/sui.service';
 import { WalrusService } from '../walrus/walrus.service';
 
 const POLL_INTERVAL = 5_000;
@@ -15,7 +15,6 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
   private evmFromBlock = 0;
-  private suiEventCursor: SuiEventCursor | null = null;
   private processing = false;
   private stopped = false;
 
@@ -34,7 +33,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
-    this.logger.log(`Polling every ${POLL_INTERVAL / 1000}s for events`);
+    this.logger.log(`Polling EVM every ${POLL_INTERVAL / 1000}s, Sui via checkpoint stream`);
+
+    // Register callback for Sui checkpoint streaming events
+    this.sui.setOnEventCallback((event) => this.handleSuiLzEvent(event));
   }
 
   async onModuleDestroy() {
@@ -53,7 +55,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.processing = true;
     try {
       this.pruneProcessedIntents();
-      await this.pollSuiLzEvents();
+      // Sui event polling replaced by checkpoint streaming (SuiService.onModuleInit)
       await this.pollEvmEvents();
     } catch (err) {
       this.logger.error(`Poll error: ${err}`);
@@ -62,55 +64,54 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async pollSuiLzEvents(): Promise<void> {
-    const { events, newCursor } = await this.sui.pollLzEvents(this.suiEventCursor);
-    this.suiEventCursor = newCursor;
+  /**
+   * Called by SuiService when an IntentReceived event is detected
+   * via checkpoint streaming.
+   */
+  async handleSuiLzEvent(event: {
+    intentId: string;
+    payload: number[];
+    srcEid: number;
+  }): Promise<void> {
+    if (this.processedIntents.has(event.intentId)) return;
 
-    for (const event of events) {
-      if (this.processedIntents.has(event.intentId)) {
-        continue;
-      }
+    const payloadHex =
+      '0x' + event.payload.map((b: number) => b.toString(16).padStart(2, '0')).join('');
 
-      // Decode ABI-encoded message: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
-      const payloadHex =
-        '0x' + event.payload.map((b: number) => b.toString(16).padStart(2, '0')).join('');
-
-      let sender: string;
-      let userPayload: string;
-      let deadlineMs: bigint;
-      try {
-        const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-          ['bytes32', 'address', 'bytes', 'uint256'],
-          payloadHex,
-        );
-        sender = decoded[1];
-        userPayload = decoded[2];
-        deadlineMs = BigInt(decoded[3]) * 1000n;
-      } catch {
-        this.logger.error(`[${event.intentId}] Failed to decode ABI payload`);
-        this.processedIntents.set(event.intentId, Date.now());
-        continue;
-      }
-
-      if (Date.now() > Number(deadlineMs)) {
-        this.logger.log(`[${event.intentId}] Skipping — deadline expired (via Sui LZ)`);
-        this.processedIntents.set(event.intentId, Date.now());
-        continue;
-      }
-
-      this.logger.log(
-        `[${event.intentId}] Intent received via Sui LZ (sender: ${sender}, src_eid: ${event.srcEid})`,
+    let sender: string;
+    let userPayload: string;
+    let deadlineMs: bigint;
+    try {
+      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+        ['bytes32', 'address', 'bytes', 'uint256'],
+        payloadHex,
       );
+      sender = decoded[1];
+      userPayload = decoded[2];
+      deadlineMs = BigInt(decoded[3]) * 1000n;
+    } catch {
+      this.logger.error(`[${event.intentId}] Failed to decode ABI payload`);
+      this.processedIntents.set(event.intentId, Date.now());
+      return;
+    }
 
-      try {
-        const payloadBytes = ethers.getBytes(userPayload);
-        await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
-        this.processedIntents.set(event.intentId, Date.now());
-        this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
-      } catch (err) {
-        this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
-        // Do NOT mark as processed — allow retry on next poll
-      }
+    if (Date.now() > Number(deadlineMs)) {
+      this.logger.log(`[${event.intentId}] Skipping — deadline expired (via Sui LZ)`);
+      this.processedIntents.set(event.intentId, Date.now());
+      return;
+    }
+
+    this.logger.log(
+      `[${event.intentId}] Intent received via Sui LZ (sender: ${sender}, src_eid: ${event.srcEid})`,
+    );
+
+    try {
+      const payloadBytes = ethers.getBytes(userPayload);
+      await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
+      this.processedIntents.set(event.intentId, Date.now());
+      this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
+    } catch (err) {
+      this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
     }
   }
 
@@ -189,7 +190,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     try {
       const storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
       // Wait for TX finality to avoid object version conflicts on the next TX
-      await this.sui.getClient().waitForTransaction({ digest: storeDigest });
+      await this.sui.getClient().core.waitForTransaction({ digest: storeDigest });
     } catch (err) {
       const msg = String(err);
       if (msg.includes('execute_store') && msg.includes(', 2)')) {
