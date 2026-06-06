@@ -31,6 +31,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
+          remarkPlugins: [require('./plugins/remark-glossary')],
           editUrl:
             'https://github.com/riva-labs/bosphor/tree/main/website/',
         },
@@ -51,6 +52,8 @@ const config: Config = {
         docsDir: 'docs',
       },
     ],
+    ['./plugins/plausible', { domain: 'docs.bosphor.xyz' }],
+    './plugins/descriptions',
   ],
 
   themes: [
