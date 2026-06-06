@@ -16,11 +16,9 @@ import { execSync } from "child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
 config({ path: resolve(import.meta.dirname, "../../.env") });
 
-import { SuiClient } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { bcs } from "@mysten/sui/bcs";
+import { createSuiClient, createSuiSigner, signAndExecute } from "../util/sui-client.js";
 
 // --- LZ Infrastructure (from .env) ---
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
@@ -34,7 +32,7 @@ const CLOCK = "0x6";
 const EVM_EID = Number(process.env.EVM_EID) || 40161;
 
 // --- Config from env ---
-const SUI_RPC_URL = process.env.SUI_RPC_URL || "https://fullnode.testnet.sui.io:443";
+const SUI_GRPC_URL = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
 
@@ -43,11 +41,8 @@ for (const k of requiredEnv) {
   if (!process.env[k]) { console.error(`Missing ${k} in .env`); process.exit(1); }
 }
 
-const suiClient = new SuiClient({ url: SUI_RPC_URL });
-const keypair = (() => {
-  const { secretKey } = decodeSuiPrivateKey(SUI_DEPLOYER_KEY);
-  return Ed25519Keypair.fromSecretKey(secretKey);
-})();
+const suiClient = createSuiClient(SUI_GRPC_URL);
+const keypair = createSuiSigner(SUI_DEPLOYER_KEY!);
 const deployerAddress = keypair.toSuiAddress();
 
 // --- Helpers ---
@@ -75,18 +70,14 @@ function addressToBytes32(addr: string): number[] {
 }
 
 async function exec(tx: Transaction, label: string) {
-  const result = await suiClient.signAndExecuteTransaction({
-    signer: keypair,
-    transaction: tx,
-    options: { showEffects: true, showObjectChanges: true, showEvents: true },
-  });
+  const result = await signAndExecute(suiClient, tx, keypair);
   if (result.effects?.status?.status !== "success") {
     console.error(`[FAIL] ${label}:`, result.effects?.status);
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${result.digest}`);
   // Wait for transaction finality to avoid object version conflicts
-  await suiClient.waitForTransaction({ digest: result.digest });
+  await suiClient.core.waitForTransaction({ digest: result.digest });
   return result;
 }
 
@@ -132,7 +123,7 @@ interface PublishResult {
 async function publish(): Promise<PublishResult> {
   console.log("\n=== Step 1: Publish bosphor_lz package ===");
   // Detect network from SUI_RPC_URL and switch sui client env
-  const isMainnet = SUI_RPC_URL.includes("mainnet");
+  const isMainnet = SUI_GRPC_URL.includes("mainnet");
   if (isMainnet) {
     try { execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" }); } catch {}
     console.log("  Switched sui client to mainnet");
@@ -161,7 +152,7 @@ async function publish(): Promise<PublishResult> {
   }
   console.log(`[OK] Published: ${result.digest}`);
   // Wait for package to be indexed
-  await suiClient.waitForTransaction({ digest: result.digest });
+  await suiClient.core.waitForTransaction({ digest: result.digest });
 
   const changes: any[] = result.objectChanges || [];
   let packageId = "";
@@ -339,7 +330,7 @@ async function setPeer(
 async function main() {
   console.log("=== Bosphor Sui Deployment ===");
   console.log(`  Deployer: ${deployerAddress}`);
-  console.log(`  Network:  ${SUI_RPC_URL}`);
+  console.log(`  Network:  ${SUI_GRPC_URL}`);
 
   // Verify active sui address matches deployer key
   try {
