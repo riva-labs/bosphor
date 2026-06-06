@@ -1,30 +1,6 @@
 import React from 'react';
-import Link from '@docusaurus/Link';
+import { Cards, Card } from '@site/src/components/Cards';
 import styles from './styles.module.css';
-
-const cards = [
-  {
-    title: 'Architecture',
-    description:
-      'Understand the system design, message flow, and trust model behind cross-chain storage routing.',
-    href: '/architecture',
-    icon: '/img/mascot/03_blueprint.png',
-  },
-  {
-    title: 'Quickstart',
-    description:
-      'Deploy and run the full pipeline on testnet in 15 minutes.',
-    href: '/quickstart',
-    icon: '/img/mascot/05_running.png',
-  },
-  {
-    title: 'Deployment',
-    description:
-      'Step-by-step guide for deploying contracts, the relayer, and wiring peers.',
-    href: '/deployment',
-    icon: '/img/mascot/19_deploying.png',
-  },
-];
 
 export default function HomepageHero(): React.ReactElement {
   return (
@@ -42,20 +18,26 @@ export default function HomepageHero(): React.ReactElement {
         on Sui, returning a DVN-verified proof back to your origin chain. One
         Solidity call, fully trustless.
       </p>
-      <div className={styles.cards}>
-        {cards.map((card) => (
-          <Link key={card.href} to={card.href} className={styles.card}>
-            <img
-              src={card.icon}
-              alt={card.title}
-              className={styles.cardIcon}
-              loading="lazy"
-            />
-            <div className={styles.cardTitle}>{card.title}</div>
-            <p className={styles.cardDescription}>{card.description}</p>
-          </Link>
-        ))}
-      </div>
+      <Cards>
+        <Card
+          title="Architecture"
+          href="/architecture"
+          icon="/img/mascot/03_blueprint.png"
+          description="Understand the system design, message flow, and trust model behind cross-chain storage routing."
+        />
+        <Card
+          title="Quickstart"
+          href="/quickstart"
+          icon="/img/mascot/05_running.png"
+          description="Deploy and run the full pipeline on testnet in 15 minutes."
+        />
+        <Card
+          title="Deployment"
+          href="/deployment"
+          icon="/img/mascot/19_deploying.png"
+          description="Step-by-step guide for deploying contracts, the relayer, and wiring peers."
+        />
+      </Cards>
       <hr className={styles.divider} />
     </div>
   );

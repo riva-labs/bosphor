@@ -1,0 +1,52 @@
+.link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: 8px;
+  border: 1px solid var(--bosphor-surface-3, #1A2540);
+  background: var(--bosphor-surface-1, #0F1729);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.2s ease, background 0.15s ease;
+}
+
+.link:hover {
+  border-color: var(--ifm-color-primary);
+  background: var(--bosphor-surface-2, #141D32);
+  text-decoration: none;
+  color: inherit;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--ifm-heading-font-family);
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ifm-heading-color);
+}
+
+.description {
+  font-size: 0.8rem;
+  color: var(--bosphor-text-muted);
+  line-height: 1.4;
+}
+
+.icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  color: var(--bosphor-text-muted);
+  transition: color 0.15s ease;
+}
+
+.link:hover .icon {
+  color: var(--ifm-color-primary);
+}
