@@ -31,6 +31,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
+          remarkPlugins: [require('./plugins/remark-glossary')],
           editUrl:
             'https://github.com/riva-labs/bosphor/tree/main/website/',
         },
@@ -51,6 +52,8 @@ const config: Config = {
         docsDir: 'docs',
       },
     ],
+    ['./plugins/plausible', { domain: 'docs.bosphor.xyz' }],
+    './plugins/descriptions',
   ],
 
   themes: [
@@ -94,11 +97,6 @@ const config: Config = {
           label: 'GitHub',
           position: 'right',
         },
-        {
-          href: 'https://bosphor.xyz',
-          label: 'Website',
-          position: 'right',
-        },
       ],
     },
     footer: {
@@ -131,10 +129,6 @@ const config: Config = {
         {
           title: 'Resources',
           items: [
-            {
-              label: 'Bosphor Website',
-              href: 'https://bosphor.xyz',
-            },
             {
               label: 'GitHub',
               href: 'https://github.com/riva-labs/bosphor',

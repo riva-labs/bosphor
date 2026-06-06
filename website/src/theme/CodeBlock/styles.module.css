@@ -1,0 +1,10 @@
+.wrapper {
+  position: relative;
+}
+
+.buttonRow {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  z-index: 1;
+}
