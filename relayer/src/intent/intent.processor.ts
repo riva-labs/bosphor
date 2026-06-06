@@ -35,8 +35,11 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
     this.logger.log(`Polling EVM every ${POLL_INTERVAL / 1000}s, Sui via checkpoint stream`);
 
-    // Register callback for Sui checkpoint streaming events
+    // Register callback for Sui checkpoint streaming events, then start the
+    // stream. Order matters: the callback must be set before streaming begins
+    // so that backfill events are not silently dropped.
     this.sui.setOnEventCallback((event) => this.handleSuiLzEvent(event));
+    this.sui.startStreaming();
   }
 
   async onModuleDestroy() {

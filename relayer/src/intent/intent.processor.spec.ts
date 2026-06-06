@@ -212,6 +212,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
       getAddress: jest.fn().mockReturnValue('0xsuiaddr'),
       setOnEventCallback: jest.fn(),
+      startStreaming: jest.fn(),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),

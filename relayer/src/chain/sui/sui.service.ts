@@ -106,7 +106,7 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
           transactionData.gasConfig.price = referenceGasPrice;
         }
         if (!transactionData.gasConfig.budget) {
-          transactionData.gasConfig.budget = '50000000';
+          transactionData.gasConfig.budget = '500000000';
         }
         if (!transactionData.gasConfig.payment) {
           const coins = await grpcClient.core.getCoins({
@@ -183,11 +183,8 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Sui LZ pkg: ${this.lzPackageId || '(not configured)'}`);
     this.logger.log(`Sui relayer: ${this.getAddress()}`);
 
-    if (this.lzPackageId) {
-      this.startCheckpointStream().catch((err) =>
-        this.logger.error(`Checkpoint stream fatal error: ${err}`),
-      );
-    }
+    // Checkpoint stream is started by IntentProcessor after callback registration
+    // to avoid a race where events arrive before the callback is set.
   }
 
   async onModuleDestroy() {
@@ -199,6 +196,18 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
    */
   setOnEventCallback(cb: (event: SuiLzEvent) => Promise<void>) {
     this.onEventCallback = cb;
+  }
+
+  /**
+   * Start the checkpoint stream. Called by IntentProcessor after the event
+   * callback is registered, avoiding a race where backfill events arrive
+   * before the callback is set.
+   */
+  startStreaming() {
+    if (!this.lzPackageId) return;
+    this.startCheckpointStream().catch((err) =>
+      this.logger.error(`Checkpoint stream fatal error: ${err}`),
+    );
   }
 
   getAddress(): string {
