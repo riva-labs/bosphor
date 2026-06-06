@@ -68,12 +68,13 @@ function addressToBytes32(addr: string): number[] {
 
 async function suiExec(tx: Transaction, label: string) {
   const result = await signAndExecute(suiClient, tx, suiKeypair);
-  if (result.effects?.status?.status !== "success") {
-    console.error(`[FAIL] ${label}:`, result.effects?.status);
+  const { digest, effects } = result.transaction;
+  if (!effects?.status?.success) {
+    console.error(`[FAIL] ${label}:`, effects?.status);
     throw new Error(`${label} failed`);
   }
-  console.log(`[OK] ${label}: ${result.digest}`);
-  await suiClient.core.waitForTransaction({ digest: result.digest });
+  console.log(`[OK] ${label}: ${digest}`);
+  await suiClient.core.waitForTransaction({ digest });
 }
 
 async function main() {

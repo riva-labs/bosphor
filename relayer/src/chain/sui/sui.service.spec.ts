@@ -91,6 +91,7 @@ describe('SuiService.lzSendProof', () => {
     }).compile();
 
     service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
     service.onModuleInit();
 
     // Replace gRPC service mocks
@@ -180,6 +181,7 @@ describe('SuiService.lzSendProof', () => {
     }).compile();
 
     const svc = module2.get<SuiService>(SuiService);
+    jest.spyOn(svc as any, 'startCheckpointStream').mockResolvedValue(undefined);
     svc.onModuleInit();
 
     await expect(svc.lzSendProof('0x' + 'ab'.repeat(32), 'dGVzdA', 100, 40161)).rejects.toThrow(
@@ -207,6 +209,7 @@ describe('SuiService.getCheckpoint', () => {
     }).compile();
 
     service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
     service.onModuleInit();
 
     const client = service.getClient();
@@ -253,6 +256,7 @@ describe('SuiService.quoteLzFee', () => {
     }).compile();
 
     service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
     service.onModuleInit();
 
     const client = service.getClient();
@@ -319,6 +323,7 @@ describe('SuiService.processCheckpoint', () => {
     }).compile();
 
     service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
     service.onModuleInit();
 
     mockCallback = jest.fn().mockResolvedValue(undefined);

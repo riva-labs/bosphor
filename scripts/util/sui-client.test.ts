@@ -63,8 +63,10 @@ describe("signAndExecute", () => {
     const fakeClient = {
       core: {
         executeTransaction: mock.fn(async () => ({
-          digest: fakeDigest,
-          effects: { status: { status: "success" } },
+          transaction: {
+            digest: fakeDigest,
+            effects: { status: { success: true, error: null } },
+          },
         })),
       },
     } as any;
@@ -79,7 +81,7 @@ describe("signAndExecute", () => {
 
     const result = await signAndExecute(fakeClient, tx, signer);
 
-    assert.equal(result.digest, fakeDigest);
+    assert.equal(result.transaction.digest, fakeDigest);
     assert.equal(fakeClient.core.executeTransaction.mock.calls.length, 1);
 
     // Verify executeTransaction was called with transaction bytes and signatures
