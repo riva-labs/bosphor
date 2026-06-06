@@ -13,7 +13,7 @@ This file contains links to documentation sections following the llmstxt.org sta
 - [Deployment Guide](https://docs.bosphor.xyz/deployment.md): <AiPrompt>
 - [Glossary](https://docs.bosphor.xyz/glossary.md): Key terms used throughout the Bosphor documentation.
 - [Integration Checklist](https://docs.bosphor.xyz/integration-checklist.md): Step-by-step checklist for integrating with Bosphor. Complete each item before moving to the next.
-- [Introduction](https://docs.bosphor.xyz/docs/intro.md): **Bosphor makes Walrus accessible from any chain.** Submit a storage intent on EVM, and Bosphor routes it cross-chain to Walrus on Sui, returning a...
+- [Introduction](https://docs.bosphor.xyz/docs/intro.md): <HomepageHero />
 - [Known Limitations](https://docs.bosphor.xyz/known-limitations.md): Current constraints and limitations of the Bosphor protocol as of Milestone 1.
 - [LayerZero Two-Step Verification Flow](https://docs.bosphor.xyz/lz-verification-flow.md): Bosphor uses LayerZero v2 for both directions of its cross-chain protocol. This page describes the message flow, encoding formats, and trust bounda...
 - [Quickstart](https://docs.bosphor.xyz/quickstart.md): Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
