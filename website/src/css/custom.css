@@ -178,3 +178,62 @@ body::before {
 [data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
   background: #334158;
 }
+
+/* Details/Collapsible styling */
+details {
+  background: var(--bosphor-surface-1, #0F1729);
+  border: 1px solid var(--bosphor-surface-3, #1A2540);
+  border-radius: 8px;
+  padding: 0;
+  margin-bottom: 1rem;
+}
+
+details summary {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ifm-heading-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  list-style: none;
+  user-select: none;
+}
+
+details summary::-webkit-details-marker {
+  display: none;
+}
+
+details summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 6px solid var(--ifm-color-primary);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+details[open] summary {
+  border-bottom: 1px solid var(--bosphor-surface-3, #1A2540);
+  margin-bottom: 0;
+}
+
+details > *:not(summary) {
+  padding: 0.75rem 1rem;
+}
+
+details summary:hover {
+  background: var(--bosphor-surface-2, #141D32);
+  border-radius: 8px 8px 0 0;
+}
+
+:root details {
+  background: #FFFFFF;
+  border-color: var(--bosphor-surface-2, #EDEDF0);
+}
