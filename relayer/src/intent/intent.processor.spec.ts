@@ -36,7 +36,6 @@ describe('IntentProcessor.processIntent', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
       findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
@@ -224,7 +223,6 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
       findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
@@ -408,7 +406,6 @@ describe('IntentProcessor.poll', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
       findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
     Object.assign(mockSui, {
@@ -488,7 +485,6 @@ describe('IntentProcessor.poll', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      getAggregatorUrl: jest.fn().mockReturnValue('https://aggregator.test'),
       findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
     Object.assign(mockSui, {

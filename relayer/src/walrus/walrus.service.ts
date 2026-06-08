@@ -11,8 +11,7 @@ export interface WalrusBlobInfo {
 @Injectable()
 export class WalrusService implements OnModuleInit {
   private readonly logger = new Logger(WalrusService.name);
-  private publisherUrl!: string;
-  private aggregatorUrl!: string;
+  private relayUrl!: string;
   private storeEpochs!: number;
 
   constructor(
@@ -21,17 +20,15 @@ export class WalrusService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.publisherUrl = this.config.getOrThrow<string>('WALRUS_PUBLISHER_URL');
-    this.aggregatorUrl = this.config.getOrThrow<string>('WALRUS_AGGREGATOR_URL');
+    this.relayUrl = this.config.getOrThrow<string>('WALRUS_RELAY_URL');
     this.storeEpochs = this.config.get<number>('WALRUS_STORE_EPOCHS', 5);
 
-    this.logger.log(`Walrus publisher: ${this.publisherUrl}`);
-    this.logger.log(`Walrus aggregator: ${this.aggregatorUrl}`);
+    this.logger.log(`Walrus relay: ${this.relayUrl}`);
   }
 
   async upload(data: Buffer): Promise<WalrusBlobInfo> {
     const relayerAddress = this.sui.getAddress();
-    const url = `${this.publisherUrl}/v1/blobs?epochs=${this.storeEpochs}&deletable=true&send_object_to=${relayerAddress}`;
+    const url = `${this.relayUrl}/v1/blobs?epochs=${this.storeEpochs}&deletable=true&send_object_to=${relayerAddress}`;
 
     const maxAttempts = 3;
     const baseDelay = 1000;
@@ -98,9 +95,5 @@ export class WalrusService implements OnModuleInit {
 
   async findBlobObject(blobId: string): Promise<string> {
     return this.sui.findBlobObject(blobId);
-  }
-
-  getAggregatorUrl(): string {
-    return this.aggregatorUrl;
   }
 }
