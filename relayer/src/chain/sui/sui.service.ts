@@ -4,6 +4,7 @@ import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
+import { walrus } from '@mysten/walrus';
 import { ethers } from 'ethers';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
@@ -47,6 +48,7 @@ const MAX_BACKOFF_MS = 30_000;
 export class SuiService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SuiService.name);
   private client!: SuiGrpcClient;
+  private walrusClient!: SuiGrpcClient & { walrus: import('@mysten/walrus').WalrusClient };
   private keypair!: Ed25519Keypair;
   private packageId!: string;
   private configId!: string;
@@ -103,6 +105,11 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    const walrusRelayUrl = this.config.getOrThrow<string>('WALRUS_RELAY_URL');
+    this.walrusClient = this.client.$extend(walrus({
+      uploadRelay: { host: walrusRelayUrl },
+    }));
+
     this.logger.log(`Sui package: ${this.packageId}`);
     this.logger.log(`Sui LZ pkg: ${this.lzPackageId || '(not configured)'}`);
     this.logger.log(`Sui relayer: ${this.getAddress()}`);
@@ -140,6 +147,14 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
 
   getClient(): SuiGrpcClient {
     return this.client;
+  }
+
+  getWalrusClient() {
+    return this.walrusClient;
+  }
+
+  getSigner(): Ed25519Keypair {
+    return this.keypair;
   }
 
   getLzPackageId(): string {

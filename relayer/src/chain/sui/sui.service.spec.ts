@@ -43,6 +43,7 @@ function makeConfigService(overrides: Record<string, string> = {}) {
     SUI_RELAYER_KEY: FAKE_RELAYER_KEY,
     SUI_PACKAGE_ID: '0xdeadbeef',
     SUI_CONFIG_ID: '0xconfigid',
+    WALRUS_RELAY_URL: 'https://relay.walrus-testnet.walrus.space',
     SUI_LZ_OAPP_ID: BOSPHOR.oappId,
     SUI_LZ_MESSAGING_CHANNEL: BOSPHOR.messagingChannel,
     SUI_LZ_PACKAGE_ID: BOSPHOR.lzPackageId,
@@ -448,5 +449,40 @@ describe('SuiService.findBlobObject', () => {
     await expect(service.findBlobObject('missing')).rejects.toThrow(
       /Blob object not found/,
     );
+  });
+});
+
+describe('SuiService walrus plugin', () => {
+  let service: SuiService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        { provide: ConfigService, useValue: makeConfigService() },
+      ],
+    }).compile();
+
+    service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
+    service.onModuleInit();
+  });
+
+  it('should extend the client with walrus plugin', () => {
+    const client = service.getWalrusClient();
+    expect(client).toBeDefined();
+    expect(client.walrus).toBeDefined();
+  });
+
+  it('should expose the keypair as signer', () => {
+    const signer = service.getSigner();
+    expect(signer).toBeDefined();
+    expect(signer.toSuiAddress()).toBe(service.getAddress());
+  });
+
+  it('should return the same extended client from getWalrusClient', () => {
+    const client1 = service.getWalrusClient();
+    const client2 = service.getWalrusClient();
+    expect(client1).toBe(client2);
   });
 });
