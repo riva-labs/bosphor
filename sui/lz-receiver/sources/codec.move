@@ -22,6 +22,7 @@ const EInvalidMessageType: u64 = 3;
 ///
 /// drop only (no store/copy) because ProofMessage is an ephemeral encoding
 /// helper, never persisted on-chain. Public visibility for future SDK import.
+#[allow(unused_field)]
 public struct ProofMessage has drop {
     intent_id: vector<u8>,
     blob_id: vector<u8>,
@@ -119,7 +120,7 @@ fun slice(data: &vector<u8>, start: u64, len: u64): vector<u8> {
 /// First 24 bytes are zero-padding, then 8 bytes of big-endian u64.
 fun encode_u64_as_u256(msg: &mut vector<u8>, value: u64) {
     // 24 zero-padding bytes
-    let mut i = 0;
+    let mut i = 0u64;
     while (i < 24) {
         msg.push_back(0u8);
         i = i + 1;
