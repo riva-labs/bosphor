@@ -145,13 +145,12 @@ Response format:
 
 ## Walrus upload
 
-The relayer uploads intent payloads to Walrus with retry logic:
+The relayer uploads intent payloads to Walrus using the `@mysten/walrus` SDK's `writeBlob()` method. The SDK manages sliver distribution, certification, retries, and epoch management natively.
 
-- Max 3 attempts per upload
-- 5xx errors trigger exponential backoff (2, 4, 8 seconds)
-- 4xx errors fail immediately (no retry)
-- 30-second timeout per attempt
-- All blobs are stored as **deletable** with `send_object_to` set to the relayer's Sui address
+- All blobs are stored as **deletable**
+- Blob ownership is transferred to the relayer's Sui address
+- Storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs)
+- The upload relay is configured via `WALRUS_RELAY_URL` in `SuiService`
 
 ## Error handling
 
