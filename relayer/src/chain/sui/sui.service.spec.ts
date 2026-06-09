@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { Transaction } from '@mysten/sui/transactions';
 import { SuiService } from './sui.service';
 
 // LZ infrastructure IDs (testnet, from verified TX)
@@ -32,12 +33,17 @@ const BOSPHOR = {
 // Raw 32-byte Ed25519 secret key in base64 (test only)
 const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
 
+// Dummy BCS bytes returned by Transaction.build() in tests.
+// Tests verify PTB construction and execution, not SDK resolution.
+const DUMMY_TX_BYTES = new Uint8Array(64);
+
 function makeConfigService(overrides: Record<string, string> = {}) {
   const defaultMap: Record<string, string> = {
     SUI_GRPC_URL: 'https://sui-testnet.mystenlabs.com',
     SUI_RELAYER_KEY: FAKE_RELAYER_KEY,
     SUI_PACKAGE_ID: '0xdeadbeef',
     SUI_CONFIG_ID: '0xconfigid',
+    WALRUS_RELAY_URL: 'https://relay.walrus-testnet.walrus.space',
     SUI_LZ_OAPP_ID: BOSPHOR.oappId,
     SUI_LZ_MESSAGING_CHANNEL: BOSPHOR.messagingChannel,
     SUI_LZ_PACKAGE_ID: BOSPHOR.lzPackageId,
@@ -94,40 +100,9 @@ describe('SuiService.lzSendProof', () => {
     jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
     service.onModuleInit();
 
-    // Replace gRPC service mocks
     const client = service.getClient();
     client.core.executeTransaction = mockExecuteTransaction;
-    // Mock getReferenceGasPrice for Transaction.build() resolution
-    client.core.getReferenceGasPrice = jest.fn().mockResolvedValue({
-      referenceGasPrice: '1000',
-    });
-    // Mock getCoins for gas selection during build
-    client.core.getCoins = jest.fn().mockResolvedValue({
-      objects: [{
-        id: '0x' + 'ff'.repeat(32),
-        version: '1',
-        digest: 'CVDFLCAjXhVWiPXH9nTCTpCgVzmDVoiPzNJYuccr1dqB',
-        content: Promise.resolve(new Uint8Array()),
-        owner: { $kind: 'AddressOwner' as const, AddressOwner: service.getAddress() },
-        type: '0x2::coin::Coin<0x2::sui::SUI>',
-        balance: '1000000000',
-        previousTransaction: null,
-      }],
-      cursor: null,
-      hasNextPage: false,
-    });
-    // Mock getObjects for object resolution (shared objects)
-    client.core.getObjects = jest.fn().mockImplementation(async (opts: any) => ({
-      objects: opts.objectIds.map((id: string) => ({
-        id,
-        version: '1',
-        digest: 'CVDFLCAjXhVWiPXH9nTCTpCgVzmDVoiPzNJYuccr1dqB',
-        content: Promise.resolve(new Uint8Array()),
-        owner: { $kind: 'Shared' as const, Shared: { initialSharedVersion: '1' } },
-        type: '0x2::object::Object',
-        previousTransaction: null,
-      })),
-    }));
+    jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
   });
 
   it('should build a PTB and execute it successfully', async () => {
@@ -261,35 +236,7 @@ describe('SuiService.quoteLzFee', () => {
 
     const client = service.getClient();
     client.transactionExecutionService.simulateTransaction = mockSimulate;
-    // Mock core methods for transaction resolution
-    client.core.getReferenceGasPrice = jest.fn().mockResolvedValue({
-      referenceGasPrice: '1000',
-    });
-    client.core.getCoins = jest.fn().mockResolvedValue({
-      objects: [{
-        id: '0x' + 'ff'.repeat(32),
-        version: '1',
-        digest: 'CVDFLCAjXhVWiPXH9nTCTpCgVzmDVoiPzNJYuccr1dqB',
-        content: Promise.resolve(new Uint8Array()),
-        owner: { $kind: 'AddressOwner' as const, AddressOwner: service.getAddress() },
-        type: '0x2::coin::Coin<0x2::sui::SUI>',
-        balance: '1000000000',
-        previousTransaction: null,
-      }],
-      cursor: null,
-      hasNextPage: false,
-    });
-    client.core.getObjects = jest.fn().mockImplementation(async (opts: any) => ({
-      objects: opts.objectIds.map((id: string) => ({
-        id,
-        version: '1',
-        digest: 'CVDFLCAjXhVWiPXH9nTCTpCgVzmDVoiPzNJYuccr1dqB',
-        content: Promise.resolve(new Uint8Array()),
-        owner: { $kind: 'Shared' as const, Shared: { initialSharedVersion: '1' } },
-        type: '0x2::object::Object',
-        previousTransaction: null,
-      })),
-    }));
+    jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
   });
 
   it('should call simulateTransaction and return the quoted native fee', async () => {
@@ -502,5 +449,40 @@ describe('SuiService.findBlobObject', () => {
     await expect(service.findBlobObject('missing')).rejects.toThrow(
       /Blob object not found/,
     );
+  });
+});
+
+describe('SuiService walrus plugin', () => {
+  let service: SuiService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        { provide: ConfigService, useValue: makeConfigService() },
+      ],
+    }).compile();
+
+    service = module.get<SuiService>(SuiService);
+    jest.spyOn(service as any, 'startCheckpointStream').mockResolvedValue(undefined);
+    service.onModuleInit();
+  });
+
+  it('should extend the client with walrus plugin', () => {
+    const client = service.getWalrusClient();
+    expect(client).toBeDefined();
+    expect(client.walrus).toBeDefined();
+  });
+
+  it('should expose the keypair as signer', () => {
+    const signer = service.getSigner();
+    expect(signer).toBeDefined();
+    expect(signer.toSuiAddress()).toBe(service.getAddress());
+  });
+
+  it('should return the same extended client from getWalrusClient', () => {
+    const client1 = service.getWalrusClient();
+    const client2 = service.getWalrusClient();
+    expect(client1).toBe(client2);
   });
 });

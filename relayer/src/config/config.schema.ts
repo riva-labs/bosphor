@@ -37,8 +37,7 @@ export const configValidationSchema = Joi.object({
   SUI_LZ_TREASURY_OBJ: Joi.string().optional().allow(''),
 
   // Walrus
-  WALRUS_PUBLISHER_URL: Joi.string().uri().required(),
-  WALRUS_AGGREGATOR_URL: Joi.string().uri().required(),
+  WALRUS_RELAY_URL: Joi.string().uri().required(),
   WALRUS_STORE_EPOCHS: Joi.number().default(5),
 
   // App

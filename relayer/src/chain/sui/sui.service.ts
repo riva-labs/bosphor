@@ -4,6 +4,7 @@ import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
+import { walrus } from '@mysten/walrus';
 import { ethers } from 'ethers';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
@@ -47,6 +48,7 @@ const MAX_BACKOFF_MS = 30_000;
 export class SuiService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SuiService.name);
   private client!: SuiGrpcClient;
+  private walrusClient!: SuiGrpcClient & { walrus: import('@mysten/walrus').WalrusClient };
   private keypair!: Ed25519Keypair;
   private packageId!: string;
   private configId!: string;
@@ -91,82 +93,6 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
     const network = grpcUrl.includes('mainnet') ? 'mainnet' as const : 'testnet' as const;
     this.client = new SuiGrpcClient({ network, baseUrl: grpcUrl });
 
-    // GrpcCoreClient.resolveTransactionPlugin() is not yet implemented (throws).
-    // Override with a resolver that uses gRPC methods for gas and object resolution.
-    const grpcClient = this.client;
-    (this.client.core as any).resolveTransactionPlugin = () => {
-      return async (
-        transactionData: any,
-        _options: any,
-        next: () => Promise<void>,
-      ) => {
-        // Resolve gas if not set
-        if (!transactionData.gasConfig.price) {
-          const { referenceGasPrice } = await grpcClient.core.getReferenceGasPrice();
-          transactionData.gasConfig.price = referenceGasPrice;
-        }
-        if (!transactionData.gasConfig.budget) {
-          transactionData.gasConfig.budget = '500000000';
-        }
-        if (!transactionData.gasConfig.payment) {
-          const coins = await grpcClient.core.getCoins({
-            address: transactionData.sender,
-            coinType: '0x2::sui::SUI',
-          });
-          if (coins.objects.length > 0) {
-            transactionData.gasConfig.payment = coins.objects.slice(0, 1).map((c: any) => ({
-              objectId: c.id,
-              version: c.version,
-              digest: c.digest,
-            }));
-          }
-        }
-        // Resolve object inputs
-        const unresolvedIds: string[] = [];
-        const unresolvedIndices: number[] = [];
-        transactionData.inputs.forEach((input: any, idx: number) => {
-          if (input.UnresolvedObject) {
-            unresolvedIds.push(input.UnresolvedObject.objectId);
-            unresolvedIndices.push(idx);
-          }
-        });
-        if (unresolvedIds.length > 0) {
-          const { objects } = await grpcClient.core.getObjects({ objectIds: unresolvedIds });
-          for (let i = 0; i < unresolvedIds.length; i++) {
-            const obj = objects[i];
-            if (obj instanceof Error) continue;
-            const owner = obj.owner;
-            if (owner && '$kind' in owner && owner.$kind === 'Shared') {
-              transactionData.inputs[unresolvedIndices[i]] = {
-                $kind: 'Object',
-                Object: {
-                  $kind: 'SharedObject',
-                  SharedObject: {
-                    objectId: obj.id,
-                    initialSharedVersion: owner.Shared.initialSharedVersion,
-                    mutable: true,
-                  },
-                },
-              };
-            } else {
-              transactionData.inputs[unresolvedIndices[i]] = {
-                $kind: 'Object',
-                Object: {
-                  $kind: 'ImmOrOwnedObject',
-                  ImmOrOwnedObject: {
-                    objectId: obj.id,
-                    version: obj.version,
-                    digest: obj.digest,
-                  },
-                },
-              };
-            }
-          }
-        }
-        await next();
-      };
-    };
-
     if (relayerKey.startsWith('suipriv')) {
       const { schema, secretKey } = decodeSuiPrivateKey(relayerKey);
       if (schema !== 'ED25519') {
@@ -178,6 +104,11 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
         Uint8Array.from(Buffer.from(relayerKey, 'base64')),
       );
     }
+
+    const walrusRelayUrl = this.config.getOrThrow<string>('WALRUS_RELAY_URL');
+    this.walrusClient = this.client.$extend(walrus({
+      uploadRelay: { host: walrusRelayUrl },
+    }));
 
     this.logger.log(`Sui package: ${this.packageId}`);
     this.logger.log(`Sui LZ pkg: ${this.lzPackageId || '(not configured)'}`);
@@ -216,6 +147,14 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
 
   getClient(): SuiGrpcClient {
     return this.client;
+  }
+
+  getWalrusClient() {
+    return this.walrusClient;
+  }
+
+  getSigner(): Ed25519Keypair {
+    return this.keypair;
   }
 
   getLzPackageId(): string {

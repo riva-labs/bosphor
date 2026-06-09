@@ -177,9 +177,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
     this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
-    this.logger.log(
-      `[${intentId}] Verify: ${this.walrus.getAggregatorUrl()}/v1/blobs/${walrusInfo.blobId}`,
-    );
+    this.logger.log(`[${intentId}] Verify blobId: ${walrusInfo.blobId}`);
 
     // 2. Find blob object if not returned directly
     let blobObjectId = walrusInfo.suiObjectId;

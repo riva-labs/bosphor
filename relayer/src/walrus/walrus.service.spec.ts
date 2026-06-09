@@ -23,8 +23,7 @@ describe('WalrusService', () => {
           useValue: {
             getOrThrow: jest.fn((key: string) => {
               const map: Record<string, string> = {
-                WALRUS_PUBLISHER_URL: 'https://publisher.test',
-                WALRUS_AGGREGATOR_URL: 'https://aggregator.test',
+                WALRUS_RELAY_URL: 'https://relay.test',
               };
               if (map[key]) return map[key];
               throw new Error(`Missing: ${key}`);
@@ -180,9 +179,4 @@ describe('WalrusService', () => {
     });
   });
 
-  describe('getAggregatorUrl', () => {
-    it('should return the configured aggregator URL', () => {
-      expect(service.getAggregatorUrl()).toBe('https://aggregator.test');
-    });
-  });
 });
