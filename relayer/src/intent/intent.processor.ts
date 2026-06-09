@@ -4,6 +4,8 @@ import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
+import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
+import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
@@ -20,6 +22,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly evm: EvmService,
     private readonly sui: SuiService,
+    private readonly suiCheckpoint: SuiCheckpointService,
+    private readonly suiLz: SuiLzService,
     private readonly walrus: WalrusService,
     private readonly config: ConfigService,
   ) {
@@ -37,13 +41,14 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Register callback for Sui checkpoint streaming events, then start the
     // stream. Order matters: the callback must be set before streaming begins
     // so that backfill events are not silently dropped.
-    this.sui.setOnEventCallback((event) => this.handleSuiLzEvent(event));
-    this.sui.startStreaming();
+    this.suiCheckpoint.setOnEventCallback((event) => this.handleSuiLzEvent(event));
+    this.suiCheckpoint.startStreaming();
   }
 
   async onModuleDestroy() {
     this.logger.log('Shutting down intent processor...');
     this.stopped = true;
+    this.suiCheckpoint.stop();
     // Wait for any in-flight processing to complete
     while (this.processing) {
       await new Promise((r) => setTimeout(r, 100));
@@ -196,7 +201,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // 3. Quote LZ fee, then send proof back to EVM via LayerZero
     let feeAmount: bigint | undefined;
     try {
-      const quotedFee = await this.sui.quoteLzFee(
+      const quotedFee = await this.suiLz.quoteLzFee(
         intentId,
         walrusInfo.blobId,
         walrusInfo.endEpoch,
@@ -212,7 +217,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
-    const lzDigest = await this.sui.lzSendProof(
+    const lzDigest = await this.suiLz.lzSendProof(
       intentId,
       walrusInfo.blobId,
       walrusInfo.endEpoch,

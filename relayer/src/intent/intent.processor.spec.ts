@@ -4,12 +4,16 @@ import { Logger } from '@nestjs/common';
 import { IntentProcessor } from './intent.processor';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
+import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
+import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
 
 describe('IntentProcessor.processIntent', () => {
   let processor: IntentProcessor;
   let mockEvm: Partial<EvmService>;
   let mockSui: Partial<SuiService>;
+  let mockSuiCheckpoint: Partial<SuiCheckpointService>;
+  let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
   let mockConfig: Partial<ConfigService>;
 
@@ -22,12 +26,21 @@ describe('IntentProcessor.processIntent', () => {
 
     mockSui = {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
-      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
-      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
+    };
+
+    mockSuiCheckpoint = {
+      setOnEventCallback: jest.fn(),
+      startStreaming: jest.fn(),
+      stop: jest.fn(),
+    };
+
+    mockSuiLz = {
+      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
     };
 
     mockWalrus = {
@@ -54,6 +67,8 @@ describe('IntentProcessor.processIntent', () => {
         IntentProcessor,
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         { provide: ConfigService, useValue: mockConfig },
       ],
@@ -78,7 +93,7 @@ describe('IntentProcessor.processIntent', () => {
     expect(mockSui.executeStore).toHaveBeenCalledWith(intentId, sender, '0xblobobj', deadlineMs);
 
     // lzSendProof should be called with Walrus results, configured dstEid, and quoted fee
-    expect(mockSui.lzSendProof).toHaveBeenCalledWith(
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(
       intentId,
       'blob123',
       50,
@@ -98,6 +113,8 @@ describe('IntentProcessor.processIntent', () => {
         IntentProcessor,
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         {
           provide: ConfigService,
@@ -121,7 +138,7 @@ describe('IntentProcessor.processIntent', () => {
 
     await (customProcessor as any).processIntent(intentId, sender, payload, deadlineMs);
 
-    expect(mockSui.lzSendProof).toHaveBeenCalledWith(
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(
       intentId,
       'blob123',
       50,
@@ -152,7 +169,7 @@ describe('IntentProcessor.processIntent', () => {
     // Verify call order: upload first, then executeStore, then lzSendProof
     const uploadOrder = (mockWalrus.upload as jest.Mock).mock.invocationCallOrder[0];
     const storeOrder = (mockSui.executeStore as jest.Mock).mock.invocationCallOrder[0];
-    const proofOrder = (mockSui.lzSendProof as jest.Mock).mock.invocationCallOrder[0];
+    const proofOrder = (mockSuiLz.lzSendProof as jest.Mock).mock.invocationCallOrder[0];
 
     expect(uploadOrder).toBeLessThan(storeOrder);
     expect(storeOrder).toBeLessThan(proofOrder);
@@ -167,12 +184,12 @@ describe('IntentProcessor.processIntent', () => {
     await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
 
     // quoteLzFee returns 100_000_000n, 10% buffer = 110_000_000n
-    expect(mockSui.quoteLzFee).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161);
-    expect(mockSui.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161, 110_000_000n);
+    expect(mockSuiLz.quoteLzFee).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161);
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161, 110_000_000n);
   });
 
   it('should fall back to default fee when quoteLzFee fails', async () => {
-    (mockSui.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
+    (mockSuiLz.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
 
     const intentId = '0x' + 'ab'.repeat(32);
     const sender = '0x' + '11'.repeat(20);
@@ -182,13 +199,15 @@ describe('IntentProcessor.processIntent', () => {
     await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
 
     // lzSendProof should still be called (without fee arg, uses default 0.5 SUI)
-    expect(mockSui.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161);
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161);
   });
 });
 
 describe('IntentProcessor.handleSuiLzEvent', () => {
   let processor: IntentProcessor;
   let mockSui: Partial<SuiService>;
+  let mockSuiCheckpoint: Partial<SuiCheckpointService>;
+  let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
 
   // ABI-encode a valid LZ payload: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
@@ -205,15 +224,22 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
   beforeEach(async () => {
     mockSui = {
       executeStore: jest.fn().mockResolvedValue('suidigest'),
-      lzSendProof: jest.fn().mockResolvedValue('lzdigest'),
-      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
       getAddress: jest.fn().mockReturnValue('0xsuiaddr'),
-      setOnEventCallback: jest.fn(),
-      startStreaming: jest.fn(),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
+    };
+
+    mockSuiCheckpoint = {
+      setOnEventCallback: jest.fn(),
+      startStreaming: jest.fn(),
+      stop: jest.fn(),
+    };
+
+    mockSuiLz = {
+      lzSendProof: jest.fn().mockResolvedValue('lzdigest'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
     };
 
     mockWalrus = {
@@ -235,6 +261,8 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
           },
         },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         {
           provide: ConfigService,
@@ -264,7 +292,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
     });
 
     expect(mockWalrus.upload).toHaveBeenCalledTimes(1);
-    expect(mockSui.lzSendProof).toHaveBeenCalledTimes(1);
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledTimes(1);
   });
 
   it('should skip already-processed intents (dedup)', async () => {
@@ -318,6 +346,8 @@ describe('IntentProcessor.poll', () => {
   let processor: IntentProcessor;
   let mockEvm: Partial<EvmService>;
   let mockSui: Partial<SuiService>;
+  let mockSuiCheckpoint: Partial<SuiCheckpointService>;
+  let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
 
   beforeEach(async () => {
@@ -331,6 +361,14 @@ describe('IntentProcessor.poll', () => {
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
     };
 
+    mockSuiCheckpoint = {
+      setOnEventCallback: jest.fn(),
+      startStreaming: jest.fn(),
+      stop: jest.fn(),
+    };
+
+    mockSuiLz = {};
+
     mockWalrus = {};
 
     const module: TestingModule = await Test.createTestingModule({
@@ -338,6 +376,8 @@ describe('IntentProcessor.poll', () => {
         IntentProcessor,
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         {
           provide: ConfigService,
@@ -407,11 +447,13 @@ describe('IntentProcessor.poll', () => {
     };
     Object.assign(mockSui, {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
-      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
-      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
+    });
+    Object.assign(mockSuiLz, {
+      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
     });
 
     // Return the event on every EVM poll
@@ -426,6 +468,8 @@ describe('IntentProcessor.poll', () => {
         IntentProcessor,
         { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         {
           provide: ConfigService,
@@ -485,11 +529,13 @@ describe('IntentProcessor.poll', () => {
     };
     Object.assign(mockSui, {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
-      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
-      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
+    });
+    Object.assign(mockSuiLz, {
+      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
+      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
     });
 
     // Config WITHOUT INTENT_TTL_MS (should default to 1h)
@@ -504,6 +550,8 @@ describe('IntentProcessor.poll', () => {
           },
         },
         { provide: SuiService, useValue: mockSui },
+        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
+        { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: fullWalrus },
         {
           provide: ConfigService,
