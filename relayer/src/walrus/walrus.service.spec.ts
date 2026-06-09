@@ -7,9 +7,11 @@ describe('WalrusService', () => {
   let service: WalrusService;
   let mockSui: Partial<SuiService>;
   let mockWriteBlob: jest.Mock;
+  let mockConfigGet: jest.Mock;
 
   beforeEach(async () => {
     mockWriteBlob = jest.fn();
+    mockConfigGet = jest.fn((_key: string, defaultValue?: any) => defaultValue);
 
     mockSui = {
       getAddress: jest.fn().mockReturnValue('0xrelayeraddr'),
@@ -26,9 +28,7 @@ describe('WalrusService', () => {
         { provide: SuiService, useValue: mockSui },
         {
           provide: ConfigService,
-          useValue: {
-            get: jest.fn((_key: string, defaultValue?: any) => defaultValue),
-          },
+          useValue: { get: mockConfigGet },
         },
       ],
     })
@@ -68,6 +68,24 @@ describe('WalrusService', () => {
         signer: 'mock-signer',
         owner: '0xrelayeraddr',
       });
+    });
+
+    it('should use configured WALRUS_STORE_EPOCHS for upload', async () => {
+      mockConfigGet.mockImplementation((key: string, defaultValue?: any) =>
+        key === 'WALRUS_STORE_EPOCHS' ? 10 : defaultValue,
+      );
+      service.onModuleInit();
+
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blob123',
+        blobObject: { id: '0xobj', storage: { end_epoch: 60 } },
+      });
+
+      await service.upload(Buffer.from('data'));
+
+      expect(mockWriteBlob).toHaveBeenCalledWith(
+        expect.objectContaining({ epochs: 10 }),
+      );
     });
 
     it('should propagate errors from writeBlob', async () => {
