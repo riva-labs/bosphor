@@ -83,9 +83,10 @@ describe('SuiService.lzSendProof', () => {
 
   beforeEach(async () => {
     mockExecuteTransaction = jest.fn().mockResolvedValue({
-      transaction: {
+      $kind: 'Transaction',
+      Transaction: {
         digest: 'fakedigest123',
-        effects: { status: { success: true, error: null } },
+        status: { success: true, error: null },
       },
     });
 
@@ -123,9 +124,10 @@ describe('SuiService.lzSendProof', () => {
 
   it('should throw when Sui transaction fails', async () => {
     mockExecuteTransaction.mockResolvedValue({
-      transaction: {
+      $kind: 'Transaction',
+      Transaction: {
         digest: 'faileddigest',
-        effects: { status: { success: false, error: 'out of gas' } },
+        status: { success: false, error: 'out of gas' },
       },
     });
 

@@ -6,11 +6,19 @@ import { SuiService } from '../chain/sui/sui.service';
 describe('WalrusService', () => {
   let service: WalrusService;
   let mockSui: Partial<SuiService>;
-  let mockFetch: jest.SpiedFunction<typeof global.fetch>;
+  let mockWriteBlob: jest.Mock;
+  let mockConfigGet: jest.Mock;
 
   beforeEach(async () => {
+    mockWriteBlob = jest.fn();
+    mockConfigGet = jest.fn((_key: string, defaultValue?: any) => defaultValue);
+
     mockSui = {
       getAddress: jest.fn().mockReturnValue('0xrelayeraddr'),
+      getWalrusClient: jest.fn().mockReturnValue({
+        walrus: { writeBlob: mockWriteBlob },
+      }),
+      getSigner: jest.fn().mockReturnValue('mock-signer'),
       findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
@@ -20,16 +28,7 @@ describe('WalrusService', () => {
         { provide: SuiService, useValue: mockSui },
         {
           provide: ConfigService,
-          useValue: {
-            getOrThrow: jest.fn((key: string) => {
-              const map: Record<string, string> = {
-                WALRUS_RELAY_URL: 'https://relay.test',
-              };
-              if (map[key]) return map[key];
-              throw new Error(`Missing: ${key}`);
-            }),
-            get: jest.fn((_key: string, defaultValue?: any) => defaultValue),
-          },
+          useValue: { get: mockConfigGet },
         },
       ],
     })
@@ -38,8 +37,6 @@ describe('WalrusService', () => {
 
     service = module.get<WalrusService>(WalrusService);
     service.onModuleInit();
-
-    mockFetch = jest.spyOn(global, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
   });
 
   afterEach(() => {
@@ -47,20 +44,14 @@ describe('WalrusService', () => {
   });
 
   describe('upload', () => {
-    it('should return blob info for newlyCreated response', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: jest.fn().mockResolvedValue({
-          newlyCreated: {
-            blobObject: {
-              blobId: 'blob123',
-              id: '0xblobobj',
-              storage: { endEpoch: 50 },
-            },
-          },
-        }),
-      } as any);
+    it('should call writeBlob and map result to WalrusBlobInfo', async () => {
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blob123',
+        blobObject: {
+          id: '0xblobobj',
+          storage: { end_epoch: 50 },
+        },
+      });
 
       const result = await service.upload(Buffer.from('test-data'));
 
@@ -69,103 +60,39 @@ describe('WalrusService', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       });
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    });
 
-    it('should return blob info for alreadyCertified response', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: jest.fn().mockResolvedValue({
-          alreadyCertified: {
-            blobId: 'certblob456',
-            endEpoch: 30,
-          },
-        }),
-      } as any);
-
-      const result = await service.upload(Buffer.from('test-data'));
-
-      expect(result).toEqual({
-        blobId: 'certblob456',
-        suiObjectId: '',
-        endEpoch: 30,
+      expect(mockWriteBlob).toHaveBeenCalledWith({
+        blob: new Uint8Array(Buffer.from('test-data')),
+        deletable: true,
+        epochs: 5,
+        signer: 'mock-signer',
+        owner: '0xrelayeraddr',
       });
     });
 
-    it('should retry on 5xx and succeed', async () => {
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 502,
-          text: jest.fn().mockResolvedValue('Bad Gateway'),
-        } as any)
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: jest.fn().mockResolvedValue({
-            newlyCreated: {
-              blobObject: {
-                blobId: 'blob789',
-                id: '0xobj789',
-                storage: { endEpoch: 40 },
-              },
-            },
-          }),
-        } as any);
+    it('should use configured WALRUS_STORE_EPOCHS for upload', async () => {
+      mockConfigGet.mockImplementation((key: string, defaultValue?: any) =>
+        key === 'WALRUS_STORE_EPOCHS' ? 10 : defaultValue,
+      );
+      service.onModuleInit();
 
-      const result = await service.upload(Buffer.from('retry-data'));
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blob123',
+        blobObject: { id: '0xobj', storage: { end_epoch: 60 } },
+      });
 
-      expect(result.blobId).toBe('blob789');
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-    }, 10_000);
+      await service.upload(Buffer.from('data'));
 
-    it('should throw after max retries on persistent 5xx', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 500,
-        text: jest.fn().mockResolvedValue('Internal Server Error'),
-      } as any);
+      expect(mockWriteBlob).toHaveBeenCalledWith(
+        expect.objectContaining({ epochs: 10 }),
+      );
+    });
+
+    it('should propagate errors from writeBlob', async () => {
+      mockWriteBlob.mockRejectedValue(new Error('SDK upload failed'));
 
       await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
-        'Walrus upload failed (500)',
-      );
-
-      expect(mockFetch).toHaveBeenCalledTimes(3);
-    }, 15_000);
-
-    it('should retry on 4xx and throw after max attempts', async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-        status: 400,
-        text: jest.fn().mockResolvedValue('Bad Request'),
-      } as any);
-
-      await expect(service.upload(Buffer.from('bad-data'))).rejects.toThrow(
-        'Walrus upload failed (400)',
-      );
-
-      expect(mockFetch).toHaveBeenCalledTimes(3);
-    }, 15_000);
-
-    it('should throw when all attempts time out', async () => {
-      const abortError = new DOMException('The operation was aborted', 'AbortError');
-      mockFetch.mockRejectedValue(abortError);
-
-      await expect(service.upload(Buffer.from('timeout-data'))).rejects.toThrow();
-
-      expect(mockFetch).toHaveBeenCalledTimes(3);
-    }, 15_000);
-
-    it('should throw on unexpected response shape', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: jest.fn().mockResolvedValue({ unknownField: true }),
-      } as any);
-
-      await expect(service.upload(Buffer.from('weird-data'))).rejects.toThrow(
-        'Unexpected Walrus response',
+        'SDK upload failed',
       );
     });
   });
@@ -178,5 +105,4 @@ describe('WalrusService', () => {
       expect(mockSui.findBlobObject).toHaveBeenCalledWith('blob123');
     });
   });
-
 });

@@ -40,7 +40,7 @@ Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. S
 
 - All blobs are stored as deletable. The relayer configures this at upload time. The protocol does not currently support permanent (non-deletable) storage.
 - Blob storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs). There is no per-intent storage duration customization.
-- If the Walrus publisher is unavailable, the relayer retries with exponential backoff up to 3 attempts. Persistent publisher outages block intent fulfillment.
+- If Walrus storage nodes or the upload relay are unavailable, the SDK handles retries internally. Persistent outages block intent fulfillment.
 
 ## Object version conflicts on Sui
 

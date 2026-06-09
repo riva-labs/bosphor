@@ -94,9 +94,9 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
     this.client = new SuiGrpcClient({ network, baseUrl: grpcUrl });
 
     if (relayerKey.startsWith('suipriv')) {
-      const { schema, secretKey } = decodeSuiPrivateKey(relayerKey);
-      if (schema !== 'ED25519') {
-        throw new Error(`Unsupported key schema: ${schema}`);
+      const { scheme, secretKey } = decodeSuiPrivateKey(relayerKey);
+      if (scheme !== 'ED25519') {
+        throw new Error(`Unsupported key scheme: ${scheme}`);
       }
       this.keypair = Ed25519Keypair.fromSecretKey(secretKey);
     } else {
@@ -286,10 +286,14 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
     tx.setSender(this.getAddress());
     const bytes = await tx.build({ client: this.client });
     const { signature } = await this.keypair.signTransaction(bytes);
-    return this.client.core.executeTransaction({
+    const result = await this.client.core.executeTransaction({
       transaction: bytes,
       signatures: [signature],
     });
+    if (result.$kind === 'FailedTransaction') {
+      throw new Error(`Sui tx failed: ${JSON.stringify(result.FailedTransaction.status)}`);
+    }
+    return result.Transaction;
   }
 
   async executeStore(
@@ -311,11 +315,10 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
       ],
     });
 
-    const result = await this.signAndExecute(tx);
-    const { digest, effects } = result.transaction;
+    const { digest, status } = await this.signAndExecute(tx);
 
-    if (!effects?.status?.success) {
-      throw new Error(`Sui tx failed: ${JSON.stringify(effects?.status)}`);
+    if (!status.success) {
+      throw new Error(`Sui tx failed: ${JSON.stringify(status)}`);
     }
 
     this.logger.log(`[${intentId}] Sui tx digest: ${digest}`);
@@ -619,11 +622,10 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
       arguments: [tx.object(this.lzConfigId), tx.object(this.lzOappId), call],
     });
 
-    const result = await this.signAndExecute(tx);
-    const { digest, effects } = result.transaction;
+    const { digest, status } = await this.signAndExecute(tx);
 
-    if (!effects?.status?.success) {
-      throw new Error(`Sui tx failed: ${JSON.stringify(effects?.status)}`);
+    if (!status.success) {
+      throw new Error(`Sui tx failed: ${JSON.stringify(status)}`);
     }
 
     this.logger.log(`[${intentId}] LZ send proof tx: ${digest}`);

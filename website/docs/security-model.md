@@ -65,7 +65,7 @@ A single-DVN setup means that DVN compromise would compromise message verificati
 |--------|-----------|
 | Relayer compromise | Relayer cannot forge proofs (DVN-verified). Can only delay or censor. Owner fallback available. |
 | DVN compromise | Single DVN risk. Multi-DVN planned. |
-| Walrus publisher outage | Relayer retries with exponential backoff. Intents expire gracefully. |
+| Walrus publisher outage | SDK handles retries internally. Intents expire gracefully if storage nodes remain unavailable. |
 | LZ endpoint compromise | Protocol-level risk shared with all LayerZero applications. |
 | Contract owner key compromise | Owner can call `confirmExecution` and `setRelayer`. Standard key management practices apply. |
 
