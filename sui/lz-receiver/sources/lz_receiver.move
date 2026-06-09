@@ -26,6 +26,7 @@ use sui::coin::Coin;
 use sui::event;
 use sui::sui::SUI;
 use sui::table::{Self, Table};
+use bosphor_lz::codec;
 use utils::bytes32::Bytes32;
 use zro::zro::ZRO;
 
@@ -37,14 +38,10 @@ const EIntentAlreadyReceived: u64 = 0;
 const EInvalidMessageLength: u64 = 1;
 /// Caller is not the authorized relayer.
 const EUnauthorizedRelayer: u64 = 2;
-/// intent_id must be exactly 32 bytes.
-const EInvalidIntentIdLength: u64 = 3;
-/// blob_id must be exactly 32 bytes.
-const EInvalidBlobIdLength: u64 = 4;
 /// Relayer address must not be zero.
-const EZeroAddress: u64 = 5;
+const EZeroAddress: u64 = 3;
 /// Intent must exist before sending proof.
-const EIntentNotReceived: u64 = 6;
+const EIntentNotReceived: u64 = 4;
 
 // === OTW ===
 
@@ -287,7 +284,7 @@ public fun lz_send_proof(
     assert!(ctx.sender() == config.relayer, EUnauthorizedRelayer);
     assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
 
-    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    let message = codec::encode(intent_id, blob_id, end_epoch);
     oapp.lz_send(
         &config.oapp_cap,
         dst_eid,
@@ -371,7 +368,7 @@ public fun quote_proof(
     options: vector<u8>,
     ctx: &mut TxContext,
 ): Call<QuoteParam, MessagingFee> {
-    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    let message = codec::encode(intent_id, blob_id, end_epoch);
     oapp.quote(
         &config.oapp_cap,
         dst_eid,
@@ -434,67 +431,7 @@ fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
         | (*data.borrow(base + 7) as u64)
 }
 
-// === Message Encoding ===
-
-/// Builds the proof message with type-1 prefix and ABI-encoded payload.
-///
-/// Format: `[0x01] [intentId(32)] [blobId(32)] [endEpoch(32, left-padded u256)]`
-/// Total: 97 bytes. Matches the EVM `_lzReceive` decoder for message type 1.
-///
-/// * `intent_id` - 32-byte intent identifier. Must be exactly 32 bytes.
-/// * `blob_id` - 32-byte Walrus blob identifier. Must be exactly 32 bytes.
-/// * `end_epoch` - Walrus storage epoch, encoded as big-endian uint256.
-///
-/// Aborts with `EInvalidIntentIdLength` if `intent_id` is not 32 bytes.
-/// Aborts with `EInvalidBlobIdLength` if `blob_id` is not 32 bytes.
-public(package) fun build_proof_message(
-    intent_id: vector<u8>,
-    blob_id: vector<u8>,
-    end_epoch: u64,
-): vector<u8> {
-    assert!(intent_id.length() == 32, EInvalidIntentIdLength);
-    assert!(blob_id.length() == 32, EInvalidBlobIdLength);
-
-    let mut msg = vector::empty<u8>();
-
-    // Type 1 prefix
-    msg.push_back(1u8);
-
-    // intentId (32 bytes)
-    let mut i = 0u64;
-    while (i < 32) {
-        msg.push_back(*intent_id.borrow(i));
-        i = i + 1;
-    };
-
-    // blobId (32 bytes)
-    i = 0;
-    while (i < 32) {
-        msg.push_back(*blob_id.borrow(i));
-        i = i + 1;
-    };
-
-    // endEpoch as uint256 (big-endian, left-padded to 32 bytes)
-    // First 24 zero-padding bytes
-    i = 0;
-    while (i < 24) {
-        msg.push_back(0u8);
-        i = i + 1;
-    };
-    // Then 8 bytes of u64 in big-endian
-    msg.push_back(((end_epoch >> 56) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 48) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 40) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 32) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 24) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 16) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 8) & 0xFF) as u8);
-    msg.push_back((end_epoch & 0xFF) as u8);
-
-    msg
-}
-
-// === Test Helpers ===
+// === Test ===
 
 /// Test-only initializer. Creates the OApp and LzReceiverConfig using a
 /// synthetic one-time witness.
