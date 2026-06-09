@@ -27,13 +27,6 @@ describe('WalrusService', () => {
         {
           provide: ConfigService,
           useValue: {
-            getOrThrow: jest.fn((key: string) => {
-              const map: Record<string, string> = {
-                WALRUS_RELAY_URL: 'https://relay.test',
-              };
-              if (map[key]) return map[key];
-              throw new Error(`Missing: ${key}`);
-            }),
             get: jest.fn((_key: string, defaultValue?: any) => defaultValue),
           },
         },
