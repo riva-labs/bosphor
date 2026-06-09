@@ -13,6 +13,7 @@
 #[allow(lint(self_transfer))]
 module bosphor_lz::lz_receiver;
 
+use bosphor_lz::codec;
 use call::call::{Call, Void};
 use call::call_cap::CallCap;
 use endpoint_v2::endpoint_quote::QuoteParam;
@@ -26,7 +27,6 @@ use sui::coin::Coin;
 use sui::event;
 use sui::sui::SUI;
 use sui::table::{Self, Table};
-use bosphor_lz::codec;
 use utils::bytes32::Bytes32;
 use zro::zro::ZRO;
 
@@ -43,12 +43,10 @@ const EZeroAddress: u64 = 3;
 /// Intent must exist before sending proof.
 const EIntentNotReceived: u64 = 4;
 
-// === OTW ===
+// === Structs ===
 
 /// One-time witness for module initialization. Used to create the OApp.
 public struct LZ_RECEIVER has drop {}
-
-// === Structs ===
 
 /// Shared configuration for the LayerZero receiver.
 ///
@@ -128,7 +126,7 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
     transfer::public_transfer(admin_cap, ctx.sender());
 }
 
-// === Core ===
+// === Public-Mutative ===
 
 /// Called by the LZ executor via PTB. Consumes the hot-potato `Call`, validates
 /// the message through the OApp (peer + endpoint checks), extracts the intent ID,
@@ -189,66 +187,6 @@ public fun lz_receive(
         value.destroy_none();
     };
 }
-
-// === View ===
-
-/// Returns true if an intent with the given ID has already been received.
-///
-/// * `config` - Shared LzReceiverConfig object.
-/// * `intent_id` - 32-byte intent identifier.
-public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
-    config.received_intents.contains(intent_id)
-}
-
-/// Returns the OApp CallCap ID. Used by the PTB builder for constructing
-/// executor move calls.
-///
-/// * `config` - Shared LzReceiverConfig object.
-public fun oapp_cap_id(config: &LzReceiverConfig): address {
-    config.oapp_cap.id()
-}
-
-// === Admin ===
-
-/// Registers this OApp with the LayerZero EndpointV2.
-///
-/// Must be called once after deployment so the endpoint knows how to route
-/// messages to this OApp. Uses the internally stored CallCap.
-///
-/// * `config` - Shared LzReceiverConfig (provides the CallCap).
-/// * `_oapp` - The OApp shared object.
-/// * `endpoint` - Mutable reference to the LZ EndpointV2.
-/// * `lz_receive_info` - OAppInfoV1-encoded metadata produced by `ptb_builder::lz_receive_info`.
-entry fun register_oapp(
-    config: &LzReceiverConfig,
-    _oapp: &OApp,
-    endpoint: &mut endpoint_v2::EndpointV2,
-    lz_receive_info: vector<u8>,
-    ctx: &mut TxContext,
-) {
-    endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
-}
-
-/// Sets the authorized relayer address. Only the OApp admin can call this.
-///
-/// * `config` - Shared LzReceiverConfig to update.
-/// * `admin_cap` - AdminCap proving the caller owns the OApp.
-/// * `oapp` - The OApp shared object for admin verification.
-/// * `new_relayer` - New relayer address. Must not be the zero address.
-///
-/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
-entry fun set_relayer(
-    config: &mut LzReceiverConfig,
-    admin_cap: &AdminCap,
-    oapp: &OApp,
-    new_relayer: address,
-) {
-    oapp.assert_admin(admin_cap);
-    assert!(new_relayer != @0x0, EZeroAddress);
-    config.relayer = new_relayer;
-}
-
-// === Send (Return Path) ===
 
 /// Initiates an LZ send of the execution proof back to EVM.
 ///
@@ -393,7 +331,65 @@ public fun confirm_quote_proof(
     fee
 }
 
-// === Internal ===
+// === Public-View ===
+
+/// Returns true if an intent with the given ID has already been received.
+///
+/// * `config` - Shared LzReceiverConfig object.
+/// * `intent_id` - 32-byte intent identifier.
+public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
+    config.received_intents.contains(intent_id)
+}
+
+/// Returns the OApp CallCap ID. Used by the PTB builder for constructing
+/// executor move calls.
+///
+/// * `config` - Shared LzReceiverConfig object.
+public fun oapp_cap_id(config: &LzReceiverConfig): address {
+    config.oapp_cap.id()
+}
+
+// === Admin ===
+
+/// Registers this OApp with the LayerZero EndpointV2.
+///
+/// Must be called once after deployment so the endpoint knows how to route
+/// messages to this OApp. Uses the internally stored CallCap.
+///
+/// * `config` - Shared LzReceiverConfig (provides the CallCap).
+/// * `_oapp` - The OApp shared object.
+/// * `endpoint` - Mutable reference to the LZ EndpointV2.
+/// * `lz_receive_info` - OAppInfoV1-encoded metadata produced by `ptb_builder::lz_receive_info`.
+entry fun register_oapp(
+    config: &LzReceiverConfig,
+    _oapp: &OApp,
+    endpoint: &mut endpoint_v2::EndpointV2,
+    lz_receive_info: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
+}
+
+/// Sets the authorized relayer address. Only the OApp admin can call this.
+///
+/// * `config` - Shared LzReceiverConfig to update.
+/// * `admin_cap` - AdminCap proving the caller owns the OApp.
+/// * `oapp` - The OApp shared object for admin verification.
+/// * `new_relayer` - New relayer address. Must not be the zero address.
+///
+/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+) {
+    oapp.assert_admin(admin_cap);
+    assert!(new_relayer != @0x0, EZeroAddress);
+    config.relayer = new_relayer;
+}
+
+// === Private ===
 
 /// Extracts a contiguous byte slice from `data` starting at `start` with length `len`.
 ///
