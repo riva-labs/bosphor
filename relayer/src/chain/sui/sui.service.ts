@@ -8,11 +8,7 @@ import { walrus } from '@mysten/walrus';
 import { ethers } from 'ethers';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
-
-const SUI_CLOCK_OBJECT = '0x6';
-
-// Default LZ options: 200_000 gas for lzReceive on EVM
-const DEFAULT_LZ_OPTIONS = '0x00030100110100000000000000000000000000030d40';
+import { SUI_CLOCK_OBJECT, DEFAULT_LZ_OPTIONS, CURSOR_FILE_NAME, MAX_BACKOFF_MS } from '../../common/constants';
 
 interface LzInfra {
   endpointV2: string;
@@ -40,8 +36,7 @@ export interface SuiLzEvent {
   nonce: bigint;
 }
 
-const CURSOR_FILE = resolve(__dirname, '../../../.sui-checkpoint-cursor');
-const MAX_BACKOFF_MS = 30_000;
+const CURSOR_FILE = resolve(__dirname, '../../../', CURSOR_FILE_NAME);
 
 @Injectable()
 export class SuiService implements OnModuleInit, OnModuleDestroy {

@@ -5,8 +5,7 @@ import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
 import { WalrusService } from '../walrus/walrus.service';
-
-const POLL_INTERVAL = 5_000;
+import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
@@ -33,7 +32,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
-    this.logger.log(`Polling EVM every ${POLL_INTERVAL / 1000}s, Sui via checkpoint stream`);
+    this.logger.log(`Polling EVM every ${POLL_INTERVAL_MS / 1000}s, Sui via checkpoint stream`);
 
     // Register callback for Sui checkpoint streaming events, then start the
     // stream. Order matters: the callback must be set before streaming begins
@@ -52,7 +51,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Intent processor stopped');
   }
 
-  @Interval(POLL_INTERVAL)
+  @Interval(POLL_INTERVAL_MS)
   async poll(): Promise<void> {
     if (this.stopped || this.processing) return;
     this.processing = true;
