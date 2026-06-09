@@ -179,15 +179,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
     this.logger.log(`[${intentId}] Verify blobId: ${walrusInfo.blobId}`);
 
-    // 2. Find blob object if not returned directly
-    let blobObjectId = walrusInfo.suiObjectId;
-    if (!blobObjectId) {
-      this.logger.log(`[${intentId}] Looking up Blob object...`);
-      blobObjectId = await this.walrus.findBlobObject(walrusInfo.blobId);
-      this.logger.log(`[${intentId}] Found: ${blobObjectId}`);
-    }
-
-    // 3. Record on Sui (skip if already executed from a prior attempt)
+    // 2. Record on Sui (skip if already executed from a prior attempt)
+    const blobObjectId = walrusInfo.suiObjectId;
     try {
       const storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
       // Wait for TX finality to avoid object version conflicts on the next TX

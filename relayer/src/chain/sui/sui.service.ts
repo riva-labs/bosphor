@@ -10,7 +10,6 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 
 const SUI_CLOCK_OBJECT = '0x6';
-const WALRUS_PACKAGE_ID = '0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66';
 
 // Default LZ options: 200_000 gas for lzReceive on EVM
 const DEFAULT_LZ_OPTIONS = '0x00030100110100000000000000000000000000030d40';
@@ -630,39 +629,5 @@ export class SuiService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`[${intentId}] LZ send proof tx: ${digest}`);
     return digest;
-  }
-
-  async findBlobObject(blobId: string): Promise<string> {
-    const result = await this.client.stateService.listOwnedObjects({
-      owner: this.getAddress(),
-      objectType: `${WALRUS_PACKAGE_ID}::blob::Blob`,
-      readMask: { paths: ['object_id', 'contents'] },
-    });
-
-    const targetBytes = Buffer.from(blobId, 'base64url');
-    const candidates = result.response.objects ?? [];
-
-    // Try to match blob_id from BCS contents.
-    // Walrus Blob struct layout: UID (32 bytes) + stored_epoch (u32, 4 bytes) + blob_id (u256, 32 bytes)
-    for (const obj of candidates) {
-      if (!obj.objectId) continue;
-      const contents = (obj as any).contents?.value;
-      if (contents && contents.length >= 68) {
-        const storedBlobId = Buffer.from(contents.slice(36, 68));
-        if (storedBlobId.equals(targetBytes)) {
-          return obj.objectId;
-        }
-      }
-    }
-
-    // Fallback: return first owned Blob if BCS matching fails
-    if (candidates.length > 0 && candidates[0].objectId) {
-      this.logger.warn(
-        `Could not match blobId from BCS contents, returning first owned Blob: ${candidates[0].objectId}`,
-      );
-      return candidates[0].objectId;
-    }
-
-    throw new Error(`Blob object not found for blobId: ${blobId}`);
   }
 }

@@ -36,7 +36,6 @@ describe('IntentProcessor.processIntent', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
     mockConfig = {
@@ -223,7 +222,6 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -406,7 +404,6 @@ describe('IntentProcessor.poll', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
     Object.assign(mockSui, {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
@@ -485,7 +482,6 @@ describe('IntentProcessor.poll', () => {
         suiObjectId: '0xblobobj',
         endEpoch: 50,
       }),
-      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
     Object.assign(mockSui, {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
