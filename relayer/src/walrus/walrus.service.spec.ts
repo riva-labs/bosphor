@@ -19,7 +19,6 @@ describe('WalrusService', () => {
         walrus: { writeBlob: mockWriteBlob },
       }),
       getSigner: jest.fn().mockReturnValue('mock-signer'),
-      findBlobObject: jest.fn().mockResolvedValue('0xblobobj'),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -94,15 +93,6 @@ describe('WalrusService', () => {
       await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
         'SDK upload failed',
       );
-    });
-  });
-
-  describe('findBlobObject', () => {
-    it('should delegate to SuiService', async () => {
-      const result = await service.findBlobObject('blob123');
-
-      expect(result).toBe('0xblobobj');
-      expect(mockSui.findBlobObject).toHaveBeenCalledWith('blob123');
     });
   });
 });

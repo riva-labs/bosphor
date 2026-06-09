@@ -45,8 +45,4 @@ export class WalrusService implements OnModuleInit {
       endEpoch: result.blobObject.storage.end_epoch,
     };
   }
-
-  async findBlobObject(blobId: string): Promise<string> {
-    return this.sui.findBlobObject(blobId);
-  }
 }
