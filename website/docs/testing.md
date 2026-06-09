@@ -79,7 +79,7 @@ Tests are in `relayer/src/**/*.spec.ts`. All external dependencies (Sui client, 
 | Suite | File | What is covered |
 |-------|------|-----------------|
 | IntentProcessor | `intent/intent.processor.spec.ts` | Full pipeline (upload, executeStore, lzSendProof), deduplication, TTL expiry, fee quote fallback, custom EVM_DST_EID |
-| WalrusService | `walrus/walrus.service.spec.ts` | SDK writeBlob result mapping, error propagation, findBlobObject delegation |
+| WalrusService | `walrus/walrus.service.spec.ts` | SDK writeBlob result mapping, error propagation, epoch configuration |
 | EvmService | `chain/evm/evm.service.spec.ts` | Event polling, log parsing, confirmExecution retry (3 attempts, 2s delay) |
 | SuiService | `chain/sui/sui.service.spec.ts` | lzSendProof PTB construction, quoteLzFee BCS parsing, checkpoint event processing, error on missing LZ config |
 | HealthService | `health/health.service.spec.ts` | ok/degraded status, uptime calculation |

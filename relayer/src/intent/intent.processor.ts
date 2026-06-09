@@ -194,7 +194,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 4. Quote LZ fee, then send proof back to EVM via LayerZero
+    // 3. Quote LZ fee, then send proof back to EVM via LayerZero
     let feeAmount: bigint | undefined;
     try {
       const quotedFee = await this.sui.quoteLzFee(
