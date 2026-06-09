@@ -888,7 +888,7 @@ The Bosphor relayer is a NestJS service that bridges Sui and EVM. It polls both 
 import AiPrompt from '@site/src/components/AiPrompt';
 
 <AiPrompt>
-{`Set up and run the Bosphor relayer service. Copy \`relayer/.env.example\` to \`relayer/.env\` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, WALRUS_PUBLISHER_URL, and WALRUS_AGGREGATOR_URL. The LZ infrastructure variables are pre-filled in the example. Then run \`cd relayer && npm install && npm run start:dev\` and verify the health endpoint responds at GET /health.`}
+{`Set up and run the Bosphor relayer service. Copy \`relayer/.env.example\` to \`relayer/.env\` and help me fill in the required variables: EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_RELAYER_KEY, SUI_PACKAGE_ID, SUI_CONFIG_ID, and WALRUS_RELAY_URL. The LZ infrastructure variables are pre-filled in the example. Then run \`cd relayer && npm install && npm run start:dev\` and verify the health endpoint responds at GET /health.`}
 </AiPrompt>
 
 ## How it works
@@ -914,8 +914,7 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SUI_RELAYER_KEY` | Sui private key (`suiprivkey1...` or base64 Ed25519) |
 | `SUI_PACKAGE_ID` | walrus_executor package ID |
 | `SUI_CONFIG_ID` | ExecutorConfig shared object ID |
-| `WALRUS_PUBLISHER_URL` | Walrus publisher endpoint |
-| `WALRUS_AGGREGATOR_URL` | Walrus aggregator endpoint |
+| `WALRUS_RELAY_URL` | Walrus upload relay endpoint |
 
 ### Optional environment variables
 
