@@ -35,6 +35,15 @@ Receives cross-chain messages from EVM via LayerZero v2 executor.
 - `register_oapp(config, oapp, endpoint, info, ctx)`: Entry function that registers the OApp with the LZ endpoint using the internal CallCap.
 - `is_received(config, intent_id)`: View function to check if an intent was received.
 
+### codec.move
+
+Encodes and decodes type-1 proof messages exchanged between Sui and EVM via LayerZero.
+
+- `encode(intent_id, blob_id, end_epoch)`: Builds a 97-byte proof message: `[0x01][intentId(32)][blobId(32)][endEpoch(32, big-endian u256)]`. Used by `lz_send_proof` and `quote_proof`.
+- `decode(message)`: Extracts `(intent_id, blob_id, end_epoch)` from a 97-byte type-1 message. Validates the type prefix and length.
+
+Wire format: `bytes1(0x01) ++ intentId(32) ++ blobId(32) ++ endEpoch(32)`
+
 ### walrus_executor.move
 
 Executes storage operations on Walrus.
