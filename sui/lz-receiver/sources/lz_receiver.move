@@ -13,6 +13,7 @@
 #[allow(lint(self_transfer))]
 module bosphor_lz::lz_receiver;
 
+use bosphor_lz::codec;
 use call::call::{Call, Void};
 use call::call_cap::CallCap;
 use endpoint_v2::endpoint_quote::QuoteParam;
@@ -37,21 +38,15 @@ const EIntentAlreadyReceived: u64 = 0;
 const EInvalidMessageLength: u64 = 1;
 /// Caller is not the authorized relayer.
 const EUnauthorizedRelayer: u64 = 2;
-/// intent_id must be exactly 32 bytes.
-const EInvalidIntentIdLength: u64 = 3;
-/// blob_id must be exactly 32 bytes.
-const EInvalidBlobIdLength: u64 = 4;
 /// Relayer address must not be zero.
-const EZeroAddress: u64 = 5;
+const EZeroAddress: u64 = 3;
 /// Intent must exist before sending proof.
-const EIntentNotReceived: u64 = 6;
+const EIntentNotReceived: u64 = 4;
 
-// === OTW ===
+// === Structs ===
 
 /// One-time witness for module initialization. Used to create the OApp.
 public struct LZ_RECEIVER has drop {}
-
-// === Structs ===
 
 /// Shared configuration for the LayerZero receiver.
 ///
@@ -131,7 +126,7 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
     transfer::public_transfer(admin_cap, ctx.sender());
 }
 
-// === Core ===
+// === Public-Mutative ===
 
 /// Called by the LZ executor via PTB. Consumes the hot-potato `Call`, validates
 /// the message through the OApp (peer + endpoint checks), extracts the intent ID,
@@ -193,66 +188,6 @@ public fun lz_receive(
     };
 }
 
-// === View ===
-
-/// Returns true if an intent with the given ID has already been received.
-///
-/// * `config` - Shared LzReceiverConfig object.
-/// * `intent_id` - 32-byte intent identifier.
-public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
-    config.received_intents.contains(intent_id)
-}
-
-/// Returns the OApp CallCap ID. Used by the PTB builder for constructing
-/// executor move calls.
-///
-/// * `config` - Shared LzReceiverConfig object.
-public fun oapp_cap_id(config: &LzReceiverConfig): address {
-    config.oapp_cap.id()
-}
-
-// === Admin ===
-
-/// Registers this OApp with the LayerZero EndpointV2.
-///
-/// Must be called once after deployment so the endpoint knows how to route
-/// messages to this OApp. Uses the internally stored CallCap.
-///
-/// * `config` - Shared LzReceiverConfig (provides the CallCap).
-/// * `_oapp` - The OApp shared object.
-/// * `endpoint` - Mutable reference to the LZ EndpointV2.
-/// * `lz_receive_info` - OAppInfoV1-encoded metadata produced by `ptb_builder::lz_receive_info`.
-entry fun register_oapp(
-    config: &LzReceiverConfig,
-    _oapp: &OApp,
-    endpoint: &mut endpoint_v2::EndpointV2,
-    lz_receive_info: vector<u8>,
-    ctx: &mut TxContext,
-) {
-    endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
-}
-
-/// Sets the authorized relayer address. Only the OApp admin can call this.
-///
-/// * `config` - Shared LzReceiverConfig to update.
-/// * `admin_cap` - AdminCap proving the caller owns the OApp.
-/// * `oapp` - The OApp shared object for admin verification.
-/// * `new_relayer` - New relayer address. Must not be the zero address.
-///
-/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
-entry fun set_relayer(
-    config: &mut LzReceiverConfig,
-    admin_cap: &AdminCap,
-    oapp: &OApp,
-    new_relayer: address,
-) {
-    oapp.assert_admin(admin_cap);
-    assert!(new_relayer != @0x0, EZeroAddress);
-    config.relayer = new_relayer;
-}
-
-// === Send (Return Path) ===
-
 /// Initiates an LZ send of the execution proof back to EVM.
 ///
 /// Builds the type-1 proof message and calls `oapp::lz_send()`. Returns the
@@ -287,7 +222,7 @@ public fun lz_send_proof(
     assert!(ctx.sender() == config.relayer, EUnauthorizedRelayer);
     assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
 
-    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    let message = codec::encode(intent_id, blob_id, end_epoch);
     oapp.lz_send(
         &config.oapp_cap,
         dst_eid,
@@ -371,7 +306,7 @@ public fun quote_proof(
     options: vector<u8>,
     ctx: &mut TxContext,
 ): Call<QuoteParam, MessagingFee> {
-    let message = build_proof_message(intent_id, blob_id, end_epoch);
+    let message = codec::encode(intent_id, blob_id, end_epoch);
     oapp.quote(
         &config.oapp_cap,
         dst_eid,
@@ -396,7 +331,65 @@ public fun confirm_quote_proof(
     fee
 }
 
-// === Internal ===
+// === Public-View ===
+
+/// Returns true if an intent with the given ID has already been received.
+///
+/// * `config` - Shared LzReceiverConfig object.
+/// * `intent_id` - 32-byte intent identifier.
+public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
+    config.received_intents.contains(intent_id)
+}
+
+/// Returns the OApp CallCap ID. Used by the PTB builder for constructing
+/// executor move calls.
+///
+/// * `config` - Shared LzReceiverConfig object.
+public fun oapp_cap_id(config: &LzReceiverConfig): address {
+    config.oapp_cap.id()
+}
+
+// === Admin ===
+
+/// Registers this OApp with the LayerZero EndpointV2.
+///
+/// Must be called once after deployment so the endpoint knows how to route
+/// messages to this OApp. Uses the internally stored CallCap.
+///
+/// * `config` - Shared LzReceiverConfig (provides the CallCap).
+/// * `_oapp` - The OApp shared object.
+/// * `endpoint` - Mutable reference to the LZ EndpointV2.
+/// * `lz_receive_info` - OAppInfoV1-encoded metadata produced by `ptb_builder::lz_receive_info`.
+entry fun register_oapp(
+    config: &LzReceiverConfig,
+    _oapp: &OApp,
+    endpoint: &mut endpoint_v2::EndpointV2,
+    lz_receive_info: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    endpoint_v2::register_oapp(endpoint, &config.oapp_cap, lz_receive_info, ctx);
+}
+
+/// Sets the authorized relayer address. Only the OApp admin can call this.
+///
+/// * `config` - Shared LzReceiverConfig to update.
+/// * `admin_cap` - AdminCap proving the caller owns the OApp.
+/// * `oapp` - The OApp shared object for admin verification.
+/// * `new_relayer` - New relayer address. Must not be the zero address.
+///
+/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+) {
+    oapp.assert_admin(admin_cap);
+    assert!(new_relayer != @0x0, EZeroAddress);
+    config.relayer = new_relayer;
+}
+
+// === Private ===
 
 /// Extracts a contiguous byte slice from `data` starting at `start` with length `len`.
 ///
@@ -434,67 +427,7 @@ fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
         | (*data.borrow(base + 7) as u64)
 }
 
-// === Message Encoding ===
-
-/// Builds the proof message with type-1 prefix and ABI-encoded payload.
-///
-/// Format: `[0x01] [intentId(32)] [blobId(32)] [endEpoch(32, left-padded u256)]`
-/// Total: 97 bytes. Matches the EVM `_lzReceive` decoder for message type 1.
-///
-/// * `intent_id` - 32-byte intent identifier. Must be exactly 32 bytes.
-/// * `blob_id` - 32-byte Walrus blob identifier. Must be exactly 32 bytes.
-/// * `end_epoch` - Walrus storage epoch, encoded as big-endian uint256.
-///
-/// Aborts with `EInvalidIntentIdLength` if `intent_id` is not 32 bytes.
-/// Aborts with `EInvalidBlobIdLength` if `blob_id` is not 32 bytes.
-public(package) fun build_proof_message(
-    intent_id: vector<u8>,
-    blob_id: vector<u8>,
-    end_epoch: u64,
-): vector<u8> {
-    assert!(intent_id.length() == 32, EInvalidIntentIdLength);
-    assert!(blob_id.length() == 32, EInvalidBlobIdLength);
-
-    let mut msg = vector::empty<u8>();
-
-    // Type 1 prefix
-    msg.push_back(1u8);
-
-    // intentId (32 bytes)
-    let mut i = 0u64;
-    while (i < 32) {
-        msg.push_back(*intent_id.borrow(i));
-        i = i + 1;
-    };
-
-    // blobId (32 bytes)
-    i = 0;
-    while (i < 32) {
-        msg.push_back(*blob_id.borrow(i));
-        i = i + 1;
-    };
-
-    // endEpoch as uint256 (big-endian, left-padded to 32 bytes)
-    // First 24 zero-padding bytes
-    i = 0;
-    while (i < 24) {
-        msg.push_back(0u8);
-        i = i + 1;
-    };
-    // Then 8 bytes of u64 in big-endian
-    msg.push_back(((end_epoch >> 56) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 48) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 40) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 32) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 24) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 16) & 0xFF) as u8);
-    msg.push_back(((end_epoch >> 8) & 0xFF) as u8);
-    msg.push_back((end_epoch & 0xFF) as u8);
-
-    msg
-}
-
-// === Test Helpers ===
+// === Test ===
 
 /// Test-only initializer. Creates the OApp and LzReceiverConfig using a
 /// synthetic one-time witness.

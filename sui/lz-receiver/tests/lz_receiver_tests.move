@@ -1,6 +1,7 @@
 #[test_only]
 module bosphor_lz::lz_receiver_tests;
 
+use bosphor_lz::codec;
 use bosphor_lz::lz_receiver;
 use sui::test_scenario;
 
@@ -54,10 +55,10 @@ fun test_admin_cap_transferred_to_sender() {
     scenario.end();
 }
 
-// === build_proof_message tests ===
+// === codec::encode tests ===
 
 #[test]
-fun test_build_proof_message_encoding() {
+fun test_encode_proof_message() {
     // intent_id: 32 bytes, first byte 0xAA, rest zeros
     let mut intent_id = vector::empty<u8>();
     intent_id.push_back(0xAA);
@@ -72,7 +73,7 @@ fun test_build_proof_message_encoding() {
 
     let end_epoch: u64 = 42;
 
-    let msg = lz_receiver::build_proof_message(intent_id, blob_id, end_epoch);
+    let msg = codec::encode(intent_id, blob_id, end_epoch);
 
     // Total length: 1 (type prefix) + 32 (intentId) + 32 (blobId) + 32 (endEpoch) = 97
     assert!(msg.length() == 97, 0);
@@ -97,21 +98,118 @@ fun test_build_proof_message_encoding() {
 }
 
 #[test]
-#[expected_failure(abort_code = lz_receiver::EInvalidIntentIdLength)]
-fun test_build_proof_message_rejects_short_intent_id() {
+#[expected_failure(abort_code = codec::EInvalidIntentIdLength)]
+fun test_encode_rejects_short_intent_id() {
     let intent_id = x"AABB"; // only 2 bytes
     let mut blob_id = vector::empty<u8>();
     let mut i = 0u64;
     while (i < 32) { blob_id.push_back(0); i = i + 1; };
-    lz_receiver::build_proof_message(intent_id, blob_id, 1);
+    codec::encode(intent_id, blob_id, 1);
 }
 
 #[test]
-#[expected_failure(abort_code = lz_receiver::EInvalidBlobIdLength)]
-fun test_build_proof_message_rejects_short_blob_id() {
+#[expected_failure(abort_code = codec::EInvalidBlobIdLength)]
+fun test_encode_rejects_short_blob_id() {
     let mut intent_id = vector::empty<u8>();
     let mut i = 0u64;
     while (i < 32) { intent_id.push_back(0); i = i + 1; };
     let blob_id = x"CCDD"; // only 2 bytes
-    lz_receiver::build_proof_message(intent_id, blob_id, 1);
+    codec::encode(intent_id, blob_id, 1);
+}
+
+// === codec round-trip tests ===
+
+#[test]
+fun test_codec_round_trip() {
+    // Build known 32-byte intent_id (0x01 repeated)
+    let mut intent_id = vector::empty<u8>();
+    let mut i = 0u64;
+    while (i < 32) { intent_id.push_back(0x01); i = i + 1; };
+
+    // Build known 32-byte blob_id (0xFF repeated)
+    let mut blob_id = vector::empty<u8>();
+    i = 0;
+    while (i < 32) { blob_id.push_back(0xFF); i = i + 1; };
+
+    let end_epoch: u64 = 12345;
+
+    // Encode
+    let msg = codec::encode(intent_id, blob_id, end_epoch);
+    assert!(msg.length() == 97, 0);
+
+    // Decode
+    let (dec_intent_id, dec_blob_id, dec_end_epoch) = codec::decode(&msg);
+
+    // Verify all fields match
+    assert!(dec_intent_id == intent_id, 1);
+    assert!(dec_blob_id == blob_id, 2);
+    assert!(dec_end_epoch == end_epoch, 3);
+}
+
+#[test]
+fun test_codec_round_trip_zero_epoch() {
+    let mut intent_id = vector::empty<u8>();
+    let mut i = 0u64;
+    while (i < 32) { intent_id.push_back(0xAB); i = i + 1; };
+
+    let mut blob_id = vector::empty<u8>();
+    i = 0;
+    while (i < 32) { blob_id.push_back(0xCD); i = i + 1; };
+
+    let msg = codec::encode(intent_id, blob_id, 0);
+    let (dec_intent_id, dec_blob_id, dec_end_epoch) = codec::decode(&msg);
+
+    assert!(dec_intent_id == intent_id, 0);
+    assert!(dec_blob_id == blob_id, 1);
+    assert!(dec_end_epoch == 0, 2);
+}
+
+#[test]
+fun test_codec_round_trip_max_u64_epoch() {
+    let mut intent_id = vector::empty<u8>();
+    let mut i = 0u64;
+    while (i < 32) { intent_id.push_back(0); i = i + 1; };
+
+    let mut blob_id = vector::empty<u8>();
+    i = 0;
+    while (i < 32) { blob_id.push_back(0); i = i + 1; };
+
+    let max_u64: u64 = 18446744073709551615;
+    let msg = codec::encode(intent_id, blob_id, max_u64);
+    let (_dec_intent_id, _dec_blob_id, dec_end_epoch) = codec::decode(&msg);
+
+    assert!(dec_end_epoch == max_u64, 0);
+}
+
+#[test]
+#[expected_failure(abort_code = codec::EInvalidMessageType)]
+fun test_decode_rejects_wrong_type_prefix() {
+    // Build a valid 97-byte message but with wrong type prefix (0x02)
+    let mut msg = vector::empty<u8>();
+    msg.push_back(0x02); // wrong prefix
+    let mut i = 0u64;
+    while (i < 96) { msg.push_back(0); i = i + 1; };
+    codec::decode(&msg);
+}
+
+#[test]
+#[expected_failure(abort_code = codec::EInvalidMessageLength)]
+fun test_decode_rejects_short_message() {
+    // Build a message shorter than 97 bytes
+    let mut msg = vector::empty<u8>();
+    msg.push_back(0x01);
+    let mut i = 0u64;
+    while (i < 50) { msg.push_back(0); i = i + 1; }; // only 51 bytes total
+    codec::decode(&msg);
+}
+
+#[test]
+#[expected_failure(abort_code = codec::EInvalidMessageLength)]
+fun test_decode_rejects_long_message() {
+    // Build a message longer than 97 bytes
+    let mut msg = vector::empty<u8>();
+    msg.push_back(0x01);
+    let mut i = 0u64;
+    while (i < 100) { msg.push_back(0); i = i + 1; }; // 101 bytes total
+    codec::decode(&msg);
 }

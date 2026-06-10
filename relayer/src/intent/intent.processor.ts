@@ -4,9 +4,10 @@ import { Interval } from '@nestjs/schedule';
 import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService } from '../chain/sui/sui.service';
+import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
+import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
-
-const POLL_INTERVAL = 5_000;
+import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
@@ -21,6 +22,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly evm: EvmService,
     private readonly sui: SuiService,
+    private readonly suiCheckpoint: SuiCheckpointService,
+    private readonly suiLz: SuiLzService,
     private readonly walrus: WalrusService,
     private readonly config: ConfigService,
   ) {
@@ -33,18 +36,19 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
-    this.logger.log(`Polling EVM every ${POLL_INTERVAL / 1000}s, Sui via checkpoint stream`);
+    this.logger.log(`Polling EVM every ${POLL_INTERVAL_MS / 1000}s, Sui via checkpoint stream`);
 
     // Register callback for Sui checkpoint streaming events, then start the
     // stream. Order matters: the callback must be set before streaming begins
     // so that backfill events are not silently dropped.
-    this.sui.setOnEventCallback((event) => this.handleSuiLzEvent(event));
-    this.sui.startStreaming();
+    this.suiCheckpoint.setOnEventCallback((event) => this.handleSuiLzEvent(event));
+    this.suiCheckpoint.startStreaming();
   }
 
   async onModuleDestroy() {
     this.logger.log('Shutting down intent processor...');
     this.stopped = true;
+    this.suiCheckpoint.stop();
     // Wait for any in-flight processing to complete
     while (this.processing) {
       await new Promise((r) => setTimeout(r, 100));
@@ -52,7 +56,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Intent processor stopped');
   }
 
-  @Interval(POLL_INTERVAL)
+  @Interval(POLL_INTERVAL_MS)
   async poll(): Promise<void> {
     if (this.stopped || this.processing) return;
     this.processing = true;
@@ -197,7 +201,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // 3. Quote LZ fee, then send proof back to EVM via LayerZero
     let feeAmount: bigint | undefined;
     try {
-      const quotedFee = await this.sui.quoteLzFee(
+      const quotedFee = await this.suiLz.quoteLzFee(
         intentId,
         walrusInfo.blobId,
         walrusInfo.endEpoch,
@@ -213,7 +217,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
-    const lzDigest = await this.sui.lzSendProof(
+    const lzDigest = await this.suiLz.lzSendProof(
       intentId,
       walrusInfo.blobId,
       walrusInfo.endEpoch,
