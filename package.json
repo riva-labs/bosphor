@@ -23,8 +23,10 @@
     "relayer:build": "cd relayer && npm run build",
     "docs:dev": "cd website && npm run start",
     "docs:build": "cd website && npm run build",
+    "test": "npm run test:forge && npm run test:move && npm run test:relayer",
     "test:forge": "cd contracts/evm && forge test -vvv",
-    "test:move": "cd sui/lz-receiver && sui move test --build-env testnet"
+    "test:move": "cd sui/lz-receiver && sui move test --build-env testnet",
+    "test:relayer": "cd relayer && npm run build && npm run test"
   },
   "dependencies": {
     "@mysten/sui": "^1.0.0",
