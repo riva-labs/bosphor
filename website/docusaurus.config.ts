@@ -15,6 +15,16 @@ const config: Config = {
     mermaid: true,
   },
 
+  headTags: [
+    {
+      tagName: 'meta',
+      attributes: {
+        name: 'algolia-site-verification',
+        content: 'F94D345DC45E170F',
+      },
+    },
+  ],
+
   url: 'https://docs.bosphor.xyz',
   baseUrl: '/',
 
