@@ -7,7 +7,23 @@ title: Architecture
 
 ## System Overview
 
-![Bosphor System Architecture](./diagrams/architecture.svg)
+```mermaid
+flowchart LR
+    user(("User"))
+    evm["EVM\nBosphorAdapter"]
+    lz{{"LayerZero\nDVN Verified"}}
+    sui["Sui\nlz_receiver"]
+    relayer{{"Relayer"}}
+    walrus[("Walrus\nexecute_store")]
+
+    user -- "1. submitIntent" --> evm
+    evm -- "2. _lzSend" --> lz
+    lz -- "3. lz_receive" --> sui
+    sui -. "4. poll events" .-> relayer
+    relayer -- "5. store blob" --> walrus
+    walrus -- "6. lz_send_proof" --> lz
+    lz -- "7. _lzReceive" --> evm
+```
 
 ### Message Flow
 
