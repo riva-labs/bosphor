@@ -17,7 +17,21 @@ Both paths are independently verified by LayerZero's Decentralized Verifier Netw
 
 ## Forward path: EVM to Sui
 
-![Forward Path: EVM to Sui](./diagrams/forward-path.svg)
+```mermaid
+sequenceDiagram
+    participant User
+    participant EVM as EVM BosphorAdapter
+    participant LZ as LayerZero DVN
+    participant Sui as Sui OApp
+
+    User->>EVM: submitIntent(payload, deadline)
+    EVM->>EVM: ABI encode (intentId, sender, payload, deadline)
+    EVM->>LZ: _lzSend(type 0 message)
+    LZ->>LZ: DVN verification (2-block confirmation)
+    LZ->>Sui: lz_receive()
+    Sui->>Sui: Decode message, store IntentRecord
+    Sui->>Sui: emit IntentReceived
+```
 
 ### Step by step
 
@@ -39,7 +53,21 @@ Total: 1 + 32 + 32 + len(payload) + 32 bytes.
 
 ## Return path: Sui to EVM
 
-![Return Path: Sui to EVM](./diagrams/return-path.svg)
+```mermaid
+sequenceDiagram
+    participant Relayer
+    participant Sui as Sui OApp
+    participant LZ as LayerZero DVN
+    participant EVM as EVM BosphorAdapter
+
+    Relayer->>Sui: execute_store(blob, intentId)
+    Sui->>Sui: Verify blob certification, check deadline, emit StorageExecuted
+    Relayer->>Sui: lz_send_proof(intentId, blobId, endEpoch)
+    Sui->>LZ: PTB via LZ endpoint (type 1 message)
+    LZ->>LZ: DVN verification
+    LZ->>EVM: _lzReceive()
+    EVM->>EVM: Decode proof, mark intent executed, emit IntentExecuted
+```
 
 ### Step by step
 
