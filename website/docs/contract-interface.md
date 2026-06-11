@@ -163,6 +163,7 @@ const adapter = new ethers.Contract(
 const dstEid = 40378; // Sui testnet
 const payload = ethers.toUtf8Bytes("Hello Walrus");
 const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+// LZ execution options: type 3 (lzReceive), gas limit 200,000 (see "LZ Options" below)
 const options = "0x00030100110100000000000000000000000000030d40";
 
 // Get fee estimate
@@ -473,4 +474,14 @@ Default options for Sui delivery:
 0x00030100110100000000000000000000000000030d40
 ```
 
-This encodes: execution type 3 (lzReceive), gas limit 200,000.
+Byte breakdown:
+
+| Bytes | Value | Meaning |
+|-------|-------|---------|
+| `0003` | 3 | Options type (lzReceive execution) |
+| `01` | 1 | Number of option entries |
+| `0011` | 17 | Entry length in bytes |
+| `01` | 1 | Worker ID (executor) |
+| `00000000000000000000000000030d40` | 200,000 | Gas limit for `_lzReceive` on the destination chain |
+
+The 200,000 gas limit is sufficient for Bosphor's `_lzReceive` handler. Increase it if you extend the handler with custom logic. See the [LayerZero v2 Message Options](https://docs.layerzero.network/v2/developers/evm/protocol-gas-settings/options) documentation for the full encoding specification.

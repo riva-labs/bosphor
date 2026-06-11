@@ -62,13 +62,6 @@ const config: Config = {
 
   themes: [
     '@docusaurus/theme-mermaid',
-    [
-      '@easyops-cn/docusaurus-search-local',
-      {
-        hashed: true,
-        indexBlog: false,
-      },
-    ],
   ],
 
   themeConfig: {

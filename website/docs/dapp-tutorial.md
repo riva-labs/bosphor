@@ -42,7 +42,8 @@ Always call `quote` before submitting to get the exact LayerZero fee:
 ```typescript
 const payload = ethers.toUtf8Bytes("data to store on Walrus");
 const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-const options = "0x00030100110100000000000000000000000000030d40"; // default LZ options
+// LZ execution options: type 3 (lzReceive), 200k gas limit. See Contract Interface > LZ Options.
+const options = "0x00030100110100000000000000000000000000030d40";
 
 const fee = await adapter.quote(DST_EID, payload, deadline, options);
 console.log("LZ fee:", ethers.formatEther(fee.nativeFee), "ETH");
