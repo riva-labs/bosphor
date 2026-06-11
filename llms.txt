@@ -6,7 +6,7 @@ This file contains links to documentation sections following the llmstxt.org sta
 
 ## Table of Contents
 
-- [Architecture](https://docs.bosphor.xyz/architecture.md): ![Bosphor System Architecture](./diagrams/architecture.svg)
+- [Architecture](https://docs.bosphor.xyz/architecture.md): ```mermaid
 - [Changelog](https://docs.bosphor.xyz/changelog.md): The initial release establishing the complete cross-chain storage intent pipeline from EVM to Walrus and back.
 - [Contract Interface Reference](https://docs.bosphor.xyz/contract-interface.md): Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface inclu...
 - [dApp Integration Tutorial](https://docs.bosphor.xyz/dapp-tutorial.md): Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and liste...
