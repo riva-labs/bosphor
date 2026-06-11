@@ -11,14 +11,15 @@ LayerZero v2, returning verifiable proof of execution to the origin chain.
 
 ## How It Works (Two-Step Verification)
 
-```
-Step 1: Intent Delivery (EVM → Sui)
-EVM ──submitIntent──► LayerZero v2 (DVN) ──► Sui lz_receive
-
-Step 2: Proof Verification (Sui → EVM)
-                       Walrus STORE (deletable blob)
-                              │
-EVM ◄──_lzReceive──◄── LayerZero v2 (DVN) ◄── lz_send_proof
+```mermaid
+flowchart LR
+    subgraph step1 ["Step 1: Intent Delivery (EVM → Sui)"]
+        EVM1["EVM"] -- "submitIntent" --> LZ1["LayerZero v2\n(DVN)"] -- "lz_receive" --> Sui1["Sui"]
+    end
+    subgraph step2 ["Step 2: Proof Verification (Sui → EVM)"]
+        Sui2["Sui"] -- "lz_send_proof" --> LZ2["LayerZero v2\n(DVN)"] -- "_lzReceive" --> EVM2["EVM"]
+        Walrus[("Walrus\n(deletable blob)")] --> Sui2
+    end
 ```
 
 1. **Step 1 (Intent Delivery):** User calls `submitIntent(payload, deadline)` on EVM. LayerZero DVN verifies and delivers the message to Sui.

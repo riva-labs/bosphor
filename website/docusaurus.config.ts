@@ -11,6 +11,10 @@ const config: Config = {
     v4: true,
   },
 
+  markdown: {
+    mermaid: true,
+  },
+
   url: 'https://docs.bosphor.xyz',
   baseUrl: '/',
 
@@ -57,6 +61,7 @@ const config: Config = {
   ],
 
   themes: [
+    '@docusaurus/theme-mermaid',
     [
       '@easyops-cn/docusaurus-search-local',
       {
