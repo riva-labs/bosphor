@@ -237,3 +237,22 @@ details summary:hover {
   background: #FFFFFF;
   border-color: var(--bosphor-surface-2, #EDEDF0);
 }
+
+/* Algolia Autocomplete in navbar */
+.navbar #autocomplete {
+  min-width: 200px;
+}
+
+.navbar #autocomplete .aa-Form {
+  background: var(--bosphor-surface-2, #141D32);
+  border: 1px solid var(--bosphor-surface-3, #1A2540);
+  border-radius: 6px;
+}
+
+[data-theme='dark'] .navbar #autocomplete .aa-Input {
+  color: var(--ifm-font-color-base);
+}
+
+[data-theme='dark'] .navbar #autocomplete .aa-Input::placeholder {
+  color: var(--bosphor-text-muted);
+}

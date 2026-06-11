@@ -70,6 +70,13 @@ const config: Config = {
     './plugins/descriptions',
   ],
 
+  scripts: [
+    {
+      src: 'https://cdn.jsdelivr.net/npm/@algolia/experiences/dist/experiences.js?appId=VXT50FAJ6C&apiKey=d27833d51c3d77ebfacdb3a14410a04f&experienceId=59cc6ba2-f485-40c7-ad25-71ad5ef4b280&env=prod',
+      defer: true,
+    },
+  ],
+
   themes: [
     '@docusaurus/theme-mermaid',
   ],
@@ -99,6 +106,11 @@ const config: Config = {
           to: '/quickstart',
           label: 'Quickstart',
           position: 'left',
+        },
+        {
+          type: 'html',
+          position: 'right',
+          value: '<div id="autocomplete"></div>',
         },
         {
           href: 'https://github.com/riva-labs/bosphor',
