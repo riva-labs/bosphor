@@ -21,4 +21,15 @@ describe('MetricsService', () => {
       'bosphor_relayer_intents_processed_total{result="failure",path="sui_lz"} 1',
     );
   });
+
+  it('counts LZ send outcomes by result', async () => {
+    service.recordLzSend('success');
+    service.recordLzSend('failure');
+    service.recordLzSend('failure');
+
+    const out = await service.getMetrics();
+
+    expect(out).toContain('bosphor_relayer_lz_send_total{result="success"} 1');
+    expect(out).toContain('bosphor_relayer_lz_send_total{result="failure"} 2');
+  });
 });

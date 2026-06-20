@@ -15,12 +15,23 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly lzSend = new Counter({
+    name: 'bosphor_relayer_lz_send_total',
+    help: 'LayerZero proof sends from the relayer, by result',
+    labelNames: ['result'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {
     this.intentsProcessed.inc({ result, path });
+  }
+
+  recordLzSend(result: Result): void {
+    this.lzSend.inc({ result });
   }
 
   get contentType(): string {
