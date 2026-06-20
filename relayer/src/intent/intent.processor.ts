@@ -7,6 +7,7 @@ import { SuiService } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -26,6 +27,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly suiLz: SuiLzService,
     private readonly walrus: WalrusService,
     private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
@@ -116,8 +118,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       const payloadBytes = ethers.getBytes(userPayload);
       await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
       this.processedIntents.set(event.intentId, Date.now());
+      this.metrics.recordIntentProcessed('sui_lz', 'success');
       this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
     } catch (err) {
+      this.metrics.recordIntentProcessed('sui_lz', 'failure');
       this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
     }
   }
@@ -152,8 +156,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
           deadlineMs,
         );
         this.processedIntents.set(event.intentId, Date.now());
+        this.metrics.recordIntentProcessed('evm', 'success');
         this.logger.log(`[${event.intentId}] Intent fulfilled (via EVM)`);
       } catch (err) {
+        this.metrics.recordIntentProcessed('evm', 'failure');
         this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
         // Do NOT mark as processed — allow retry on next poll
       }
@@ -177,7 +183,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     // 1. Upload payload to Walrus
     this.logger.log(`[${intentId}] Uploading to Walrus...`);
+    const uploadStart = Date.now();
     const walrusInfo = await this.walrus.upload(payload);
+    this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
     this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
@@ -223,13 +231,20 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
-    const lzDigest = await this.suiLz.lzSendProof(
-      intentId,
-      walrusInfo.blobId,
-      walrusInfo.endEpoch,
-      this.evmDstEid,
-      ...(feeAmount !== undefined ? [feeAmount] : []),
-    );
+    let lzDigest: string;
+    try {
+      lzDigest = await this.suiLz.lzSendProof(
+        intentId,
+        walrusInfo.blobId,
+        walrusInfo.endEpoch,
+        this.evmDstEid,
+        ...(feeAmount !== undefined ? [feeAmount] : []),
+      );
+    } catch (err) {
+      this.metrics.recordLzSend('failure');
+      throw err;
+    }
+    this.metrics.recordLzSend('success');
     this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
   }
 }

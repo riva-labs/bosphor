@@ -7,6 +7,16 @@ import { SuiService } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
+import { MetricsService } from '../metrics/metrics.service';
+
+function makeMetricsMock() {
+  return {
+    recordIntentProcessed: jest.fn(),
+    recordLzSend: jest.fn(),
+    observeWalrusUpload: jest.fn(),
+    setCheckpointCursorLag: jest.fn(),
+  };
+}
 
 describe('IntentProcessor.processIntent', () => {
   let processor: IntentProcessor;
@@ -16,6 +26,7 @@ describe('IntentProcessor.processIntent', () => {
   let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
   let mockConfig: Partial<ConfigService>;
+  let mockMetrics: jest.Mocked<Pick<MetricsService, 'recordIntentProcessed' | 'recordLzSend' | 'observeWalrusUpload' | 'setCheckpointCursorLag'>>;
 
   beforeEach(async () => {
     mockEvm = {
@@ -62,6 +73,13 @@ describe('IntentProcessor.processIntent', () => {
       }),
     };
 
+    mockMetrics = {
+      recordIntentProcessed: jest.fn(),
+      recordLzSend: jest.fn(),
+      observeWalrusUpload: jest.fn(),
+      setCheckpointCursorLag: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IntentProcessor,
@@ -71,6 +89,7 @@ describe('IntentProcessor.processIntent', () => {
         { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: MetricsService, useValue: mockMetrics },
       ],
     }).compile();
 
@@ -105,6 +124,19 @@ describe('IntentProcessor.processIntent', () => {
     expect(mockEvm.confirmExecution).not.toHaveBeenCalled();
   });
 
+  it('records Walrus upload timing and a successful LZ send for a fulfilled intent', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+
+    expect(mockMetrics.observeWalrusUpload).toHaveBeenCalledTimes(1);
+    expect(mockMetrics.observeWalrusUpload.mock.calls[0][0]).toBeGreaterThanOrEqual(0);
+    expect(mockMetrics.recordLzSend).toHaveBeenCalledWith('success');
+  });
+
   it('should use EVM_DST_EID from config for lzSendProof', async () => {
     const customEid = 30101; // mainnet EID
 
@@ -126,6 +158,7 @@ describe('IntentProcessor.processIntent', () => {
             }),
           },
         },
+        { provide: MetricsService, useValue: mockMetrics },
       ],
     }).compile();
 
@@ -274,6 +307,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
             getOrThrow: jest.fn(() => 40161),
           },
         },
+        { provide: MetricsService, useValue: makeMetricsMock() },
       ],
     }).compile();
 
@@ -383,6 +417,7 @@ describe('IntentProcessor.poll', () => {
           provide: ConfigService,
           useValue: { get: jest.fn(() => 40161), getOrThrow: jest.fn(() => 40161) },
         },
+        { provide: MetricsService, useValue: makeMetricsMock() },
       ],
     }).compile();
 
@@ -482,6 +517,7 @@ describe('IntentProcessor.poll', () => {
             getOrThrow: jest.fn(() => 40161),
           },
         },
+        { provide: MetricsService, useValue: makeMetricsMock() },
       ],
     }).compile();
 
@@ -563,6 +599,7 @@ describe('IntentProcessor.poll', () => {
             getOrThrow: jest.fn(() => 40161),
           },
         },
+        { provide: MetricsService, useValue: makeMetricsMock() },
       ],
     }).compile();
 
