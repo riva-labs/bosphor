@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { SuiService, SuiLzEvent } from './sui.service';
-import { CURSOR_FILE_NAME, MAX_BACKOFF_MS } from '../../common/constants';
+import { CURSOR_FILE_NAME, MAX_BACKOFF_MS, POLL_INTERVAL_MS } from '../../common/constants';
 
 const CURSOR_FILE = resolve(__dirname, '../../../', CURSOR_FILE_NAME);
 
@@ -22,19 +22,19 @@ export class SuiCheckpointService {
   }
 
   /**
-   * Start the checkpoint stream. Called by IntentProcessor after the event
-   * callback is registered, avoiding a race where backfill events arrive
-   * before the callback is set.
+   * Start polling Sui checkpoints for IntentReceived events. Called by
+   * IntentProcessor after the event callback is registered, avoiding a race
+   * where backfilled events arrive before the callback is set.
    */
   startStreaming() {
     if (!this.sui.getLzPackageId()) return;
-    this.startCheckpointStream().catch((err) =>
-      this.logger.error(`Checkpoint stream fatal error: ${err}`),
+    this.runCheckpointPoll().catch((err) =>
+      this.logger.error(`Checkpoint poll fatal error: ${err}`),
     );
   }
 
   /**
-   * Stop the checkpoint stream gracefully.
+   * Stop the checkpoint poll gracefully.
    */
   stop() {
     this.stopped = true;
@@ -53,35 +53,59 @@ export class SuiCheckpointService {
     writeFileSync(CURSOR_FILE, checkpoint.toString());
   }
 
-  private async startCheckpointStream() {
-    const lastCheckpoint = this.readCursor();
-    if (lastCheckpoint !== null) {
-      this.logger.log(`Resuming from checkpoint ${lastCheckpoint}`);
-      await this.backfill(lastCheckpoint);
+  /**
+   * Poll Sui for new checkpoints and process their events on a fixed interval.
+   *
+   * Detection is driven by sequential backfill from the cursor rather than the
+   * live `subscribeCheckpoints` stream. The stream drops roughly every minute
+   * and resubscribes from the latest checkpoint, silently skipping events
+   * produced during the gap while still advancing the high-water cursor past
+   * them, so events are lost and never recovered. Sequential backfill visits
+   * every checkpoint in order, so no IntentReceived event is missed.
+   */
+  private async runCheckpointPoll() {
+    // Start from the current checkpoint on first run so we process intents from
+    // now forward instead of replaying all of chain history.
+    if (this.readCursor() === null) {
+      const current = BigInt(await this.sui.getCheckpoint());
+      this.writeCursor(current);
+      this.logger.log(`Initialized checkpoint cursor at ${current}`);
+    } else {
+      this.logger.log(`Resuming from checkpoint ${this.readCursor()}`);
     }
 
     let backoffMs = 1000;
     while (!this.stopped) {
       try {
-        this.logger.log('Starting checkpoint stream...');
-        await this.streamCheckpoints();
-        backoffMs = 1000; // reset on clean disconnect
+        const cursor = this.readCursor();
+        if (cursor !== null) {
+          await this.backfill(cursor);
+        }
+        backoffMs = 1000; // reset after a clean pass
+        await this.sleep(POLL_INTERVAL_MS);
       } catch (err) {
         if (this.stopped) break;
-        this.logger.warn(`Checkpoint stream error: ${err}. Reconnecting in ${backoffMs}ms...`);
-        await new Promise((r) => setTimeout(r, backoffMs));
+        this.logger.warn(`Checkpoint poll error: ${err}. Retrying in ${backoffMs}ms...`);
+        await this.sleep(backoffMs);
         backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
       }
     }
   }
 
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
   private async backfill(fromCheckpoint: bigint) {
     const client = this.sui.getClient();
-    const currentStr = await this.sui.getCheckpoint();
-    const current = BigInt(currentStr);
+    const current = BigInt(await this.sui.getCheckpoint());
     if (fromCheckpoint >= current) return;
 
-    this.logger.log(`Backfilling checkpoints ${fromCheckpoint + 1n} to ${current}`);
+    // Only announce sizeable catch-ups; steady-state polling advances a handful
+    // of checkpoints per pass and would otherwise spam the log.
+    if (current - fromCheckpoint > 50n) {
+      this.logger.log(`Backfilling checkpoints ${fromCheckpoint + 1n} to ${current}`);
+    }
     for (let seq = fromCheckpoint + 1n; seq <= current; seq++) {
       if (this.stopped) break;
       const { response } = await client.ledgerService.getCheckpoint({
@@ -90,22 +114,6 @@ export class SuiCheckpointService {
       });
       if (response.checkpoint) {
         await this.processCheckpoint(response.checkpoint, seq);
-      }
-    }
-  }
-
-  private async streamCheckpoints() {
-    const client = this.sui.getClient();
-    const stream = client.subscriptionService.subscribeCheckpoints({
-      readMask: { paths: ['transactions.events'] },
-    });
-
-    for await (const msg of stream.responses) {
-      if (this.stopped) break;
-      const checkpoint = msg.checkpoint;
-      const seq = BigInt(msg.cursor ?? checkpoint?.sequenceNumber ?? 0);
-      if (checkpoint) {
-        await this.processCheckpoint(checkpoint, seq);
       }
     }
   }
@@ -123,26 +131,29 @@ export class SuiCheckpointService {
       for (const event of events) {
         if (event.eventType !== eventType) continue;
 
-        const json = event.json?.value;
-        if (!json) continue;
+        // gRPC returns event.json as a protobuf Value:
+        //   { kind: { structValue: { fields: { <name>: Value, ... } } } }
+        // where each field is itself a Value with a `kind` oneof. Byte vectors
+        // (intent_id, payload) arrive base64-encoded as stringValue, u32 as
+        // numberValue, and u64 (nonce) as stringValue.
+        const structFields = event.json?.kind?.structValue?.fields;
+        if (!structFields) continue;
 
-        let fields: Record<string, any>;
-        try {
-          fields = typeof json === 'string' ? JSON.parse(json) : json;
-        } catch {
-          continue;
-        }
+        const strVal = (f: any): string | undefined => f?.kind?.stringValue;
+        const numVal = (f: any): number | undefined => f?.kind?.numberValue;
+        const b64Bytes = (s?: string): number[] =>
+          s ? Array.from(new Uint8Array(Buffer.from(s, 'base64'))) : [];
 
-        const intentIdBytes: number[] = fields.intent_id;
-        if (!Array.isArray(intentIdBytes)) continue;
+        const intentIdBytes = b64Bytes(strVal(structFields.intent_id));
+        if (intentIdBytes.length === 0) continue;
         const intentId =
-          '0x' + intentIdBytes.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+          '0x' + intentIdBytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 
         const lzEvent: SuiLzEvent = {
           intentId,
-          payload: fields.payload,
-          srcEid: fields.src_eid,
-          nonce: BigInt(fields.nonce ?? 0),
+          payload: b64Bytes(strVal(structFields.payload)),
+          srcEid: numVal(structFields.src_eid) ?? 0,
+          nonce: BigInt(strVal(structFields.nonce) ?? '0'),
         };
 
         if (this.onEventCallback) {

@@ -71,18 +71,40 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     };
   }
 
+  // Build an event `json` field in the gRPC protobuf Value shape that
+  // ledgerService/subscriptionService return: byte vectors are base64
+  // stringValue, u32 is numberValue, u64 is stringValue.
+  function eventJson(fields: {
+    intent_id: number[];
+    payload: number[];
+    src_eid: number;
+    nonce: string;
+  }) {
+    const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64');
+    return {
+      kind: {
+        structValue: {
+          fields: {
+            intent_id: { kind: { stringValue: b64(fields.intent_id) } },
+            payload: { kind: { stringValue: b64(fields.payload) } },
+            src_eid: { kind: { numberValue: fields.src_eid } },
+            nonce: { kind: { stringValue: fields.nonce } },
+          },
+        },
+      },
+    };
+  }
+
   it('should invoke callback for matching IntentReceived events', async () => {
     const intentBytes = Array.from({ length: 32 }, (_, i) => i);
     const checkpoint = makeCheckpoint([{
       eventType: EVENT_TYPE,
-      json: {
-        value: {
-          intent_id: intentBytes,
-          payload: [1, 2, 3],
-          src_eid: 40161,
-          nonce: '1',
-        },
-      },
+      json: eventJson({
+        intent_id: intentBytes,
+        payload: [1, 2, 3],
+        src_eid: 40161,
+        nonce: '1',
+      }),
     }]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
@@ -97,7 +119,7 @@ describe('SuiCheckpointService.processCheckpoint', () => {
   it('should skip events with non-matching event type', async () => {
     const checkpoint = makeCheckpoint([{
       eventType: `${LZ_PKG}::lz_receiver::ProofSent`,
-      json: { value: { intent_id: [1], payload: [], src_eid: 1, nonce: '0' } },
+      json: eventJson({ intent_id: [1], payload: [], src_eid: 1, nonce: '0' }),
     }]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
@@ -116,10 +138,10 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     expect(mockCallback).not.toHaveBeenCalled();
   });
 
-  it('should skip events with malformed JSON string', async () => {
+  it('should skip events whose struct is missing intent_id', async () => {
     const checkpoint = makeCheckpoint([{
       eventType: EVENT_TYPE,
-      json: { value: '{ broken json' },
+      json: { kind: { structValue: { fields: {} } } },
     }]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
@@ -127,24 +149,25 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     expect(mockCallback).not.toHaveBeenCalled();
   });
 
-  it('should handle JSON as string (parses it)', async () => {
+  it('should decode base64-encoded byte fields', async () => {
     const intentBytes = Array.from({ length: 32 }, () => 0xab);
     const checkpoint = makeCheckpoint([{
       eventType: EVENT_TYPE,
-      json: {
-        value: JSON.stringify({
-          intent_id: intentBytes,
-          payload: [10, 20],
-          src_eid: 40378,
-          nonce: '5',
-        }),
-      },
+      json: eventJson({
+        intent_id: intentBytes,
+        payload: [10, 20],
+        src_eid: 40378,
+        nonce: '5',
+      }),
     }]);
 
     await checkpointService.processCheckpoint(checkpoint, 200n);
 
     expect(mockCallback).toHaveBeenCalledTimes(1);
-    expect(mockCallback.mock.calls[0][0].srcEid).toBe(40378);
+    const event = mockCallback.mock.calls[0][0];
+    expect(event.srcEid).toBe(40378);
+    expect(event.payload).toEqual([10, 20]);
+    expect(event.intentId).toBe('0x' + 'ab'.repeat(32));
   });
 
   it('should not invoke callback when none is registered', async () => {
@@ -154,9 +177,7 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     const intentBytes = Array.from({ length: 32 }, () => 0);
     const checkpoint = makeCheckpoint([{
       eventType: EVENT_TYPE,
-      json: {
-        value: { intent_id: intentBytes, payload: [], src_eid: 1, nonce: '0' },
-      },
+      json: eventJson({ intent_id: intentBytes, payload: [], src_eid: 1, nonce: '0' }),
     }]);
 
     // Should not throw
