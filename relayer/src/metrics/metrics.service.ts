@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Counter, Gauge, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 type Result = 'success' | 'failure';
 type IntentPath = 'evm' | 'sui_lz';
@@ -28,6 +28,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly walrusUpload = new Histogram({
+    name: 'bosphor_relayer_walrus_upload_seconds',
+    help: 'Walrus upload duration in seconds',
+    buckets: [0.5, 1, 2.5, 5, 10, 30, 60],
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
@@ -42,6 +49,10 @@ export class MetricsService {
 
   setCheckpointCursorLag(lag: number): void {
     this.checkpointCursorLag.set(lag);
+  }
+
+  observeWalrusUpload(seconds: number): void {
+    this.walrusUpload.observe(seconds);
   }
 
   get contentType(): string {
