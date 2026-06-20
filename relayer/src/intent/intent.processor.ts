@@ -191,7 +191,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       await this.sui.getClient().core.waitForTransaction({ digest: storeDigest });
     } catch (err) {
       const msg = String(err);
-      if (msg.includes('execute_store') && msg.includes(', 2)')) {
+      // EIntentAlreadyExecuted (abort code 2) means a prior attempt already
+      // recorded this intent on Sui; proceed to the LZ send. Match both the
+      // legacy "..., 2)" and the gRPC "abort code: 2" error formats.
+      if (
+        msg.includes('execute_store') &&
+        (msg.includes(', 2)') || msg.includes('abort code: 2'))
+      ) {
         this.logger.log(`[${intentId}] execute_store already done, proceeding to LZ send`);
       } else {
         throw err;

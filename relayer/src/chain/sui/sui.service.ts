@@ -95,7 +95,10 @@ export class SuiService implements OnModuleInit {
 
     const walrusRelayUrl = this.config.getOrThrow<string>('WALRUS_RELAY_URL');
     this.walrusClient = this.client.$extend(walrus({
-      uploadRelay: { host: walrusRelayUrl },
+      // The upload relay requires a tip payment; sendTip lets the SDK fetch
+      // the relay's tip-config, pay it, and attach the tx id + nonce to the
+      // upload request. Without it the relay rejects with HTTP 400.
+      uploadRelay: { host: walrusRelayUrl, sendTip: { max: 1_000_000 } },
     }));
 
     this.logger.log(`Sui package: ${this.packageId}`);
