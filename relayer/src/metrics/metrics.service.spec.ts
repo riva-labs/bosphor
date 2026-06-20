@@ -32,4 +32,13 @@ describe('MetricsService', () => {
     expect(out).toContain('bosphor_relayer_lz_send_total{result="success"} 1');
     expect(out).toContain('bosphor_relayer_lz_send_total{result="failure"} 2');
   });
+
+  it('reports the latest checkpoint cursor lag as a gauge', async () => {
+    service.setCheckpointCursorLag(7);
+    service.setCheckpointCursorLag(3);
+
+    const out = await service.getMetrics();
+
+    expect(out).toContain('bosphor_relayer_checkpoint_cursor_lag 3');
+  });
 });

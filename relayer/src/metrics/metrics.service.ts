@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Counter, Registry, collectDefaultMetrics } from 'prom-client';
+import { Counter, Gauge, Registry, collectDefaultMetrics } from 'prom-client';
 
 type Result = 'success' | 'failure';
 type IntentPath = 'evm' | 'sui_lz';
@@ -22,6 +22,12 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly checkpointCursorLag = new Gauge({
+    name: 'bosphor_relayer_checkpoint_cursor_lag',
+    help: 'Latest Sui checkpoint minus the processed cursor',
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
@@ -32,6 +38,10 @@ export class MetricsService {
 
   recordLzSend(result: Result): void {
     this.lzSend.inc({ result });
+  }
+
+  setCheckpointCursorLag(lag: number): void {
+    this.checkpointCursorLag.set(lag);
   }
 
   get contentType(): string {
