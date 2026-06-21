@@ -378,130 +378,41 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
 
 describe('IntentProcessor.poll', () => {
   let processor: IntentProcessor;
-  let mockEvm: Partial<EvmService>;
   let mockSui: Partial<SuiService>;
   let mockSuiCheckpoint: Partial<SuiCheckpointService>;
   let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
 
-  beforeEach(async () => {
-    mockEvm = {
-      getBlockNumber: jest.fn().mockResolvedValue(100),
-      pollEvents: jest.fn().mockResolvedValue({ events: [], newFromBlock: 101 }),
-    };
+  function abiPayload(sender: string, payload: string, deadlineUnix: number): number[] {
+    const encoded = require('ethers').AbiCoder.defaultAbiCoder().encode(
+      ['bytes32', 'address', 'bytes', 'uint256'],
+      ['0x' + 'ab'.repeat(32), sender, payload, deadlineUnix],
+    );
+    return Array.from(require('ethers').getBytes(encoded));
+  }
 
+  async function build(ttlMs?: number) {
+    mockSuiCheckpoint = { setOnEventCallback: jest.fn(), startStreaming: jest.fn(), stop: jest.fn() };
+    mockWalrus = {
+      upload: jest.fn().mockResolvedValue({ blobId: 'blob123', suiObjectId: '0xblobobj', endEpoch: 50 }),
+    };
     mockSui = {
       getAddress: jest.fn().mockReturnValue('0xsuiaddr'),
       getLzPackageId: jest.fn().mockReturnValue('0xlzpkg'),
-    };
-
-    mockSuiCheckpoint = {
-      setOnEventCallback: jest.fn(),
-      startStreaming: jest.fn(),
-      stop: jest.fn(),
-    };
-
-    mockSuiLz = {};
-
-    mockWalrus = {};
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        IntentProcessor,
-        { provide: EvmService, useValue: mockEvm },
-        { provide: SuiService, useValue: mockSui },
-        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
-        { provide: SuiLzService, useValue: mockSuiLz },
-        { provide: WalrusService, useValue: mockWalrus },
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn(() => 40161), getOrThrow: jest.fn(() => 40161) },
-        },
-        { provide: MetricsService, useValue: makeMetricsMock() },
-      ],
-    }).compile();
-
-    processor = module.get<IntentProcessor>(IntentProcessor);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('should poll EVM events when called', async () => {
-    await processor.poll();
-
-    // Sui events are now pushed via checkpoint streaming, only EVM is polled
-    expect(mockEvm.pollEvents).toHaveBeenCalled();
-  });
-
-  it('should not poll when stopped', async () => {
-    await processor.onModuleDestroy();
-    await processor.poll();
-
-    expect(mockEvm.pollEvents).not.toHaveBeenCalled();
-  });
-
-  it('should skip poll if already processing', async () => {
-    // Make the first poll hang on EVM
-    (mockEvm.pollEvents as jest.Mock).mockImplementation(
-      () =>
-        new Promise((resolve) =>
-          setTimeout(() => resolve({ events: [], newFromBlock: 101 }), 200),
-        ),
-    );
-
-    const first = processor.poll();
-    await processor.poll();
-
-    expect(mockEvm.pollEvents).toHaveBeenCalledTimes(1);
-
-    await first;
-  });
-
-  it('should re-process an intent after TTL expires', async () => {
-    const intentId = '0x' + 'cc'.repeat(32);
-    const futureDeadline = BigInt(Math.floor(Date.now() / 1000) + 7200); // 2h from now
-
-    const evmEvent = {
-      intentId,
-      sender: '0x' + '11'.repeat(20),
-      targetChainId: 1n,
-      payload: '0x' + Buffer.from('hello').toString('hex'),
-      nonce: 1n,
-      deadline: futureDeadline,
-    };
-
-    // Extend mocks to support full processing
-    mockWalrus = {
-      upload: jest.fn().mockResolvedValue({
-        blobId: 'blob123',
-        suiObjectId: '0xblobobj',
-        endEpoch: 50,
-      }),
-    };
-    Object.assign(mockSui, {
       executeStore: jest.fn().mockResolvedValue('suidigest123'),
       getClient: jest.fn().mockReturnValue({
         core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
       }),
-    });
-    Object.assign(mockSuiLz, {
-      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
+    };
+    mockSuiLz = {
+      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest'),
       quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
-    });
+    };
 
-    // Return the event on every EVM poll
-    (mockEvm.pollEvents as jest.Mock).mockResolvedValue({
-      events: [evmEvent],
-      newFromBlock: 101,
-    });
-
-    // Rebuild processor with full mocks
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IntentProcessor,
-        { provide: EvmService, useValue: mockEvm },
+        { provide: EvmService, useValue: { getBlockNumber: jest.fn().mockResolvedValue(100) } },
         { provide: SuiService, useValue: mockSui },
         { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
         { provide: SuiLzService, useValue: mockSuiLz },
@@ -510,7 +421,7 @@ describe('IntentProcessor.poll', () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn((key: string) => {
-              if (key === 'INTENT_TTL_MS') return 60_000; // 1 minute TTL for test
+              if (key === 'INTENT_TTL_MS') return ttlMs;
               if (key === 'EVM_DST_EID') return 40161;
               return undefined;
             }),
@@ -519,107 +430,51 @@ describe('IntentProcessor.poll', () => {
         },
         { provide: MetricsService, useValue: makeMetricsMock() },
       ],
-    }).compile();
+    })
+      .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
+      .compile();
 
-    processor = module.get<IntentProcessor>(IntentProcessor);
+    return module.get<IntentProcessor>(IntentProcessor);
+  }
 
-    const baseTime = Date.now();
-    const dateSpy = jest.spyOn(Date, 'now');
-
-    // First poll at t=0: intent should be processed
-    dateSpy.mockReturnValue(baseTime);
-    await processor.poll();
-    expect(mockWalrus.upload).toHaveBeenCalledTimes(1);
-
-    // Second poll at t=30s (within TTL): intent should be deduped
-    dateSpy.mockReturnValue(baseTime + 30_000);
-    await processor.poll();
-    expect(mockWalrus.upload).toHaveBeenCalledTimes(1); // still 1
-
-    // Third poll at t=61s (past TTL): intent should be re-processable
-    dateSpy.mockReturnValue(baseTime + 61_000);
-    await processor.poll();
-    expect(mockWalrus.upload).toHaveBeenCalledTimes(2); // now 2
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  it('should default to 1 hour TTL when INTENT_TTL_MS is not configured', async () => {
-    const intentId = '0x' + 'dd'.repeat(32);
-    const futureDeadline = BigInt(Math.floor(Date.now() / 1000) + 14400); // 4h from now
+  it('is a no-op when stopped (no EVM polling drives fulfillment)', async () => {
+    processor = await build(60_000);
+    await processor.onModuleDestroy();
+    expect(() => processor.poll()).not.toThrow();
+  });
 
-    const evmEvent = {
-      intentId,
-      sender: '0x' + '11'.repeat(20),
-      targetChainId: 1n,
-      payload: '0x' + Buffer.from('hello').toString('hex'),
-      nonce: 1n,
-      deadline: futureDeadline,
+  it('prunes expired intents so a Sui LZ intent is re-processable after its TTL', async () => {
+    processor = await build(60_000); // 1 minute TTL
+
+    const sender = '0x' + '11'.repeat(20);
+    const deadline = Math.floor(Date.now() / 1000) + 7200;
+    const event = {
+      intentId: '0x' + 'cc'.repeat(32),
+      payload: abiPayload(sender, '0x' + Buffer.from('hello').toString('hex'), deadline),
+      srcEid: 40161,
     };
 
-    // Full mocks for processing
-    const fullWalrus = {
-      upload: jest.fn().mockResolvedValue({
-        blobId: 'blob123',
-        suiObjectId: '0xblobobj',
-        endEpoch: 50,
-      }),
-    };
-    Object.assign(mockSui, {
-      executeStore: jest.fn().mockResolvedValue('suidigest123'),
-      getClient: jest.fn().mockReturnValue({
-        core: { waitForTransaction: jest.fn().mockResolvedValue({}) },
-      }),
-    });
-    Object.assign(mockSuiLz, {
-      lzSendProof: jest.fn().mockResolvedValue('lzproofdigest456'),
-      quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
-    });
-
-    // Config WITHOUT INTENT_TTL_MS (should default to 1h)
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        IntentProcessor,
-        {
-          provide: EvmService,
-          useValue: {
-            ...mockEvm,
-            pollEvents: jest.fn().mockResolvedValue({ events: [evmEvent], newFromBlock: 101 }),
-          },
-        },
-        { provide: SuiService, useValue: mockSui },
-        { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
-        { provide: SuiLzService, useValue: mockSuiLz },
-        { provide: WalrusService, useValue: fullWalrus },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest.fn((key: string) => {
-              if (key === 'EVM_DST_EID') return 40161;
-              return undefined; // no INTENT_TTL_MS
-            }),
-            getOrThrow: jest.fn(() => 40161),
-          },
-        },
-        { provide: MetricsService, useValue: makeMetricsMock() },
-      ],
-    }).compile();
-
-    const proc = module.get<IntentProcessor>(IntentProcessor);
     const baseTime = Date.now();
     const dateSpy = jest.spyOn(Date, 'now');
 
-    // First poll: processes the intent
+    // t=0: processed via the Sui LZ path
     dateSpy.mockReturnValue(baseTime);
-    await proc.poll();
-    expect(fullWalrus.upload).toHaveBeenCalledTimes(1);
+    await processor.handleSuiLzEvent(event);
+    expect(mockWalrus.upload).toHaveBeenCalledTimes(1);
 
-    // Poll at t=59min: still deduped (within default 1h TTL)
-    dateSpy.mockReturnValue(baseTime + 59 * 60_000);
-    await proc.poll();
-    expect(fullWalrus.upload).toHaveBeenCalledTimes(1);
+    // t=30s (within TTL): deduped
+    dateSpy.mockReturnValue(baseTime + 30_000);
+    await processor.handleSuiLzEvent(event);
+    expect(mockWalrus.upload).toHaveBeenCalledTimes(1);
 
-    // Poll at t=61min: re-processed (past default 1h TTL)
-    dateSpy.mockReturnValue(baseTime + 61 * 60_000);
-    await proc.poll();
-    expect(fullWalrus.upload).toHaveBeenCalledTimes(2);
+    // t=61s (past TTL): poll prunes, then it can be re-processed
+    dateSpy.mockReturnValue(baseTime + 61_000);
+    processor.poll();
+    await processor.handleSuiLzEvent(event);
+    expect(mockWalrus.upload).toHaveBeenCalledTimes(2);
   });
 });
