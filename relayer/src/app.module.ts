@@ -6,11 +6,13 @@ import { SuiModule } from './chain/sui/sui.module';
 import { WalrusModule } from './walrus/walrus.module';
 import { IntentModule } from './intent/intent.module';
 import { HealthModule } from './health/health.module';
+import { MetricsModule } from './metrics/metrics.module';
 
 @Module({
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
+    MetricsModule,
     EvmModule,
     SuiModule,
     WalrusModule,
