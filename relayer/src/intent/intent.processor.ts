@@ -7,6 +7,7 @@ import { SuiService } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
+import { MetricsService } from '../metrics/metrics.service';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -15,7 +16,6 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly processedIntents = new Map<string, number>();
   private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
-  private evmFromBlock = 0;
   private processing = false;
   private stopped = false;
 
@@ -26,17 +26,18 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly suiLz: SuiLzService,
     private readonly walrus: WalrusService,
     private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
   }
 
   async onModuleInit() {
-    this.evmFromBlock = await this.evm.getBlockNumber();
-    this.logger.log(`Starting EVM poll from block ${this.evmFromBlock}`);
+    const block = await this.evm.getBlockNumber();
+    this.logger.log(`EVM connected at block ${block}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
-    this.logger.log(`Polling EVM every ${POLL_INTERVAL_MS / 1000}s, Sui via checkpoint stream`);
+    this.logger.log(`Fulfilling intents via Sui checkpoint stream (LayerZero delivery)`);
 
     // Register callback for Sui checkpoint streaming events, then start the
     // stream. Order matters: the callback must be set before streaming begins
@@ -57,18 +58,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   @Interval(POLL_INTERVAL_MS)
-  async poll(): Promise<void> {
-    if (this.stopped || this.processing) return;
-    this.processing = true;
-    try {
-      this.pruneProcessedIntents();
-      // Sui event polling replaced by checkpoint streaming (SuiService.onModuleInit)
-      await this.pollEvmEvents();
-    } catch (err) {
-      this.logger.error(`Poll error: ${err}`);
-    } finally {
-      this.processing = false;
-    }
+  poll(): void {
+    if (this.stopped) return;
+    // Intents are fulfilled from the Sui LZ event (the canonical LayerZero
+    // delivery). This interval only prunes the dedup map. The EVM poll was
+    // removed because lz_send_proof aborts EIntentNotReceived when it runs
+    // before the intent has been delivered to Sui (issue #138).
+    this.pruneProcessedIntents();
   }
 
   /**
@@ -116,47 +112,11 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       const payloadBytes = ethers.getBytes(userPayload);
       await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
       this.processedIntents.set(event.intentId, Date.now());
+      this.metrics.recordIntentProcessed('sui_lz', 'success');
       this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
     } catch (err) {
+      this.metrics.recordIntentProcessed('sui_lz', 'failure');
       this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
-    }
-  }
-
-  private async pollEvmEvents(): Promise<void> {
-    const { events, newFromBlock } = await this.evm.pollEvents(this.evmFromBlock);
-    this.evmFromBlock = newFromBlock;
-
-    for (const event of events) {
-      if (this.processedIntents.has(event.intentId)) {
-        this.logger.debug(`[${event.intentId}] Skipping — already processed`);
-        continue;
-      }
-
-      const deadlineMs = BigInt(event.deadline) * 1000n;
-      if (Date.now() > Number(deadlineMs)) {
-        this.logger.log(`[${event.intentId}] Skipping — deadline expired`);
-        this.processedIntents.set(event.intentId, Date.now());
-        continue;
-      }
-
-      this.logger.log(
-        `[${event.intentId}] Intent received via EVM (sender: ${event.sender}, chain: ${event.targetChainId}, nonce: ${event.nonce})`,
-      );
-
-      try {
-        const payloadBytes = ethers.getBytes(event.payload);
-        await this.processIntent(
-          event.intentId,
-          event.sender,
-          Buffer.from(payloadBytes),
-          deadlineMs,
-        );
-        this.processedIntents.set(event.intentId, Date.now());
-        this.logger.log(`[${event.intentId}] Intent fulfilled (via EVM)`);
-      } catch (err) {
-        this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
-        // Do NOT mark as processed — allow retry on next poll
-      }
     }
   }
 
@@ -177,7 +137,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     // 1. Upload payload to Walrus
     this.logger.log(`[${intentId}] Uploading to Walrus...`);
+    const uploadStart = Date.now();
     const walrusInfo = await this.walrus.upload(payload);
+    this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
     this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
@@ -223,13 +185,20 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
-    const lzDigest = await this.suiLz.lzSendProof(
-      intentId,
-      walrusInfo.blobId,
-      walrusInfo.endEpoch,
-      this.evmDstEid,
-      ...(feeAmount !== undefined ? [feeAmount] : []),
-    );
+    let lzDigest: string;
+    try {
+      lzDigest = await this.suiLz.lzSendProof(
+        intentId,
+        walrusInfo.blobId,
+        walrusInfo.endEpoch,
+        this.evmDstEid,
+        ...(feeAmount !== undefined ? [feeAmount] : []),
+      );
+    } catch (err) {
+      this.metrics.recordLzSend('failure');
+      throw err;
+    }
+    this.metrics.recordLzSend('success');
     this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
   }
 }

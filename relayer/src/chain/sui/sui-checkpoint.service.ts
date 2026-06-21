@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { SuiService, SuiLzEvent } from './sui.service';
+import { MetricsService } from '../../metrics/metrics.service';
 import { CURSOR_FILE_NAME, MAX_BACKOFF_MS, POLL_INTERVAL_MS } from '../../common/constants';
 
 const CURSOR_FILE = resolve(__dirname, '../../../', CURSOR_FILE_NAME);
@@ -12,7 +13,10 @@ export class SuiCheckpointService {
   private onEventCallback?: (event: SuiLzEvent) => Promise<void>;
   private stopped = false;
 
-  constructor(private readonly sui: SuiService) {}
+  constructor(
+    private readonly sui: SuiService,
+    private readonly metrics: MetricsService,
+  ) {}
 
   /**
    * Register a callback for IntentReceived events detected via checkpoint streaming.
@@ -99,6 +103,7 @@ export class SuiCheckpointService {
   private async backfill(fromCheckpoint: bigint) {
     const client = this.sui.getClient();
     const current = BigInt(await this.sui.getCheckpoint());
+    this.metrics.setCheckpointCursorLag(Number(current > fromCheckpoint ? current - fromCheckpoint : 0n));
     if (fromCheckpoint >= current) return;
 
     // Only announce sizeable catch-ups; steady-state polling advances a handful

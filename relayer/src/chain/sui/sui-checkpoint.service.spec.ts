@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { SuiService } from './sui.service';
 import { SuiCheckpointService } from './sui-checkpoint.service';
+import { MetricsService } from '../../metrics/metrics.service';
 
 // Raw 32-byte Ed25519 secret key in base64 (test only)
 const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
@@ -48,6 +49,7 @@ describe('SuiCheckpointService.processCheckpoint', () => {
         SuiService,
         SuiCheckpointService,
         { provide: ConfigService, useValue: makeConfigService() },
+        { provide: MetricsService, useValue: new MetricsService() },
       ],
     }).compile();
 
@@ -187,5 +189,26 @@ describe('SuiCheckpointService.processCheckpoint', () => {
   it('should handle checkpoint with no transactions', async () => {
     await checkpointService.processCheckpoint({}, 100n);
     expect(mockCallback).not.toHaveBeenCalled();
+  });
+});
+
+describe('SuiCheckpointService cursor lag', () => {
+  it('reports the gap between the latest checkpoint and the cursor', async () => {
+    const mockSui = {
+      getCheckpoint: jest.fn().mockResolvedValue('105'),
+      getClient: jest.fn().mockReturnValue({
+        ledgerService: {
+          getCheckpoint: jest.fn().mockResolvedValue({ response: { checkpoint: undefined } }),
+        },
+      }),
+      getLzPackageId: jest.fn().mockReturnValue('0xlz'),
+    } as unknown as SuiService;
+    const metrics = { setCheckpointCursorLag: jest.fn() } as unknown as MetricsService;
+
+    const svc = new SuiCheckpointService(mockSui, metrics);
+
+    await (svc as any).backfill(100n);
+
+    expect(metrics.setCheckpointCursorLag).toHaveBeenCalledWith(5);
   });
 });
