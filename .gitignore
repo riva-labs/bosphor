@@ -49,3 +49,9 @@ codex.md
 
 # misc
 .DS_Store
+
+# local hosting overlay (contains a Grafana admin password)
+docker-compose.hosting.yml
+
+# brand asset drop (full mascot set; website tracks the subset it uses)
+bosphor_mascot/
