@@ -6,3 +6,8 @@ scrape_configs:
     static_configs:
       - targets: ['relayer:3000']
     metrics_path: /metrics
+
+  - job_name: bosphor-canary
+    static_configs:
+      - targets: ['canary:9300']
+    metrics_path: /metrics

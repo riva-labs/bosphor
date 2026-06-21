@@ -50,6 +50,9 @@ codex.md
 # misc
 .DS_Store
 
+# canary
+canary/node_modules
+
 # local hosting overlay (contains a Grafana admin password)
 docker-compose.hosting.yml
 
