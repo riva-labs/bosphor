@@ -49,3 +49,6 @@ codex.md
 
 # misc
 .DS_Store
+
+# canary
+canary/node_modules
