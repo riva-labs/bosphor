@@ -143,6 +143,21 @@ Response format:
 | `sui.checkpoint` | Latest Sui checkpoint |
 | `uptime` | Seconds since the relayer started |
 
+## Metrics endpoint
+
+The relayer exposes Prometheus metrics at `GET /metrics` on the configured `PORT` (default 3000), served in the standard text exposition format (`Content-Type: text/plain; version=0.0.4`). Point a Prometheus scrape job at this path. The provided `monitoring/prometheus.yml` is already configured to scrape `relayer:3000/metrics`.
+
+Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`, memory, event loop lag, and so on), the relayer emits:
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `bosphor_relayer_intents_processed_total` | counter | `result` (`success`/`failure`), `path` (`evm`/`sui_lz`) | Intents processed, split by detection path and outcome |
+| `bosphor_relayer_lz_send_total` | counter | `result` (`success`/`failure`) | LayerZero proof sends back to EVM |
+| `bosphor_relayer_checkpoint_cursor_lag` | gauge | — | Latest Sui checkpoint minus the processed cursor |
+| `bosphor_relayer_walrus_upload_seconds` | histogram | — | Walrus upload duration in seconds |
+
+The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
+
 ## Walrus upload
 
 The relayer uploads intent payloads to Walrus using the `@mysten/walrus` SDK's `writeBlob()` method. The SDK manages sliver distribution, certification, retries, and epoch management natively.

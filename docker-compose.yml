@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   relayer:
     build: ./relayer
@@ -33,8 +31,8 @@ services:
     image: grafana/grafana:latest
     environment:
       # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment. The
-      # `admin` fallback exists only so a fresh clone boots for local dev.
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # fallback exists only so a fresh clone boots for local dev.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-bosphor}
     volumes:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
