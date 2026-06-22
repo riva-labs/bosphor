@@ -32,7 +32,9 @@ services:
   grafana:
     image: grafana/grafana:latest
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=bosphor
+      # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment. The
+      # `admin` fallback exists only so a fresh clone boots for local dev.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
