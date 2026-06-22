@@ -10,10 +10,6 @@
   object-fit: contain;
 }
 
-[data-theme='dark'] .mascot {
-  filter: brightness(0) invert(1);
-}
-
 .heroTitle {
   font-family: var(--ifm-heading-font-family);
   font-weight: 900;
