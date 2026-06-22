@@ -1,0 +1,11 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # Internal compose DNS, not the host-published port.
+    url: http://prometheus:9090
+    uid: bosphor-prometheus
+    isDefault: true
+    editable: false
