@@ -7,16 +7,18 @@ describe('WalrusService', () => {
   let service: WalrusService;
   let mockSui: Partial<SuiService>;
   let mockWriteBlob: jest.Mock;
+  let mockReset: jest.Mock;
   let mockConfigGet: jest.Mock;
 
   beforeEach(async () => {
     mockWriteBlob = jest.fn();
+    mockReset = jest.fn();
     mockConfigGet = jest.fn((_key: string, defaultValue?: any) => defaultValue);
 
     mockSui = {
       getAddress: jest.fn().mockReturnValue('0xrelayeraddr'),
       getWalrusClient: jest.fn().mockReturnValue({
-        walrus: { writeBlob: mockWriteBlob },
+        walrus: { writeBlob: mockWriteBlob, reset: mockReset },
       }),
       getSigner: jest.fn().mockReturnValue('mock-signer'),
     };
@@ -87,12 +89,39 @@ describe('WalrusService', () => {
       );
     });
 
-    it('should propagate errors from writeBlob', async () => {
+    it('should reset the SDK cache and retry once when writeBlob fails (Walrus epoch change)', async () => {
+      // First attempt fails with the stale-epoch balance::split abort; after
+      // reset() the retry succeeds against refreshed on-chain state.
+      mockWriteBlob
+        .mockRejectedValueOnce(
+          new Error('MoveAbort in 4th command, abort code: 2, in 0x2::balance::split'),
+        )
+        .mockResolvedValueOnce({
+          blobId: 'blobRetry',
+          blobObject: { id: '0xobjRetry', storage: { end_epoch: 70 } },
+        });
+
+      const result = await service.upload(Buffer.from('retry-data'));
+
+      expect(mockReset).toHaveBeenCalledTimes(1);
+      expect(mockWriteBlob).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({
+        blobId: 'blobRetry',
+        suiObjectId: '0xobjRetry',
+        endEpoch: 70,
+      });
+    });
+
+    it('should propagate the error when the retry also fails', async () => {
+      // No fabricated fallback: if reset + retry still fails, the error must
+      // surface so the intent fails loudly rather than returning fake data.
       mockWriteBlob.mockRejectedValue(new Error('SDK upload failed'));
 
       await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
         'SDK upload failed',
       );
+      expect(mockReset).toHaveBeenCalledTimes(1);
+      expect(mockWriteBlob).toHaveBeenCalledTimes(2);
     });
   });
 });
