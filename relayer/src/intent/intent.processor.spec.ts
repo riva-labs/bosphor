@@ -221,7 +221,10 @@ describe('IntentProcessor.processIntent', () => {
     expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161, 110_000_000n);
   });
 
-  it('should fall back to default fee when quoteLzFee fails', async () => {
+  it('should fail loudly and not send a proof when quoteLzFee fails', async () => {
+    // No fabricated fallback fee. A bad fee either drains the relayer
+    // (overpay) or reverts the send (underpay), so when the on-chain quote
+    // fails the intent must error out rather than send with a made-up fee.
     (mockSuiLz.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
 
     const intentId = '0x' + 'ab'.repeat(32);
@@ -229,10 +232,13 @@ describe('IntentProcessor.processIntent', () => {
     const payload = Buffer.from('hello');
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+    await expect(
+      (processor as any).processIntent(intentId, sender, payload, deadlineMs),
+    ).rejects.toThrow(/devInspect failed/);
 
-    // lzSendProof should still be called (without fee arg, uses default 0.5 SUI)
-    expect(mockSuiLz.lzSendProof).toHaveBeenCalledWith(intentId, 'blob123', 50, 40161);
+    expect(mockSuiLz.lzSendProof).not.toHaveBeenCalled();
+    // The failed return-path quote is surfaced on the LZ-send metric.
+    expect(mockMetrics.recordLzSend).toHaveBeenCalledWith('failure');
   });
 });
 

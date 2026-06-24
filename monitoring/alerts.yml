@@ -1,0 +1,50 @@
+groups:
+  - name: bosphor-canary
+    rules:
+      # The canary process is gone or unscrapable. Without this, a dead canary
+      # looks identical to a healthy-but-quiet one.
+      - alert: BosphorCanaryDown
+        expr: up{job="bosphor-canary"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor canary is down (not scrapable)"
+          description: >-
+            Prometheus cannot scrape the canary at {{ $labels.instance }} for 2m.
+            No synthetic round-trips are running, so an end-to-end outage would go
+            undetected. Check `docker logs bosphor-canary-1`.
+
+      # Early warning: repeated round-trip failures before staleness trips.
+      # The canary increments result="failure" on submit errors and return
+      # timeouts; two in 20m means the cross-chain path is degraded, not a blip.
+      - alert: BosphorCanaryRoundTripFailing
+        expr: increase(bosphor_canary_roundtrip_total{result="failure"}[20m]) >= 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor synthetic round-trips are failing"
+          description: >-
+            {{ $value | printf "%.0f" }} canary round-trips failed in the last 20m.
+            The forward (submitIntent) or return (executed proof on EVM) leg is
+            broken. Check the relayer return path and LayerZero delivery.
+
+      # Dead-man's switch -- the catch-all. Fires whether round-trips are failing,
+      # the relayer stopped fulfilling, or the canary itself died mid-flight. The
+      # second clause suppresses the alert during the canary's first 40m of
+      # uptime so a cold start (last_success still 0) does not page; after that,
+      # a never-succeeding canary correctly alerts.
+      - alert: BosphorCanaryRoundTripStale
+        expr: >-
+          (time() - bosphor_canary_last_success_timestamp_seconds > 2400)
+          and on(instance) (time() - process_start_time_seconds{job="bosphor-canary"} > 2400)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful Bosphor round-trip in over 40m"
+          description: >-
+            The last successful end-to-end round-trip was
+            {{ $value | printf "%.0f" }}s ago. The EVM -> Sui -> EVM path is not
+            completing. This is the primary end-to-end health signal.

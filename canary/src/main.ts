@@ -23,8 +23,20 @@ const LZ_OPTIONS = '0x00030100110100000000000000000000000000030d40';
 const INTERVAL_MS = Number(process.env.CANARY_INTERVAL_MS) || 15 * 60 * 1000;
 const PORT = Number(process.env.CANARY_PORT) || 9300;
 const POLL_INTERVAL_MS = Number(process.env.CANARY_POLL_INTERVAL_MS) || 15_000;
-const MAX_WAIT_MS = Number(process.env.CANARY_MAX_WAIT_MS) || 15 * 60 * 1000;
+// Must stay below INTERVAL_MS. If a probe is allowed to run as long as the
+// interval, a single slow round-trip overruns into the next tick, which is then
+// skipped ("previous probe still in flight") -- so exactly when the return path
+// is degraded we collect half the samples. A round-trip normally takes ~4 min,
+// so 10 min is generous headroom while leaving 5 min of slack before the tick.
+const MAX_WAIT_MS = Number(process.env.CANARY_MAX_WAIT_MS) || 10 * 60 * 1000;
 const DEADLINE_SECONDS = Number(process.env.CANARY_DEADLINE_SECONDS) || 14_400;
+
+if (MAX_WAIT_MS >= INTERVAL_MS) {
+  console.warn(
+    `[canary] CANARY_MAX_WAIT_MS (${MAX_WAIT_MS}) >= CANARY_INTERVAL_MS (${INTERVAL_MS}); ` +
+      'a slow probe will overrun the next tick and skip a sample',
+  );
+}
 
 const ADAPTER_ABI = [
   'function nonces(address) view returns (uint256)',

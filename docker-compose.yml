@@ -22,6 +22,7 @@ services:
     image: prom/prometheus:latest
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
     ports:
       - "9090:9090"
     restart: unless-stopped
@@ -29,8 +30,12 @@ services:
   grafana:
     image: grafana/grafana:latest
     environment:
-      # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment.
+      # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment. The
+      # fallback exists only so a fresh clone boots for local dev.
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-bosphor}
+    volumes:
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
     ports:
       - "3001:3000"
     depends_on:

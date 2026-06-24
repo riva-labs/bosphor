@@ -166,23 +166,29 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // 3. Quote LZ fee, then send proof back to EVM via LayerZero
-    let feeAmount: bigint | undefined;
+    // 3. Quote the real LZ fee on-chain, then send the proof back to EVM.
+    // The quoted fee is authoritative. We never substitute a fabricated
+    // fallback: a bad fee either overpays (drains the relayer) or underpays
+    // (the send reverts). If the quote fails, fail loudly so it gets fixed.
+    let quotedFee: bigint;
     try {
-      const quotedFee = await this.suiLz.quoteLzFee(
+      quotedFee = await this.suiLz.quoteLzFee(
         intentId,
         walrusInfo.blobId,
         walrusInfo.endEpoch,
         this.evmDstEid,
       );
-      // Add 10% buffer to the quoted fee
-      feeAmount = (quotedFee * 11n) / 10n;
-      this.logger.log(
-        `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
-      );
     } catch (err) {
-      this.logger.warn(`[${intentId}] LZ fee quote failed, using default: ${err}`);
+      // A failed quote means the return path did not go out. Record it on the
+      // LZ-send metric so the canary dashboards alert on it, then rethrow.
+      this.metrics.recordLzSend('failure');
+      throw err;
     }
+    // Add 10% buffer to the quoted fee for price drift between quote and send.
+    const feeAmount = (quotedFee * 11n) / 10n;
+    this.logger.log(
+      `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
+    );
 
     this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
     let lzDigest: string;
@@ -192,7 +198,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         walrusInfo.blobId,
         walrusInfo.endEpoch,
         this.evmDstEid,
-        ...(feeAmount !== undefined ? [feeAmount] : []),
+        feeAmount,
       );
     } catch (err) {
       this.metrics.recordLzSend('failure');

@@ -114,7 +114,7 @@ describe('SuiLzService.lzSendProof', () => {
     const endEpoch = 100;
     const dstEid = 40161;
 
-    const digest = await lzService.lzSendProof(intentId, blobId, endEpoch, dstEid);
+    const digest = await lzService.lzSendProof(intentId, blobId, endEpoch, dstEid, 110_000_000n);
 
     expect(digest).toBe('fakedigest123');
     expect(mockExecuteTransaction).toHaveBeenCalledTimes(1);
@@ -136,7 +136,7 @@ describe('SuiLzService.lzSendProof', () => {
     const intentId = '0x' + 'ab'.repeat(32);
     const blobId = 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0';
 
-    await expect(lzService.lzSendProof(intentId, blobId, 100, 40161)).rejects.toThrow(
+    await expect(lzService.lzSendProof(intentId, blobId, 100, 40161, 110_000_000n)).rejects.toThrow(
       /Sui tx failed/,
     );
   });
@@ -164,9 +164,9 @@ describe('SuiLzService.lzSendProof', () => {
     sui.onModuleInit();
     const lz = module2.get<SuiLzService>(SuiLzService);
 
-    await expect(lz.lzSendProof('0x' + 'ab'.repeat(32), 'dGVzdA', 100, 40161)).rejects.toThrow(
-      /LZ send proof requires/,
-    );
+    await expect(
+      lz.lzSendProof('0x' + 'ab'.repeat(32), 'dGVzdA', 100, 40161, 110_000_000n),
+    ).rejects.toThrow(/LZ send proof requires/);
   });
 });
 
@@ -181,19 +181,30 @@ describe('SuiLzService.quoteLzFee', () => {
     const nativeFeeBytes = [0x00, 0xe1, 0xf5, 0x05, 0x00, 0x00, 0x00, 0x00];
     const zroFeeBytes = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
 
-    mockSimulate = jest.fn().mockResolvedValue({
-      response: {
-        commandOutputs: [
-          // 15 intermediate commands
-          ...Array(15).fill({ returnValues: [] }),
-          // Last command returns MessagingFee
-          {
-            returnValues: [{
-              value: { value: new Uint8Array([...nativeFeeBytes, ...zroFeeBytes]) },
-            }],
-          },
-        ],
-      },
+    // Mirror server behavior: the gRPC FieldMask uses snake_case proto paths.
+    // Command return values only populate when 'command_outputs.return_values'
+    // is requested; the camelCase parent 'commandOutputs' yields an empty array.
+    mockSimulate = jest.fn().mockImplementation((req: { readMask?: { paths?: string[] } }) => {
+      const paths = req.readMask?.paths ?? [];
+      const populated = paths.includes('command_outputs.return_values');
+      return Promise.resolve({
+        response: {
+          commandOutputs: populated
+            ? [
+                // 15 intermediate commands
+                ...Array(15).fill({ returnValues: [] }),
+                // Last command returns MessagingFee
+                {
+                  returnValues: [
+                    {
+                      value: { value: new Uint8Array([...nativeFeeBytes, ...zroFeeBytes]) },
+                    },
+                  ],
+                },
+              ]
+            : [],
+        },
+      });
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -224,9 +235,23 @@ describe('SuiLzService.quoteLzFee', () => {
     expect(fee).toBe(100_000_000n);
     expect(mockSimulate).toHaveBeenCalledTimes(1);
 
-    // Verify readMask includes commandOutputs
+    // Verify readMask requests the snake_case leaf path. The camelCase parent
+    // 'commandOutputs' is silently returned empty by the server, which would
+    // drop the quote to the oversized hardcoded fallback fee.
     const callArgs = mockSimulate.mock.calls[0][0];
-    expect(callArgs.readMask?.paths).toContain('commandOutputs');
+    expect(callArgs.readMask?.paths).toContain('command_outputs.return_values');
     expect(callArgs.transaction?.bcs?.value).toBeDefined();
+  });
+
+  it('would fail to parse if the readMask used the camelCase parent path', async () => {
+    // Regression guard: the original bug requested 'commandOutputs', which the
+    // server returns empty. Proves the snake_case leaf path is load-bearing.
+    mockSimulate.mockImplementationOnce(() =>
+      Promise.resolve({ response: { commandOutputs: [] } }),
+    );
+
+    await expect(
+      lzService.quoteLzFee('0x' + 'ab'.repeat(32), 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0', 100, 40161),
+    ).rejects.toThrow(/Failed to parse LZ fee quote/);
   });
 });
