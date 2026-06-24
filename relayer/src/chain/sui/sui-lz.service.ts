@@ -177,6 +177,11 @@ export class SuiLzService {
 
     const buf = Buffer.from(returnValue);
     const nativeFee = buf.readBigUInt64LE(0);
+    // A zero fee means the quote did not resolve to a real amount; sending with
+    // a 0 fee coin would revert on-chain. Fail loudly instead of underpaying.
+    if (nativeFee <= 0n) {
+      throw new Error('Failed to parse LZ fee quote: non-positive native fee');
+    }
     return nativeFee;
   }
 

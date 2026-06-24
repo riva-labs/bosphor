@@ -170,12 +170,20 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // The quoted fee is authoritative. We never substitute a fabricated
     // fallback: a bad fee either overpays (drains the relayer) or underpays
     // (the send reverts). If the quote fails, fail loudly so it gets fixed.
-    const quotedFee = await this.suiLz.quoteLzFee(
-      intentId,
-      walrusInfo.blobId,
-      walrusInfo.endEpoch,
-      this.evmDstEid,
-    );
+    let quotedFee: bigint;
+    try {
+      quotedFee = await this.suiLz.quoteLzFee(
+        intentId,
+        walrusInfo.blobId,
+        walrusInfo.endEpoch,
+        this.evmDstEid,
+      );
+    } catch (err) {
+      // A failed quote means the return path did not go out. Record it on the
+      // LZ-send metric so the canary dashboards alert on it, then rethrow.
+      this.metrics.recordLzSend('failure');
+      throw err;
+    }
     // Add 10% buffer to the quoted fee for price drift between quote and send.
     const feeAmount = (quotedFee * 11n) / 10n;
     this.logger.log(

@@ -237,6 +237,8 @@ describe('IntentProcessor.processIntent', () => {
     ).rejects.toThrow(/devInspect failed/);
 
     expect(mockSuiLz.lzSendProof).not.toHaveBeenCalled();
+    // The failed return-path quote is surfaced on the LZ-send metric.
+    expect(mockMetrics.recordLzSend).toHaveBeenCalledWith('failure');
   });
 });
 
