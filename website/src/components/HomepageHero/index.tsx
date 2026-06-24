@@ -6,7 +6,7 @@ export default function HomepageHero(): React.ReactElement {
   return (
     <div className={styles.heroSection}>
       <img
-        src="/img/mascot/01_waving.png"
+        src="/img/mascot/bosphor_wave.webp"
         alt="Bosphor beaver mascot waving"
         className={styles.mascot}
         loading="eager"
@@ -22,19 +22,19 @@ export default function HomepageHero(): React.ReactElement {
         <Card
           title="Architecture"
           href="/architecture"
-          icon="/img/mascot/03_blueprint.png"
+          icon="/img/mascot/bosphor_cube.webp"
           description="Understand the system design, message flow, and trust model behind cross-chain storage routing."
         />
         <Card
           title="Quickstart"
           href="/quickstart"
-          icon="/img/mascot/05_running.png"
+          icon="/img/mascot/bosphor_peek.webp"
           description="Deploy and run the full pipeline on testnet in 15 minutes."
         />
         <Card
           title="Deployment"
           href="/deployment"
-          icon="/img/mascot/19_deploying.png"
+          icon="/img/mascot/bosphor_code.webp"
           description="Step-by-step guide for deploying contracts, the relayer, and wiring peers."
         />
       </Cards>

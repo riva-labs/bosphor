@@ -46,10 +46,6 @@
   object-fit: contain;
 }
 
-[data-theme='dark'] .cardIcon {
-  filter: brightness(0) invert(1);
-}
-
 .cardTitle {
   font-family: var(--ifm-heading-font-family);
   font-weight: 700;
