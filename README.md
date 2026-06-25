@@ -74,18 +74,19 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 
 | Step | TX |
 |------|----|
-| EVM Intent | [0x223d...](https://sepolia.etherscan.io/tx/0x223d075c73facfa48bddce0e4316548924b40a0fd362ad3628b0a59ae5c1c40c) |
-| LZ DELIVERED | [LZ Explorer](https://testnet.layerzeroscan.com/tx/0x223d075c73facfa48bddce0e4316548924b40a0fd362ad3628b0a59ae5c1c40c) |
-| Sui Execution | [3MmJ1nk...](https://suiscan.xyz/testnet/tx/3MmJ1nkJEzzmBV9uFFBKdgqJM9sZi3xajJQrZw91WVNW) |
-| Walrus Blob | [rfj52maH...](https://walruscan.com/testnet/blob/rfj52maH_ZyCqaMVIfMOJLUtNnu8ZQ_y-8ZW3pUa63s) |
-| EVM Confirm | [0x13243e...](https://sepolia.etherscan.io/tx/0x13243e35227e6f2a421381bd1b48191e8fee67a0169861b688861337d7a774f6) |
+| EVM Intent | [0xde576c...](https://sepolia.etherscan.io/tx/0xde576c41b95c5f19dfb86600b6d08705c2fbdc1205969beaf909852184765aa2) |
+| LZ DELIVERED | [LZ Explorer](https://testnet.layerzeroscan.com/tx/0xde576c41b95c5f19dfb86600b6d08705c2fbdc1205969beaf909852184765aa2) |
+| Sui Execution | [5dcGjoC9...](https://suiscan.xyz/testnet/tx/5dcGjoC9qz4EaN9KSkTvJAmsper1xkMoCRfdn1zBrZMv) |
+| Walrus Blob | [1sfeIRiJ...](https://walruscan.com/testnet/blob/1sfeIRiJCxR_2HtapNCfGUkoMbsl5Mqj5sIwR8PLQvU) |
+| EVM Confirm | [0x941966...](https://sepolia.etherscan.io/tx/0x9419666133c7b876c1ccebecc73d83af9356a6972fed1c6728d1b7cc079c1309) |
 
 ## Deployed Contracts
 
 | Contract | Network | Address |
 |----------|---------|---------|
-| BosphorAdapter | Sepolia | `0xbC7EF2F021F517d871282C2bb512C741ad2958c3` |
-| LZ OApp | Sui Testnet | `0xa4420716d875fa323c5d543876d03979607dea3c428818566d25d82fea6f6656` |
+| BosphorAdapter | Sepolia | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
+| Sui Package | Sui Testnet | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |
+| Sui OApp | Sui Testnet | `0x4a5bf89e083c16bd8034b027454057d30ec336c734a7cc274e857a9125540026` |
 
 ## Docker
 
