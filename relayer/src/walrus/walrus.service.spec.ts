@@ -71,6 +71,23 @@ describe('WalrusService', () => {
       });
     });
 
+    it('should reset the SDK cache before every upload so payment uses live state', async () => {
+      // The cache goes stale at each Walrus epoch rollover; resetting before the
+      // write computes the storage payment from fresh on-chain state and kills
+      // the whole stale-cache abort class regardless of its signature.
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blobFresh',
+        blobObject: { id: '0xfresh', storage: { end_epoch: 80 } },
+      });
+
+      await service.upload(Buffer.from('fresh-data'));
+
+      expect(mockReset).toHaveBeenCalledTimes(1);
+      const resetOrder = mockReset.mock.invocationCallOrder[0];
+      const writeOrder = mockWriteBlob.mock.invocationCallOrder[0];
+      expect(resetOrder).toBeLessThan(writeOrder);
+    });
+
     it('should use configured WALRUS_STORE_EPOCHS for upload', async () => {
       mockConfigGet.mockImplementation((key: string, defaultValue?: any) =>
         key === 'WALRUS_STORE_EPOCHS' ? 10 : defaultValue,
@@ -103,7 +120,8 @@ describe('WalrusService', () => {
 
       const result = await service.upload(Buffer.from('retry-data'));
 
-      expect(mockReset).toHaveBeenCalledTimes(1);
+      // One proactive reset before the first write + one on the retry.
+      expect(mockReset).toHaveBeenCalledTimes(2);
       expect(mockWriteBlob).toHaveBeenCalledTimes(2);
       expect(result).toEqual({
         blobId: 'blobRetry',
@@ -112,16 +130,44 @@ describe('WalrusService', () => {
       });
     });
 
+    it('should reset and retry once on the balance::destroy_zero stale-cache abort', async () => {
+      // The epoch-rollover abort surfaces as balance::destroy_zero (ENonZero,
+      // code 0) when the stale price leaves a non-zero payment remainder. This is
+      // the same stale-cache root cause as balance::split and must reset + retry.
+      mockWriteBlob
+        .mockRejectedValueOnce(
+          new Error(
+            "MoveAbort in 5th command, abort code: 0, in " +
+              "'0x0000000000000000000000000000000000000000000000000000000000000002::balance::destroy_zero' (instruction 8)",
+          ),
+        )
+        .mockResolvedValueOnce({
+          blobId: 'blobDz',
+          blobObject: { id: '0xobjDz', storage: { end_epoch: 75 } },
+        });
+
+      const result = await service.upload(Buffer.from('dz-data'));
+
+      expect(mockReset).toHaveBeenCalledTimes(2);
+      expect(mockWriteBlob).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({
+        blobId: 'blobDz',
+        suiObjectId: '0xobjDz',
+        endEpoch: 75,
+      });
+    });
+
     it('should NOT retry on a generic/transient error (writeBlob is not idempotent)', async () => {
       // A non-stale-cache error (e.g. a network failure after the blob may have
       // already been registered) must propagate without a blind retry, which
-      // would mint a duplicate orphan blob and double-pay storage.
+      // would mint a duplicate orphan blob and double-pay storage. The single
+      // proactive reset still runs before the one attempt.
       mockWriteBlob.mockRejectedValue(new Error('socket hang up'));
 
       await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
         'socket hang up',
       );
-      expect(mockReset).not.toHaveBeenCalled();
+      expect(mockReset).toHaveBeenCalledTimes(1);
       expect(mockWriteBlob).toHaveBeenCalledTimes(1);
     });
 
@@ -135,7 +181,8 @@ describe('WalrusService', () => {
       await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
         'balance::split',
       );
-      expect(mockReset).toHaveBeenCalledTimes(1);
+      // One proactive reset + one on the retry.
+      expect(mockReset).toHaveBeenCalledTimes(2);
       expect(mockWriteBlob).toHaveBeenCalledTimes(2);
     });
   });
