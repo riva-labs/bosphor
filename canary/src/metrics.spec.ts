@@ -31,3 +31,37 @@ test('records per-stage durations', async () => {
   const out = await m.getMetrics();
   assert.match(out, /bosphor_canary_stage_duration_seconds_count\{stage="return_delivery"\} 1/);
 });
+
+test('publishes wallet balance and gas price gauges', async () => {
+  const m = new CanaryMetrics();
+
+  m.setWalletBalance(0.0342);
+  m.setGasPrice(432);
+
+  const out = await m.getMetrics();
+  assert.match(out, /bosphor_canary_wallet_balance_eth 0.0342/);
+  assert.match(out, /bosphor_canary_gas_price_gwei 432/);
+});
+
+test('ignores non-finite gauge reads instead of publishing NaN', async () => {
+  const m = new CanaryMetrics();
+
+  m.setWalletBalance(NaN);
+  m.setGasPrice(NaN);
+
+  const out = await m.getMetrics();
+  assert.doesNotMatch(out, /bosphor_canary_wallet_balance_eth Nan/i);
+  assert.doesNotMatch(out, /bosphor_canary_gas_price_gwei Nan/i);
+});
+
+test('counts skipped probes by reason', async () => {
+  const m = new CanaryMetrics();
+
+  m.recordSkip('low_balance');
+  m.recordSkip('high_gas');
+  m.recordSkip('high_gas');
+
+  const out = await m.getMetrics();
+  assert.match(out, /bosphor_canary_skipped_total\{reason="low_balance"\} 1/);
+  assert.match(out, /bosphor_canary_skipped_total\{reason="high_gas"\} 2/);
+});

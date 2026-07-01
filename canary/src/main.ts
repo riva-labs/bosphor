@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { ethers } from 'ethers';
 import { CanaryMetrics } from './metrics.ts';
 import { runProbe, type ProbeDeps } from './probe.ts';
+import { preflight } from './preflight.ts';
 
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
@@ -30,6 +31,14 @@ const POLL_INTERVAL_MS = Number(process.env.CANARY_POLL_INTERVAL_MS) || 15_000;
 // so 10 min is generous headroom while leaving 5 min of slack before the tick.
 const MAX_WAIT_MS = Number(process.env.CANARY_MAX_WAIT_MS) || 10 * 60 * 1000;
 const DEADLINE_SECONDS = Number(process.env.CANARY_DEADLINE_SECONDS) || 14_400;
+
+// Preflight guard thresholds. Skip a probe rather than burn (or fail on) a paid
+// tx when the wallet is nearly drained or gas has spiked. Both are drains we hit
+// in production: an empty sender and a Sepolia base-fee spike to 400+ gwei.
+const MIN_BALANCE_ETH = Number(process.env.CANARY_MIN_BALANCE_ETH) || 0.005;
+const MAX_GAS_GWEI = Number(process.env.CANARY_MAX_GAS_GWEI) || 50;
+const MIN_BALANCE_WEI = ethers.parseEther(String(MIN_BALANCE_ETH));
+const MAX_GAS_WEI = BigInt(Math.round(MAX_GAS_GWEI * 1e9));
 
 if (MAX_WAIT_MS >= INTERVAL_MS) {
   console.warn(
@@ -81,8 +90,30 @@ async function runOnce(): Promise<void> {
     return;
   }
   running = true;
-  console.log(`[canary] starting round-trip from ${wallet.address} (dstEid ${DST_EID})`);
   try {
+    // Guard the paid submit: skip this tick if the wallet is nearly drained or
+    // gas has spiked, and always refresh the balance/gas gauges for Prometheus.
+    const pre = await preflight({
+      getBalanceWei: () => provider.getBalance(wallet.address),
+      getGasPriceWei: async () => {
+        const fee = await provider.getFeeData();
+        return fee.maxFeePerGas ?? fee.gasPrice ?? 0n;
+      },
+      minBalanceWei: MIN_BALANCE_WEI,
+      maxGasWei: MAX_GAS_WEI,
+    });
+    metrics.setWalletBalance(pre.balanceEth);
+    metrics.setGasPrice(pre.gasGwei);
+    if (!pre.ok && pre.reason) {
+      metrics.recordSkip(pre.reason);
+      console.warn(
+        `[canary] skipping tick (${pre.reason}): balance ${pre.balanceEth.toFixed(4)} ETH, ` +
+          `gas ${pre.gasGwei.toFixed(1)} gwei`,
+      );
+      return;
+    }
+
+    console.log(`[canary] starting round-trip from ${wallet.address} (dstEid ${DST_EID})`);
     const res = await runProbe(makeDeps());
     if (res.success) {
       metrics.recordSuccess(res.roundtripSeconds ?? 0, Math.floor(Date.now() / 1000));
