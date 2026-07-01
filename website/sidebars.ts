@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'deployment',
         'relayer',
+        'canary',
         'testing',
         'troubleshooting',
       ],
