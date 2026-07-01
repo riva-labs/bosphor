@@ -35,6 +35,25 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  private readonly walBalance = new Gauge({
+    name: 'bosphor_relayer_wal_balance_wal',
+    help: 'Relayer WAL balance in WAL (the Walrus storage token)',
+    registers: [this.registry],
+  });
+
+  private readonly suiBalance = new Gauge({
+    name: 'bosphor_relayer_sui_balance_sui',
+    help: 'Relayer SUI balance in SUI (gas + WAL swap funding)',
+    registers: [this.registry],
+  });
+
+  private readonly walTopUp = new Counter({
+    name: 'bosphor_relayer_wal_topup_total',
+    help: 'WAL auto top-up attempts by result',
+    labelNames: ['result'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
@@ -53,6 +72,18 @@ export class MetricsService {
 
   observeWalrusUpload(seconds: number): void {
     this.walrusUpload.observe(seconds);
+  }
+
+  setWalBalance(wal: number): void {
+    if (Number.isFinite(wal)) this.walBalance.set(wal);
+  }
+
+  setSuiBalance(sui: number): void {
+    if (Number.isFinite(sui)) this.suiBalance.set(sui);
+  }
+
+  recordWalTopUp(result: 'success' | 'failure' | 'insufficient_sui'): void {
+    this.walTopUp.inc({ result });
   }
 
   get contentType(): string {
