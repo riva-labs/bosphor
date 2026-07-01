@@ -76,6 +76,35 @@ groups:
             canary is not sampling. Check the network gas price before treating a
             staleness alert as a real outage.
 
+      # Relayer WAL exhaustion: the relayer auto-refills WAL by swapping SUI, so
+      # a low WAL balance should be transient. If it stays low, the swap is
+      # failing (e.g. relayer SUI is also low) and stores will start aborting.
+      - alert: BosphorRelayerWalLow
+        expr: bosphor_relayer_wal_balance_wal < 0.1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor relayer WAL is low and not auto-refilling"
+          description: >-
+            The relayer has {{ $value | printf "%.4f" }} WAL and has stayed below
+            the floor for 15m. The SUI->WAL auto top-up may be failing. Check the
+            relayer SUI balance and wal_topup_total{result} for failures.
+
+      # The auto top-up gave up because the relayer SUI is too low to swap. This
+      # is the manual-intervention signal: fund the relayer's Sui address.
+      - alert: BosphorRelayerWalTopUpBlocked
+        expr: increase(bosphor_relayer_wal_topup_total{result="insufficient_sui"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer cannot refill WAL (SUI too low)"
+          description: >-
+            The relayer WAL top-up could not swap because SUI is below the swap +
+            reserve threshold. Storage payments will fail. Fund the relayer's Sui
+            address with SUI.
+
       # Dead-man's switch -- the catch-all. Fires whether round-trips are failing,
       # the relayer stopped fulfilling, or the canary itself died mid-flight. The
       # second clause suppresses the alert during the canary's first 40m of
