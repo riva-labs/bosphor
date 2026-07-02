@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import { ethers } from 'ethers';
 import { CanaryMetrics } from './metrics.ts';
 import { runProbe, type ProbeDeps } from './probe.ts';
-import { preflight } from './preflight.ts';
+import { preflight, effectiveGasPriceWei } from './preflight.ts';
 
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
@@ -95,10 +95,7 @@ async function runOnce(): Promise<void> {
     // gas has spiked, and always refresh the balance/gas gauges for Prometheus.
     const pre = await preflight({
       getBalanceWei: () => provider.getBalance(wallet.address),
-      getGasPriceWei: async () => {
-        const fee = await provider.getFeeData();
-        return fee.maxFeePerGas ?? fee.gasPrice ?? 0n;
-      },
+      getGasPriceWei: async () => effectiveGasPriceWei(await provider.getFeeData()),
       minBalanceWei: MIN_BALANCE_WEI,
       maxGasWei: MAX_GAS_WEI,
     });
