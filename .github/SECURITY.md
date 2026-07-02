@@ -10,7 +10,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Email security reports to: **security@rivalabs.dev**
+Email security reports to: **ali@rivalabs.io**
 
 Include:
 - Description of the vulnerability
