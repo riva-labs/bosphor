@@ -47,6 +47,9 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
 | `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |
 | `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
+| `WAL_MIN_BALANCE_MIST` | `500000000` | WAL floor (0.5 WAL); below this the relayer auto-swaps SUI for WAL |
+| `WAL_TOPUP_SUI_MIST` | `1000000000` | SUI to swap per top-up (1 SUI) |
+| `WAL_TOPUP_SUI_RESERVE_MIST` | `1000000000` | SUI kept in reserve for gas, never spent on a swap (1 SUI) |
 | `INTENT_TTL_MS` | `3600000` | TTL for processed intent deduplication (ms) |
 | `PORT` | `3000` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
@@ -155,6 +158,9 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_lz_send_total` | counter | `result` (`success`/`failure`) | LayerZero proof sends back to EVM |
 | `bosphor_relayer_checkpoint_cursor_lag` | gauge | — | Latest Sui checkpoint minus the processed cursor |
 | `bosphor_relayer_walrus_upload_seconds` | histogram | — | Walrus upload duration in seconds |
+| `bosphor_relayer_wal_balance_wal` | gauge | — | Relayer WAL balance (the Walrus storage token) |
+| `bosphor_relayer_sui_balance_sui` | gauge | — | Relayer SUI balance (gas + WAL swap funding) |
+| `bosphor_relayer_wal_topup_total` | counter | `result` (`success`/`failure`/`insufficient_sui`) | SUI→WAL auto top-up attempts |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
 
@@ -166,6 +172,14 @@ The relayer uploads intent payloads to Walrus using the `@mysten/walrus` SDK's `
 - Blob ownership is transferred to the relayer's Sui address
 - Storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs)
 - The upload relay is configured via `WALRUS_RELAY_URL` in `SuiService`
+
+### WAL auto top-up
+
+Every Walrus store is paid for in WAL, which drains over time. There is no faucet in the fulfillment path, so the relayer refills itself: before each store (and on a background interval) it checks its WAL balance, and when WAL falls below `WAL_MIN_BALANCE_MIST` it swaps `WAL_TOPUP_SUI_MIST` of SUI for WAL on the Walrus testnet exchange (the same exchange `walrus get-wal` uses).
+
+- The swap never spends the `WAL_TOPUP_SUI_RESERVE_MIST` SUI gas reserve. If SUI is too low to swap without eating the reserve, the top-up records `wal_topup_total{result="insufficient_sui"}` and logs an error instead, so the `BosphorRelayerWalTopUpBlocked` alert pages for a manual SUI refill.
+- Concurrent intents trigger at most one swap; the check is serialized.
+- As long as the relayer holds SUI, WAL is self-healing. Keep the relayer's Sui address funded with SUI.
 
 ## Error handling
 

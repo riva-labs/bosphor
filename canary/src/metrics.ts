@@ -1,4 +1,5 @@
 import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import type { SkipReason } from './preflight.ts';
 
 export type CanaryStage = 'forward_delivery' | 'return_delivery';
 
@@ -39,6 +40,25 @@ export class CanaryMetrics {
     registers: [this.registry],
   });
 
+  private readonly walletBalance = new Gauge({
+    name: 'bosphor_canary_wallet_balance_eth',
+    help: 'Sender wallet balance in ETH (native gas token)',
+    registers: [this.registry],
+  });
+
+  private readonly gasPrice = new Gauge({
+    name: 'bosphor_canary_gas_price_gwei',
+    help: 'Current network gas price (maxFeePerGas) in gwei',
+    registers: [this.registry],
+  });
+
+  private readonly skipped = new Counter({
+    name: 'bosphor_canary_skipped_total',
+    help: 'Probes skipped by the preflight guard, by reason',
+    labelNames: ['reason'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
@@ -55,6 +75,21 @@ export class CanaryMetrics {
 
   observeStage(stage: CanaryStage, seconds: number): void {
     this.stageDuration.observe({ stage }, seconds);
+  }
+
+  /** Publish the latest wallet balance (ETH). No-op on a failed read (NaN). */
+  setWalletBalance(eth: number): void {
+    if (Number.isFinite(eth)) this.walletBalance.set(eth);
+  }
+
+  /** Publish the latest gas price (gwei). No-op on a failed read (NaN). */
+  setGasPrice(gwei: number): void {
+    if (Number.isFinite(gwei)) this.gasPrice.set(gwei);
+  }
+
+  /** Count a probe the preflight guard skipped, labelled by reason. */
+  recordSkip(reason: SkipReason): void {
+    this.skipped.inc({ reason });
   }
 
   get contentType(): string {

@@ -7,7 +7,13 @@ import { SuiService } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
+import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
+
+const walTopUpProvider = {
+  provide: WalTopUpService,
+  useValue: { ensureWal: jest.fn().mockResolvedValue(undefined) },
+};
 
 function makeMetricsMock() {
   return {
@@ -88,6 +94,7 @@ describe('IntentProcessor.processIntent', () => {
         { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
         { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
+        walTopUpProvider,
         { provide: ConfigService, useValue: mockConfig },
         { provide: MetricsService, useValue: mockMetrics },
       ],
@@ -148,6 +155,7 @@ describe('IntentProcessor.processIntent', () => {
         { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
         { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
+        walTopUpProvider,
         {
           provide: ConfigService,
           useValue: {
@@ -303,6 +311,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
         { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
         { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
+        walTopUpProvider,
         {
           provide: ConfigService,
           useValue: {
@@ -423,6 +432,7 @@ describe('IntentProcessor.poll', () => {
         { provide: SuiCheckpointService, useValue: mockSuiCheckpoint },
         { provide: SuiLzService, useValue: mockSuiLz },
         { provide: WalrusService, useValue: mockWalrus },
+        walTopUpProvider,
         {
           provide: ConfigService,
           useValue: {

@@ -7,6 +7,7 @@ import { SuiService } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
+import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
@@ -25,6 +26,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly suiCheckpoint: SuiCheckpointService,
     private readonly suiLz: SuiLzService,
     private readonly walrus: WalrusService,
+    private readonly walTopUp: WalTopUpService,
     private readonly config: ConfigService,
     private readonly metrics: MetricsService,
   ) {
@@ -135,6 +137,11 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     payload: Buffer,
     deadlineMs: bigint,
   ): Promise<void> {
+    // 0. Ensure the relayer holds enough WAL to pay for storage. Refills from
+    // SUI via the Walrus exchange when low, so an exhausted WAL balance never
+    // silently blocks fulfillment (a live failure mode we hit on testnet).
+    await this.walTopUp.ensureWal();
+
     // 1. Upload payload to Walrus
     this.logger.log(`[${intentId}] Uploading to Walrus...`);
     const uploadStart = Date.now();

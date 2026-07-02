@@ -40,6 +40,12 @@ export const configValidationSchema = Joi.object({
   WALRUS_RELAY_URL: Joi.string().uri().required(),
   WALRUS_STORE_EPOCHS: Joi.number().default(5),
 
+  // WAL auto top-up: the relayer refills its own WAL (Walrus storage token) by
+  // swapping SUI on the Walrus testnet exchange when the balance runs low.
+  WAL_MIN_BALANCE_MIST: Joi.number().integer().default(500_000_000), // 0.5 WAL floor
+  WAL_TOPUP_SUI_MIST: Joi.number().integer().default(1_000_000_000), // swap 1 SUI per top-up
+  WAL_TOPUP_SUI_RESERVE_MIST: Joi.number().integer().default(1_000_000_000), // keep >=1 SUI for gas
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
