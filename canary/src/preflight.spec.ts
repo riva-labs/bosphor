@@ -1,9 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ethers } from 'ethers';
-import { preflight, type PreflightDeps } from './preflight.ts';
+import { preflight, effectiveGasPriceWei, type PreflightDeps } from './preflight.ts';
 
 const GWEI = 10n ** 9n;
+
+test('effectiveGasPriceWei gates on gasPrice, not the padded maxFeePerGas ceiling', () => {
+  // ethers pads maxFeePerGas to baseFee*2 + tip. At a 31 gwei base fee the
+  // ceiling is ~62 gwei; gating on it would skip against a 50 gwei guard even
+  // though the tx only pays ~31 gwei. The guard must read the 31.
+  const fee = { gasPrice: 31n * GWEI, maxFeePerGas: 62n * GWEI };
+  assert.equal(effectiveGasPriceWei(fee), 31n * GWEI);
+});
+
+test('effectiveGasPriceWei falls back to maxFeePerGas when gasPrice is absent', () => {
+  assert.equal(effectiveGasPriceWei({ gasPrice: null, maxFeePerGas: 40n * GWEI }), 40n * GWEI);
+});
+
+test('effectiveGasPriceWei returns 0 when the node returns no fee data', () => {
+  assert.equal(effectiveGasPriceWei({ gasPrice: null, maxFeePerGas: null }), 0n);
+});
 
 function baseDeps(overrides: Partial<PreflightDeps> = {}): PreflightDeps {
   return {

@@ -6,7 +6,7 @@ import { ethers } from 'ethers';
  */
 export interface PreflightDeps {
   getBalanceWei(): Promise<bigint>;
-  /** Current network gas price (maxFeePerGas, falling back to gasPrice) in wei. */
+  /** Effective gas price actually paid (baseFee + tip) in wei. See effectiveGasPriceWei. */
   getGasPriceWei(): Promise<bigint>;
   /** Skip the probe when the sender balance is below this many wei. */
   minBalanceWei: bigint;
@@ -15,6 +15,25 @@ export interface PreflightDeps {
 }
 
 export type SkipReason = 'low_balance' | 'high_gas';
+
+/** The subset of ethers' FeeData the gas guard reads. */
+export interface FeeLike {
+  gasPrice: bigint | null;
+  maxFeePerGas: bigint | null;
+}
+
+/**
+ * The gas price the submit actually pays, in wei.
+ *
+ * ethers pads maxFeePerGas to `baseFee * 2 + tip` as an inclusion ceiling, so
+ * gating the guard on it skips at roughly half the configured threshold (a
+ * 25 gwei base fee trips a "50 gwei" guard). gasPrice is eth_gasPrice, the
+ * effective cost. Prefer it; fall back to the ceiling only when the node does
+ * not return gasPrice (non-EIP-1559 / partial FeeData).
+ */
+export function effectiveGasPriceWei(fee: FeeLike): bigint {
+  return fee.gasPrice ?? fee.maxFeePerGas ?? 0n;
+}
 
 export interface PreflightResult {
   ok: boolean;
