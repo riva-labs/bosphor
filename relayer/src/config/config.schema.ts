@@ -46,6 +46,11 @@ export const configValidationSchema = Joi.object({
   WAL_TOPUP_SUI_MIST: Joi.number().integer().default(1_000_000_000), // swap 1 SUI per top-up
   WAL_TOPUP_SUI_RESERVE_MIST: Joi.number().integer().default(1_000_000_000), // keep >=1 SUI for gas
 
+  // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
+  // error reporting is disabled (the relayer runs unchanged).
+  SENTRY_DSN: Joi.string().uri().optional().allow(''),
+  SENTRY_ENVIRONMENT: Joi.string().default('production'),
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),

@@ -62,6 +62,10 @@ When a `high_gas` skip alert is active, treat a following staleness alert as a g
 
 When `BosphorCanaryWalletLow` or `BosphorCanaryWalletCritical` fires, top up the canary sender with Sepolia ETH (and Sui testnet gas on the destination side). No restart is needed. The preflight guard clears on the next tick once the balance is back above `CANARY_MIN_BALANCE_ETH`.
 
+## Error tracking (Sentry)
+
+The canary reports failed probes to Sentry when `SENTRY_DSN` is set, tagged with the failing intent id and the stage that failed (`submit` or `return`), alongside unexpected runtime errors. It shares the relayer's `SENTRY_DSN` / `SENTRY_ENVIRONMENT` environment. Leave `SENTRY_DSN` empty to disable; the canary runs unchanged without it.
+
 ## Related
 
 - [Relayer Operator Guide](relayer.md) for the service the canary exercises

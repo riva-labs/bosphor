@@ -191,6 +191,10 @@ Every Walrus store is paid for in WAL, which drains over time. There is no fauce
 | Sui TX failure | NOT marked as processed, retried on next poll |
 | LZ fee quote failure | Falls back to default 0.5 SUI fee |
 
+## Error tracking (Sentry)
+
+The relayer reports runtime errors to Sentry when `SENTRY_DSN` is set (use the sentry.io free tier). Intent processing failures are captured with the `intentId` as context, so a failed round-trip is traceable to the exact intent. Set `SENTRY_ENVIRONMENT` to distinguish deployments (defaults to `production`). Leave `SENTRY_DSN` empty to disable reporting; the relayer runs unchanged without it. Never commit a real DSN.
+
 ## Related
 
 - [Architecture](architecture.md) for the full message flow
