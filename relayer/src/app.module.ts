@@ -7,12 +7,14 @@ import { WalrusModule } from './walrus/walrus.module';
 import { IntentModule } from './intent/intent.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
+import { LifecycleModule } from './lifecycle/lifecycle.module';
 
 @Module({
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
     MetricsModule,
+    LifecycleModule,
     EvmModule,
     SuiModule,
     WalrusModule,
