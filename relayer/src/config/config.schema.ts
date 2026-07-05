@@ -46,6 +46,13 @@ export const configValidationSchema = Joi.object({
   WAL_TOPUP_SUI_MIST: Joi.number().integer().default(1_000_000_000), // swap 1 SUI per top-up
   WAL_TOPUP_SUI_RESERVE_MIST: Joi.number().integer().default(1_000_000_000), // keep >=1 SUI for gas
 
+  // Public intent feed / dashboard
+  // Postgres connection for the IntentLifecycleStore. When unset, the relayer
+  // falls back to an in-memory store (local dev / tests only; not durable).
+  DATABASE_URL: Joi.string().uri({ scheme: ['postgres', 'postgresql'] }).optional().allow(''),
+  // Origin allowed to read the public API (CORS). The deployed dashboard.
+  DASHBOARD_ORIGIN: Joi.string().uri().default('https://status.bosphor.xyz'),
+
   // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
   // error reporting is disabled (the relayer runs unchanged).
   SENTRY_DSN: Joi.string().uri().optional().allow(''),

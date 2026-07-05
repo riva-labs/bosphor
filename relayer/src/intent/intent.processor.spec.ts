@@ -9,12 +9,20 @@ import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { ErrorReporter } from '../observability/error-reporter';
 
 const walTopUpProvider = {
   provide: WalTopUpService,
   useValue: { ensureWal: jest.fn().mockResolvedValue(undefined) },
 };
+
+function makeLifecycleMock() {
+  return {
+    recordHop: jest.fn().mockResolvedValue(undefined),
+    getRecentIntents: jest.fn().mockResolvedValue([]),
+  };
+}
 
 function makeMetricsMock() {
   return {
@@ -40,6 +48,7 @@ describe('IntentProcessor.processIntent', () => {
   let mockWalrus: Partial<WalrusService>;
   let mockConfig: Partial<ConfigService>;
   let mockMetrics: jest.Mocked<Pick<MetricsService, 'recordIntentProcessed' | 'recordLzSend' | 'observeWalrusUpload' | 'setCheckpointCursorLag'>>;
+  let mockLifecycle: ReturnType<typeof makeLifecycleMock>;
 
   beforeEach(async () => {
     mockEvm = {
@@ -93,6 +102,8 @@ describe('IntentProcessor.processIntent', () => {
       setCheckpointCursorLag: jest.fn(),
     };
 
+    mockLifecycle = makeLifecycleMock();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IntentProcessor,
@@ -104,11 +115,46 @@ describe('IntentProcessor.processIntent', () => {
         walTopUpProvider,
         { provide: ConfigService, useValue: mockConfig },
         { provide: MetricsService, useValue: mockMetrics },
+        { provide: IntentLifecycleStore, useValue: mockLifecycle },
         reporterProvider,
       ],
     }).compile();
 
     processor = module.get<IntentProcessor>(IntentProcessor);
+  });
+
+  it('records the Walrus, Sui-record and proof-sent hops for a fulfilled intent', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    await (processor as any).processIntent(intentId, sender, payload, deadlineMs);
+
+    expect(mockLifecycle.recordHop).toHaveBeenCalledWith(intentId, 'stored_walrus', {
+      blobId: 'blob123',
+      suiObjectId: '0xblobobj',
+      endEpoch: 50,
+    });
+    expect(mockLifecycle.recordHop).toHaveBeenCalledWith(intentId, 'recorded_sui', {
+      txHash: 'suidigest123',
+    });
+    expect(mockLifecycle.recordHop).toHaveBeenCalledWith(intentId, 'proof_sent', {
+      txHash: 'lzproofdigest456',
+    });
+  });
+
+  it('does not fail fulfillment when hop recording throws', async () => {
+    mockLifecycle.recordHop.mockRejectedValue(new Error('db down'));
+    const intentId = '0x' + 'ab'.repeat(32);
+    const sender = '0x' + '11'.repeat(20);
+    const payload = Buffer.from('hello');
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    await expect(
+      (processor as any).processIntent(intentId, sender, payload, deadlineMs),
+    ).resolves.not.toThrow();
+    expect(mockSuiLz.lzSendProof).toHaveBeenCalledTimes(1);
   });
 
   it('should call lzSendProof instead of confirmExecution after Walrus upload and executeStore', async () => {
@@ -175,6 +221,7 @@ describe('IntentProcessor.processIntent', () => {
           },
         },
         { provide: MetricsService, useValue: mockMetrics },
+        { provide: IntentLifecycleStore, useValue: makeLifecycleMock() },
         reporterProvider,
       ],
     }).compile();
@@ -265,6 +312,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
   let mockSuiCheckpoint: Partial<SuiCheckpointService>;
   let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
+  let mockLifecycle: ReturnType<typeof makeLifecycleMock>;
   let mockReporter: ReturnType<typeof makeReporterMock>;
 
   // ABI-encode a valid LZ payload: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
@@ -307,6 +355,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
       }),
     };
 
+    mockLifecycle = makeLifecycleMock();
     mockReporter = makeReporterMock();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -335,11 +384,28 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
           },
         },
         { provide: MetricsService, useValue: makeMetricsMock() },
+        { provide: IntentLifecycleStore, useValue: mockLifecycle },
         { provide: ErrorReporter, useValue: mockReporter },
       ],
     }).compile();
 
     processor = module.get<IntentProcessor>(IntentProcessor);
+  });
+
+  it('records the received hop with the sender when an intent arrives via Sui LZ', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const futureDeadline = Math.floor(Date.now() / 1000) + 3600;
+    const payload = makeAbiPayload(sender, '0x' + Buffer.from('hi').toString('hex'), futureDeadline);
+
+    await processor.handleSuiLzEvent({
+      intentId: '0x' + 'ab'.repeat(32),
+      payload,
+      srcEid: 40161,
+    });
+
+    expect(mockLifecycle.recordHop).toHaveBeenCalledWith('0x' + 'ab'.repeat(32), 'received', {
+      sender,
+    });
   });
 
   it('reports a processing failure to Sentry with the intent id', async () => {
@@ -483,6 +549,7 @@ describe('IntentProcessor.poll', () => {
           },
         },
         { provide: MetricsService, useValue: makeMetricsMock() },
+        { provide: IntentLifecycleStore, useValue: makeLifecycleMock() },
         reporterProvider,
       ],
     })

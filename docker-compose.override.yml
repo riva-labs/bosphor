@@ -1,0 +1,9 @@
+# Host-specific overrides (not committed). On this shared box another project
+# already binds host port 3000, so expose the relayer on 3300 instead. Prometheus
+# scrapes the relayer over the internal docker network (relayer:3000), so the host
+# port is for manual access only and this remap does not affect functionality.
+services:
+  relayer:
+    # !override replaces the base ports list instead of appending to it.
+    ports: !override
+      - "3300:3000"
