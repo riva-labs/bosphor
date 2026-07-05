@@ -17,4 +17,8 @@ ingress:
   # Public status page (Kener container, host port 3008). Rollback = 3002 (Kuma).
   - hostname: status.bosphor.xyz
     service: http://localhost:3008
+  # Operator dashboards (Grafana, host port 3001). Gated by Grafana's own login;
+  # put Cloudflare Access in front for a second factor on this operator data.
+  - hostname: grafana.bosphor.xyz
+    service: http://localhost:3001
   - service: http_status:404
