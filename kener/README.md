@@ -48,11 +48,25 @@ docker restart bosphor-kener
 
 ## Monitors
 
-Add via the admin UI (Monitors → Create). The form produces the correct
-`type_data`; do not hand-write it in SQL. First monitor:
+Monitors live in the DB (SQLite volume), not in git. Add via the admin UI
+(Monitors → Create) so the form produces the correct `type_data`; do not
+hand-write it in SQL from scratch. To add many, create one in the UI, then clone
+its row in SQL and `REPLACE` the url (and for a POST monitor, the method + body),
+add a `pages_monitors` link (page_id=1), and `docker restart bosphor-kener`.
 
-- Name `Bosphor API`, Type `API`, URL `https://api.bosphor.xyz/health`,
-  method `GET`, interval 1m.
+Current set (two categories):
+
+Bosphor
+- Bosphor — `https://api.bosphor.xyz/health` (relayer)
+- Intent Lifecycle API — `https://api.bosphor.xyz/public/intents`
+- Bosphor Website — `https://bosphor.xyz`
+
+Dependencies (upstream chains/infra Bosphor relies on; public health endpoints,
+not our keyed providers)
+- Ethereum Sepolia RPC — `https://ethereum-sepolia-rpc.publicnode.com` (POST `eth_blockNumber`)
+- Sui Testnet RPC — `https://fullnode.testnet.sui.io/health`
+- Walrus Testnet — `https://aggregator.walrus-testnet.walrus.space/v1/api`
+- LayerZero Scan API — `https://scan-testnet.layerzero-api.com/v1/swagger`
 
 ## Cutover from Uptime Kuma (after the page looks right)
 
