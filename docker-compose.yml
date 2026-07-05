@@ -63,16 +63,8 @@ services:
       - prometheus
     restart: unless-stopped
 
-  # Public status page (industry-standard, self-hosted). Serves the branded
-  # "All Systems Operational" page + component health + uptime history at
-  # status.bosphor.xyz via the Cloudflare tunnel. Configured through its own web
-  # UI; state persists in the uptime-kuma-data volume.
-  uptime-kuma:
-    image: louislam/uptime-kuma:1
-    volumes:
-      - uptime-kuma-data:/app/data
-    restart: unless-stopped
+# status.bosphor.xyz is served by Kener (see kener/), routed through the
+# Cloudflare tunnel to host port 3008. Uptime Kuma was retired at cutover.
 
 volumes:
   bosphor-pgdata:
-  uptime-kuma-data:
