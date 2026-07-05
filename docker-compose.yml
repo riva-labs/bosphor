@@ -1,10 +1,28 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bosphor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bosphor}
+      POSTGRES_DB: bosphor
+    volumes:
+      - bosphor-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bosphor -d bosphor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   relayer:
     build: ./relayer
     env_file: .env
     ports:
       - "3000:3000"
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
@@ -41,3 +59,6 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+
+volumes:
+  bosphor-pgdata:

@@ -7,3 +7,10 @@ services:
     # !override replaces the base ports list instead of appending to it.
     ports: !override
       - "3300:3000"
+
+  # Expose the dedicated bosphor Postgres on a free host port for admin access.
+  # The relayer reaches it over the internal docker network (postgres:5432); this
+  # host mapping is for manual psql only. 5432-5434 are taken by other projects.
+  postgres:
+    ports:
+      - "5435:5432"
