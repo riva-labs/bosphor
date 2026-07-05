@@ -1,40 +1,40 @@
-/* Bosphor status theme — uniform deep navy (dark-only brand).
-   Forced on BOTH :root and .dark so no area falls back to a black/white
-   default before the theme class is applied. Brand: no purple, functional
-   blue (#4A8EC7) for links/focus only, identity from atmosphere + type. */
+/* Bosphor status theme — full black (dark-only).
+   Forced on BOTH :root and .dark plus html/body so no area falls back to a
+   default before the theme class applies. Status colors (green/red/amber) and
+   functional blue (#4A8EC7, links/focus only) come from the color settings. */
 :root,
 .dark {
-  --background: #0B1221;
-  --foreground: #E7ECF3;
-  --card: #0E1524;
-  --card-foreground: #E7ECF3;
-  --popover: #0E1524;
-  --popover-foreground: #E7ECF3;
-  --primary: #E7ECF3;
-  --primary-foreground: #0B1221;
-  --secondary: #141D32;
-  --secondary-foreground: #B8C1CE;
-  --muted: #141D32;
-  --muted-foreground: #8593A5;
-  --accent: #182338;
+  --background: #000000;
+  --foreground: #EDEDED;
+  --card: #0A0A0A;
+  --card-foreground: #EDEDED;
+  --popover: #0A0A0A;
+  --popover-foreground: #EDEDED;
+  --primary: #EDEDED;
+  --primary-foreground: #000000;
+  --secondary: #141414;
+  --secondary-foreground: #C8C8C8;
+  --muted: #141414;
+  --muted-foreground: #8A8A8A;
+  --accent: #1A1A1A;
   --accent-foreground: #4A8EC7;
   --destructive: #A84D4A;
-  --border: #1B273F;
-  --input: #141D32;
+  --border: #222222;
+  --input: #1A1A1A;
   --ring: #4A8EC7;
-  --sidebar: #0E1524;
-  --sidebar-foreground: #E7ECF3;
-  --sidebar-border: #1B273F;
-  --sidebar-accent: #182338;
+  --sidebar: #0A0A0A;
+  --sidebar-foreground: #EDEDED;
+  --sidebar-border: #222222;
+  --sidebar-accent: #1A1A1A;
   --sidebar-accent-foreground: #4A8EC7;
   --sidebar-ring: #4A8EC7;
   color-scheme: dark;
 }
 
-/* one uniform base — no black gaps at the top/header */
+/* one uniform black base — no gaps at the top/header */
 html,
 body {
-  background-color: #0B1221 !important;
+  background-color: #000000 !important;
 }
 
 /* functional blue reserved for links */
