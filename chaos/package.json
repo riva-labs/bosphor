@@ -1,20 +1,18 @@
 {
-  "name": "bosphor-canary",
+  "name": "bosphor-chaos",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "license": "MIT",
-  "description": "Continuous synthetic e2e canary for the Bosphor cross-chain round-trip",
+  "description": "On-demand chaos / failure-injection harness for the Bosphor cross-chain system",
   "scripts": {
-    "start": "tsx src/main.ts",
-    "test": "tsx --test src/*.spec.ts",
+    "chaos": "tsx src/main.ts",
+    "test": "tsx --test src/**/*.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sentry/node": "^10.63.0",
     "dotenv": "^16.4.0",
     "ethers": "^6.13.0",
-    "prom-client": "^15.1.3",
     "tsx": "^4.21.0"
   },
   "devDependencies": {

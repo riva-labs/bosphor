@@ -4,9 +4,15 @@ config({ path: resolve(import.meta.dirname, '../../.env') });
 
 import { createServer } from 'http';
 import { ethers } from 'ethers';
+import * as Sentry from '@sentry/node';
 import { CanaryMetrics } from './metrics.ts';
 import { runProbe, type ProbeDeps } from './probe.ts';
 import { preflight, effectiveGasPriceWei } from './preflight.ts';
+import { initSentry, reportProbeFailure } from './error-report.ts';
+
+if (initSentry(process.env.SENTRY_DSN, process.env.SENTRY_ENVIRONMENT || 'production')) {
+  console.log('[canary] Sentry error reporting enabled');
+}
 
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
@@ -121,10 +127,12 @@ async function runOnce(): Promise<void> {
       );
     } else {
       metrics.recordFailure();
+      reportProbeFailure(Sentry, res);
       console.error(`[canary] FAILURE at ${res.failedStage}: ${res.error} (${res.intentId})`);
     }
   } catch (err) {
     metrics.recordFailure();
+    Sentry.captureException(err);
     console.error(`[canary] unexpected error: ${err}`);
   } finally {
     running = false;

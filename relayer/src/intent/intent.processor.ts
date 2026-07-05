@@ -11,6 +11,7 @@ import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
+import { ErrorReporter } from '../observability/error-reporter';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -32,6 +33,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly metrics: MetricsService,
     private readonly lifecycle: IntentLifecycleStore,
+    private readonly errorReporter: ErrorReporter,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
@@ -123,6 +125,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.metrics.recordIntentProcessed('sui_lz', 'failure');
       this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
+      this.errorReporter.captureException(err, { intentId: event.intentId });
     }
   }
 

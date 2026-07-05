@@ -10,6 +10,7 @@ import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
+import { ErrorReporter } from '../observability/error-reporter';
 
 const walTopUpProvider = {
   provide: WalTopUpService,
@@ -31,6 +32,12 @@ function makeMetricsMock() {
     setCheckpointCursorLag: jest.fn(),
   };
 }
+
+function makeReporterMock() {
+  return { captureException: jest.fn() };
+}
+
+const reporterProvider = { provide: ErrorReporter, useValue: makeReporterMock() };
 
 describe('IntentProcessor.processIntent', () => {
   let processor: IntentProcessor;
@@ -109,6 +116,7 @@ describe('IntentProcessor.processIntent', () => {
         { provide: ConfigService, useValue: mockConfig },
         { provide: MetricsService, useValue: mockMetrics },
         { provide: IntentLifecycleStore, useValue: mockLifecycle },
+        reporterProvider,
       ],
     }).compile();
 
@@ -214,6 +222,7 @@ describe('IntentProcessor.processIntent', () => {
         },
         { provide: MetricsService, useValue: mockMetrics },
         { provide: IntentLifecycleStore, useValue: makeLifecycleMock() },
+        reporterProvider,
       ],
     }).compile();
 
@@ -304,6 +313,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
   let mockSuiLz: Partial<SuiLzService>;
   let mockWalrus: Partial<WalrusService>;
   let mockLifecycle: ReturnType<typeof makeLifecycleMock>;
+  let mockReporter: ReturnType<typeof makeReporterMock>;
 
   // ABI-encode a valid LZ payload: (bytes32 intentId, address sender, bytes payload, uint256 deadline)
   function makeAbiPayload(sender: string, payload: string, deadlineUnix: number): number[] {
@@ -346,6 +356,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
     };
 
     mockLifecycle = makeLifecycleMock();
+    mockReporter = makeReporterMock();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -374,6 +385,7 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
         },
         { provide: MetricsService, useValue: makeMetricsMock() },
         { provide: IntentLifecycleStore, useValue: mockLifecycle },
+        { provide: ErrorReporter, useValue: mockReporter },
       ],
     }).compile();
 
@@ -394,6 +406,31 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
     expect(mockLifecycle.recordHop).toHaveBeenCalledWith('0x' + 'ab'.repeat(32), 'received', {
       sender,
     });
+  });
+
+  it('reports a processing failure to Sentry with the intent id', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const futureDeadline = Math.floor(Date.now() / 1000) + 3600;
+    const payload = makeAbiPayload(sender, '0x' + Buffer.from('hi').toString('hex'), futureDeadline);
+    (mockWalrus.upload as jest.Mock).mockRejectedValue(new Error('walrus down'));
+    const intentId = '0x' + 'ab'.repeat(32);
+
+    await processor.handleSuiLzEvent({ intentId, payload, srcEid: 40161 });
+
+    expect(mockReporter.captureException).toHaveBeenCalledTimes(1);
+    const [err, context] = mockReporter.captureException.mock.calls[0];
+    expect((err as Error).message).toMatch(/walrus down/);
+    expect(context).toEqual({ intentId });
+  });
+
+  it('does not report to Sentry on a successful intent', async () => {
+    const sender = '0x' + '11'.repeat(20);
+    const futureDeadline = Math.floor(Date.now() / 1000) + 3600;
+    const payload = makeAbiPayload(sender, '0x' + Buffer.from('ok').toString('hex'), futureDeadline);
+
+    await processor.handleSuiLzEvent({ intentId: '0x' + 'ab'.repeat(32), payload, srcEid: 40161 });
+
+    expect(mockReporter.captureException).not.toHaveBeenCalled();
   });
 
   it('should process a valid Sui LZ event and call lzSendProof', async () => {
@@ -513,6 +550,7 @@ describe('IntentProcessor.poll', () => {
         },
         { provide: MetricsService, useValue: makeMetricsMock() },
         { provide: IntentLifecycleStore, useValue: makeLifecycleMock() },
+        reporterProvider,
       ],
     })
       .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })

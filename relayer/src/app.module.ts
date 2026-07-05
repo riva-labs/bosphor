@@ -8,11 +8,13 @@ import { IntentModule } from './intent/intent.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
+    ObservabilityModule,
     MetricsModule,
     LifecycleModule,
     EvmModule,
