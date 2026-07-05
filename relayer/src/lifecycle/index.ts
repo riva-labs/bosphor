@@ -1,4 +1,5 @@
 export { LifecycleModule } from './lifecycle.module';
+export { PublicController } from './public.controller';
 export { IntentLifecycleStore } from './intent-lifecycle.store';
 export { InMemoryIntentLifecycleStore } from './in-memory-intent-lifecycle.store';
 export { PgIntentLifecycleStore } from './pg-intent-lifecycle.store';

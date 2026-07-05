@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { IntentLifecycleStore } from './intent-lifecycle.store';
 import { InMemoryIntentLifecycleStore } from './in-memory-intent-lifecycle.store';
 import { PgIntentLifecycleStore } from './pg-intent-lifecycle.store';
+import { PublicController } from './public.controller';
 
 /**
  * Provides the single IntentLifecycleStore for the app. Uses Postgres when
@@ -12,6 +13,7 @@ import { PgIntentLifecycleStore } from './pg-intent-lifecycle.store';
  */
 @Global()
 @Module({
+  controllers: [PublicController],
   providers: [
     {
       provide: IntentLifecycleStore,
