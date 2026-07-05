@@ -14,9 +14,3 @@ services:
   postgres:
     ports:
       - "5435:5432"
-
-  # Uptime Kuma on a free host port so the Cloudflare tunnel (host network) can
-  # reach it at localhost:3002. 3001 is Grafana on this box.
-  uptime-kuma:
-    ports:
-      - "3002:3001"

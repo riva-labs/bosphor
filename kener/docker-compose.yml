@@ -1,0 +1,58 @@
+# =============================================================================
+# Kener — public status page for status.bosphor.xyz (replaces Uptime Kuma)
+#
+# Prebuilt image, no source build. Two services: Redis (internal only) + Kener.
+# SQLite is the default DB, persisted in the named volume `kener_db`.
+#
+# Deploy (from the repo on the VPS):
+#   docker compose -f kener/docker-compose.yml --env-file kener/.env up -d
+#
+# See kener/README.md for the runbook (admin, branding, cutover, rollback).
+# =============================================================================
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: bosphor-kener-redis
+    restart: unless-stopped
+    # No host port: reachable only on the internal compose network.
+    volumes:
+      - redis_data:/data
+    networks:
+      - kener
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kener:
+    image: rajnandan1/kener:latest
+    container_name: bosphor-kener
+    restart: unless-stopped
+    environment:
+      # Required. KENER_SECRET_KEY + ORIGIN come from kener/.env (gitignored).
+      KENER_SECRET_KEY: ${KENER_SECRET_KEY:?set in kener/.env}
+      ORIGIN: ${ORIGIN:?set in kener/.env}
+      REDIS_URL: redis://redis:6379
+      # DB defaults to SQLite at /app/database (persisted below).
+    ports:
+      # Host 3008. Cloudflare tunnel routes status.bosphor.xyz here at cutover.
+      - "3008:3000"
+    volumes:
+      - data:/app/database
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - kener
+
+networks:
+  kener:
+    name: bosphor-kener
+
+volumes:
+  data:
+    name: bosphor_kener_db
+  redis_data:
+    name: bosphor_kener_redis

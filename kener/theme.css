@@ -1,0 +1,50 @@
+/* Bosphor status theme — full black (dark-only).
+   Forced on BOTH :root and .dark plus html/body so no area falls back to a
+   default before the theme class applies. Status colors (green/red/amber) and
+   functional blue (#4A8EC7, links/focus only) come from the color settings. */
+:root,
+.dark {
+  --background: #000000;
+  --foreground: #EDEDED;
+  --card: #0A0A0A;
+  --card-foreground: #EDEDED;
+  --popover: #0A0A0A;
+  --popover-foreground: #EDEDED;
+  --primary: #EDEDED;
+  --primary-foreground: #000000;
+  --secondary: #141414;
+  --secondary-foreground: #C8C8C8;
+  --muted: #141414;
+  --muted-foreground: #8A8A8A;
+  --accent: #1A1A1A;
+  --accent-foreground: #4A8EC7;
+  --destructive: #A84D4A;
+  --border: #222222;
+  --input: #1A1A1A;
+  --ring: #4A8EC7;
+  --sidebar: #0A0A0A;
+  --sidebar-foreground: #EDEDED;
+  --sidebar-border: #222222;
+  --sidebar-accent: #1A1A1A;
+  --sidebar-accent-foreground: #4A8EC7;
+  --sidebar-ring: #4A8EC7;
+  color-scheme: dark;
+}
+
+/* one uniform black base — no gaps at the top/header */
+html,
+body {
+  background-color: #000000 !important;
+}
+
+/* functional blue reserved for links */
+a:not([data-slot="button"]):hover {
+  color: #4A8EC7;
+}
+
+/* editorial serif-italic accent (Instrument Serif loaded via the font setting) */
+h1 + p {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  letter-spacing: 0.2px;
+}
