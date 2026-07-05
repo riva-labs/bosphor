@@ -14,7 +14,7 @@ credentials-file: /etc/cloudflared/2bc9d726-211c-439c-9ee6-16b45c6414c5.json
 ingress:
   - hostname: api.bosphor.xyz
     service: http://localhost:3300
-  # Public status page (Uptime Kuma container, host port 3002).
+  # Public status page (Kener container, host port 3008). Rollback = 3002 (Kuma).
   - hostname: status.bosphor.xyz
-    service: http://localhost:3002
+    service: http://localhost:3008
   - service: http_status:404
