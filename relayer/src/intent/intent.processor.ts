@@ -9,6 +9,8 @@ import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
+import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
+import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -29,6 +31,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly walTopUp: WalTopUpService,
     private readonly config: ConfigService,
     private readonly metrics: MetricsService,
+    private readonly lifecycle: IntentLifecycleStore,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
@@ -109,6 +112,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `[${event.intentId}] Intent received via Sui LZ (sender: ${sender}, src_eid: ${event.srcEid})`,
     );
+    await this.trackHop(event.intentId, 'received', { sender });
 
     try {
       const payloadBytes = ethers.getBytes(userPayload);
@@ -151,11 +155,17 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
     this.logger.log(`[${intentId}] Verify blobId: ${walrusInfo.blobId}`);
+    await this.trackHop(intentId, 'stored_walrus', {
+      blobId: walrusInfo.blobId,
+      suiObjectId: walrusInfo.suiObjectId,
+      endEpoch: walrusInfo.endEpoch,
+    });
 
     // 2. Record on Sui (skip if already executed from a prior attempt)
     const blobObjectId = walrusInfo.suiObjectId;
+    let storeDigest: string | undefined;
     try {
-      const storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
+      storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
       // Wait for TX finality to avoid object version conflicts on the next TX
       await this.sui.getClient().core.waitForTransaction({ digest: storeDigest });
     } catch (err) {
@@ -172,6 +182,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         throw err;
       }
     }
+    await this.trackHop(intentId, 'recorded_sui', { txHash: storeDigest });
 
     // 3. Quote the real LZ fee on-chain, then send the proof back to EVM.
     // The quoted fee is authoritative. We never substitute a fabricated
@@ -213,5 +224,19 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
     this.metrics.recordLzSend('success');
     this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
+    await this.trackHop(intentId, 'proof_sent', { txHash: lzDigest });
+  }
+
+  /**
+   * Record a lifecycle hop for the public feed. Best-effort: a store failure is
+   * logged but never propagates, so feed persistence can never break intent
+   * fulfillment.
+   */
+  private async trackHop(intentId: string, hop: IntentHop, details?: HopDetails): Promise<void> {
+    try {
+      await this.lifecycle.recordHop(intentId, hop, details);
+    } catch (err) {
+      this.logger.warn(`[${intentId}] Failed to record ${hop} hop: ${err}`);
+    }
   }
 }
