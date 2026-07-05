@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sentry/node": "^10.63.0",
     "dotenv": "^16.4.0",
     "ethers": "^6.13.0",
     "prom-client": "^15.1.3",
