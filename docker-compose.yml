@@ -51,6 +51,9 @@ services:
       # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment. The
       # fallback exists only so a fresh clone boots for local dev.
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-bosphor}
+      # Injected into the Bosphor Postgres datasource provisioning for the
+      # internal intent-lifecycle table panel.
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bosphor}
     volumes:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards

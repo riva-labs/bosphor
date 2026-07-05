@@ -9,3 +9,20 @@ datasources:
     uid: bosphor-prometheus
     isDefault: true
     editable: false
+
+  # Read-only access to the intent lifecycle store so Grafana can show the
+  # per-intent, per-hop feed to operators/reviewers (internal only). Password is
+  # injected from POSTGRES_PASSWORD in the grafana service environment.
+  - name: Bosphor Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: bosphor
+    user: bosphor
+    uid: bosphor-postgres
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+    editable: false
