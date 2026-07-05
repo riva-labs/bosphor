@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bosphor Status</title>
+    <meta name="description" content="Status and live intent feed for Bosphor, the cross-chain storage intent router." />
+    <style>
+      :root {
+        --navy: #0b1020;
+        --navy-2: #121a33;
+        --violet: #7c5cff;
+        --text: #e7eaf3;
+        --muted: #9aa3b8;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: radial-gradient(1200px 600px at 50% -10%, var(--navy-2), var(--navy));
+        color: var(--text);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 24px;
+      }
+      .card { max-width: 560px; }
+      .badge {
+        display: inline-block;
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--violet);
+        border: 1px solid rgba(124, 92, 255, 0.4);
+        border-radius: 999px;
+        padding: 6px 14px;
+        margin-bottom: 28px;
+      }
+      h1 { font-size: 40px; margin: 0 0 12px; letter-spacing: -0.02em; }
+      p { color: var(--muted); margin: 0 auto 24px; max-width: 44ch; }
+      a { color: var(--violet); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .foot { margin-top: 36px; font-size: 13px; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <span class="badge">Status</span>
+      <h1>Bosphor</h1>
+      <p>
+        The live status dashboard is coming soon. Bosphor routes cross-chain
+        storage intents from EVM through LayerZero to Sui and Walrus, with proof
+        back to EVM.
+      </p>
+      <p>
+        Public API: <a href="https://api.bosphor.xyz/health">api.bosphor.xyz</a>
+        &nbsp;&middot;&nbsp; Docs: <a href="https://bosphor.xyz">bosphor.xyz</a>
+      </p>
+      <div class="foot">All systems being wired up.</div>
+    </main>
+  </body>
+</html>

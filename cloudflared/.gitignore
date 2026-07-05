@@ -1,0 +1,3 @@
+# Never commit tunnel credentials or the account certificate.
+*.json
+cert.pem
