@@ -40,9 +40,11 @@ it lives in the DB. To (re)apply after editing `theme.css`:
 
 ```bash
 docker cp kener/theme.css bosphor-kener:/tmp/theme.css
+# CAST AS TEXT is REQUIRED: readfile() returns a BLOB, which Kener serializes
+# into the page as a Uint8Array and breaks client JS (page stuck on skeletons).
 docker exec bosphor-kener sqlite3 /app/database/kener.sqlite.db \
-  "INSERT INTO site_data (key,value,data_type) VALUES ('customCSS', readfile('/tmp/theme.css'), 'string') \
-   ON CONFLICT(key) DO UPDATE SET value=readfile('/tmp/theme.css'), updated_at=CURRENT_TIMESTAMP;"
+  "INSERT INTO site_data (key,value,data_type) VALUES ('customCSS', CAST(readfile('/tmp/theme.css') AS TEXT), 'string') \
+   ON CONFLICT(key) DO UPDATE SET value=CAST(readfile('/tmp/theme.css') AS TEXT), updated_at=CURRENT_TIMESTAMP;"
 docker restart bosphor-kener
 ```
 
