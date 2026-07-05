@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 
 const ADAPTER_ABI = [
   'event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)',
+  'event IntentExecuted(bytes32 indexed intentId, bytes proof)',
   'function confirmExecution(bytes32 intentId, bytes proof) external',
   'function executed(bytes32) view returns (bool)',
   'function quote(uint32 dstEid, bytes payload, uint256 deadline, bytes options) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))',
@@ -17,6 +18,13 @@ export interface EvmIntentEvent {
   payload: string;
   nonce: bigint;
   deadline: bigint;
+}
+
+/** The two EVM-side lifecycle bookend events, with the tx hash that carried them. */
+export interface EvmLifecycleEvents {
+  submitted: { intentId: string; sender: string; txHash: string }[];
+  executed: { intentId: string; txHash: string }[];
+  newFromBlock: number;
 }
 
 @Injectable()
@@ -77,6 +85,51 @@ export class EvmService implements OnModuleInit {
     }
 
     return { events, newFromBlock: latestBlock + 1 };
+  }
+
+  /**
+   * Fetch the EVM-side lifecycle bookend events (IntentSubmitted, IntentExecuted)
+   * since `fromBlock`, each with the tx hash that emitted it. Used by the
+   * lifecycle watcher to populate the public feed; does not drive fulfillment.
+   */
+  async pollLifecycleEvents(fromBlock: number): Promise<EvmLifecycleEvents> {
+    const latestBlock = await this.provider.getBlockNumber();
+    if (fromBlock > latestBlock) {
+      return { submitted: [], executed: [], newFromBlock: fromBlock };
+    }
+
+    const [submittedLogs, executedLogs] = await Promise.all([
+      this.adapter.queryFilter(this.adapter.filters.IntentSubmitted(), fromBlock, latestBlock),
+      this.adapter.queryFilter(this.adapter.filters.IntentExecuted(), fromBlock, latestBlock),
+    ]);
+
+    const submitted = submittedLogs
+      .map((log) => {
+        const parsed = this.adapter.interface.parseLog({
+          topics: log.topics as string[],
+          data: log.data,
+        });
+        if (!parsed) return null;
+        return {
+          intentId: parsed.args.intentId as string,
+          sender: parsed.args.sender as string,
+          txHash: log.transactionHash,
+        };
+      })
+      .filter((e): e is EvmLifecycleEvents['submitted'][number] => e !== null);
+
+    const executed = executedLogs
+      .map((log) => {
+        const parsed = this.adapter.interface.parseLog({
+          topics: log.topics as string[],
+          data: log.data,
+        });
+        if (!parsed) return null;
+        return { intentId: parsed.args.intentId as string, txHash: log.transactionHash };
+      })
+      .filter((e): e is EvmLifecycleEvents['executed'][number] => e !== null);
+
+    return { submitted, executed, newFromBlock: latestBlock + 1 };
   }
 
   async confirmExecution(intentId: string, proof: string): Promise<string> {
