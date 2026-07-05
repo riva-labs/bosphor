@@ -30,6 +30,7 @@ const sidebars: SidebarsConfig = {
         'contract-interface',
         'integration-checklist',
         'dapp-tutorial',
+        'public-api',
       ],
     },
     {
