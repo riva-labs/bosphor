@@ -1,0 +1,55 @@
+/* Bosphor status theme — deep navy, monochrome + functional blue, subtle grain.
+   Overrides Kener's shadcn dark tokens. Brand: no purple, accent from
+   atmosphere + typography, functional blue (#4A8EC7) for links/focus only. */
+.dark {
+  --background: #0B1221;
+  --foreground: #E7ECF3;
+  --card: #0F1729;
+  --card-foreground: #E7ECF3;
+  --popover: #141D32;
+  --popover-foreground: #E7ECF3;
+  --primary: #E7ECF3;
+  --primary-foreground: #0B1221;
+  --secondary: #141D32;
+  --secondary-foreground: #B8C1CE;
+  --muted: #141D32;
+  --muted-foreground: #8593A5;
+  --accent: #1A2540;
+  --accent-foreground: #4A8EC7;
+  --destructive: #A84D4A;
+  --border: #1E2A44;
+  --input: #1A2540;
+  --ring: #4A8EC7;
+  --sidebar: #0F1729;
+  --sidebar-foreground: #E7ECF3;
+  --sidebar-border: #1E2A44;
+  --sidebar-accent: #1A2540;
+  --sidebar-accent-foreground: #4A8EC7;
+  --sidebar-ring: #4A8EC7;
+}
+
+/* deep navy base */
+.dark body { background-color: #0B1221; }
+
+/* subtle film grain over the page for depth (brand: grain texture) */
+.dark body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* functional blue reserved for links */
+.dark a:not([data-slot="button"]):hover { color: #4A8EC7; }
+
+/* editorial serif-italic accent (Instrument Serif is loaded via the font setting) */
+.dark h1 + p,
+.dark .kener-hero p,
+.dark [data-hero] p {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  letter-spacing: 0.2px;
+}
