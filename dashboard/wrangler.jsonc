@@ -1,0 +1,11 @@
+{
+  // Cloudflare Workers static-assets config for the status.bosphor.xyz site.
+  // The Pages/Workers build uses root directory /dashboard and runs
+  // `npx wrangler deploy`, which reads this file. Static files live in ./public.
+  "name": "bosphor-status",
+  "compatibility_date": "2026-07-05",
+  "assets": {
+    "directory": "public",
+    "not_found_handling": "single-page-application"
+  }
+}
