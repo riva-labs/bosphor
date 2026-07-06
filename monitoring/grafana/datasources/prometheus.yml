@@ -23,6 +23,11 @@ datasources:
     secureJsonData:
       password: ${POSTGRES_PASSWORD}
     jsonData:
+      # Grafana 13 splits the SQL query editor into builder and code modes.
+      # Builder mode needs a default database here or it errors with "you don't
+      # have a default database configured" before any query runs. Keep it in
+      # sync with the connection database above.
+      database: bosphor
       sslmode: disable
       postgresVersion: 1600
     editable: false
