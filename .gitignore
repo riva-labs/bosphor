@@ -32,6 +32,10 @@ website/.docusaurus/
 # confidential
 AGREEMENT*.md
 
+# internal grant / milestone reports (foundation-facing, kept local only)
+MILESTONE_*_STATUS_REPORT.md
+MILESTONE_*_STATUS_REPORT.docx
+
 # relayer runtime state
 relayer/sui-cursor.json
 relayer/sui-sent-proofs.json
@@ -55,6 +59,12 @@ canary/node_modules
 
 # local hosting overlay (contains a Grafana admin password)
 docker-compose.hosting.yml
+
+# host-specific compose override (Docker auto-merges it; local topology only)
+docker-compose.override.yml
+
+# cloudflared tunnel config (real tunnel UUID + host topology; see config.example.yml)
+cloudflared/config.yml
 
 # brand asset drop (full mascot set; website tracks the subset it uses)
 bosphor_mascot/
