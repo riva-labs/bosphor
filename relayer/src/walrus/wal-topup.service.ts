@@ -85,16 +85,24 @@ export class WalTopUpService implements OnModuleInit {
     }
     this.metrics.setWalBalance(this.toUnits(walBalance));
 
-    if (walBalance >= this.minBalanceMist) return;
-
-    let suiBalance: bigint;
+    // Publish the SUI balance on every check, not only when a swap is needed.
+    // Otherwise, in the common healthy-WAL steady state we return below before
+    // ever reading SUI, and the gauge reports a stale 0 on the dashboard.
+    let suiBalance: bigint | null = null;
     try {
       suiBalance = await this.getBalance(SUI_COIN_TYPE);
+      this.metrics.setSuiBalance(this.toUnits(suiBalance));
     } catch (err) {
-      this.logger.error(`WAL low (${this.fmt(walBalance)}) but SUI balance read failed: ${err}`);
+      this.logger.warn(`Could not read SUI balance: ${err}`);
+    }
+
+    if (walBalance >= this.minBalanceMist) return;
+
+    // WAL is low: we need a SUI reading to decide whether a swap is possible.
+    if (suiBalance === null) {
+      this.logger.error(`WAL low (${this.fmt(walBalance)}) but SUI balance read failed`);
       return;
     }
-    this.metrics.setSuiBalance(this.toUnits(suiBalance));
 
     // Never spend the gas reserve on a swap: if we cannot swap without eating
     // into it, this is not self-healable. Fail loudly so the alert pages.

@@ -64,6 +64,17 @@ describe('WalTopUpService', () => {
     expect(metrics.setWalBalance).toHaveBeenCalledWith(2);
   });
 
+  it('publishes the SUI balance even when WAL is healthy and no swap happens', async () => {
+    // Regression: previously the run() returned right after WAL was healthy,
+    // so setSuiBalance was never reached and the SUI gauge read a stale 0.
+    const { svc, metrics, signAndExecute } = build({ wal: 2n * GWEI, sui: 7n * GWEI });
+
+    await svc.ensureWal();
+
+    expect(signAndExecute).not.toHaveBeenCalled();
+    expect(metrics.setSuiBalance).toHaveBeenCalledWith(7);
+  });
+
   it('swaps SUI for WAL when below the floor and SUI is sufficient', async () => {
     const { svc, metrics, signAndExecute } = build({ wal: GWEI / 10n, sui: 10n * GWEI });
 

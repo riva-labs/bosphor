@@ -56,6 +56,12 @@ export class MetricsService {
 
   constructor() {
     collectDefaultMetrics({ register: this.registry });
+    // Initialize the top-up counter series to 0 for every result so the WAL
+    // auto top-up panel renders a flat 0 line instead of "No data" until the
+    // first top-up actually fires (which only happens when WAL drops low).
+    for (const result of ['success', 'failure', 'insufficient_sui'] as const) {
+      this.walTopUp.inc({ result }, 0);
+    }
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {
