@@ -1,0 +1,25 @@
+# Cloudflare Tunnel config for the public Bosphor relayer API.
+#
+# Copy this file to config.yml and fill in your own tunnel UUID. config.yml is
+# gitignored because it pins a specific tunnel and host port topology.
+#
+# The tunnel connects OUTBOUND to the Cloudflare edge, so no inbound port is
+# opened on the host. Secrets are NOT in this file: the tunnel credentials JSON
+# and the account cert.pem live in ~/.cloudflared on the host (gitignored,
+# mounted read-only into the cloudflared container at /etc/cloudflared).
+# See README.md.
+tunnel: <YOUR_TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<YOUR_TUNNEL_UUID>.json
+
+ingress:
+  # Public relayer API. Point at wherever the relayer's host port is mapped.
+  - hostname: api.bosphor.xyz
+    service: http://localhost:3300
+  # Public status page (Kener).
+  - hostname: status.bosphor.xyz
+    service: http://localhost:3008
+  # Operator dashboards (Grafana). Gated by Grafana's own login; put Cloudflare
+  # Access in front for a second factor on this operator data.
+  - hostname: grafana.bosphor.xyz
+    service: http://localhost:3001
+  - service: http_status:404
