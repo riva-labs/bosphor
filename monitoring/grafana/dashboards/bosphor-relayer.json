@@ -269,14 +269,15 @@
       "type": "table",
       "title": "Recent intents (lifecycle)",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
-      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "bosphor-postgres" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "options": { "showHeader": true },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "bosphor-postgres" },
           "format": "table",
+          "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT to_timestamp(created_at/1000) AS \"created\", intent_id, status, sender, blob_id, sui_object_id, jsonb_array_length(hops) AS hops FROM intent_lifecycle ORDER BY created_at DESC LIMIT 50"
         }
