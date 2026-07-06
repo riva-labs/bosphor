@@ -51,6 +51,9 @@ services:
       # Set GRAFANA_ADMIN_PASSWORD in .env for any non-local deployment. The
       # fallback exists only so a fresh clone boots for local dev.
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-bosphor}
+      # External URL Grafana is served from (grafana.bosphor.xyz via the tunnel).
+      # Needed for correct login redirects and asset URLs behind the subdomain.
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
       # Injected into the Bosphor Postgres datasource provisioning for the
       # internal intent-lifecycle table panel.
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bosphor}
