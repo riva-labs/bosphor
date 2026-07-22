@@ -1593,7 +1593,7 @@ Full registration export for evidence. Gated by a bearer token; send `Authorizat
 { "entries": [ { "email": "dev@yourteam.dev", "source": "waitlist-page", "createdAt": 1751731440000 } ], "count": 1 }
 ```
 
-A ready-to-deploy signup page lives at `/waitlist.html` (served from the docs site's static assets); it posts to this API and shows the live count.
+A branded signup page lives at [waitlist.bosphor.xyz](https://waitlist.bosphor.xyz); it posts to this API and shows the live count.
 
 ## Configuration
 
