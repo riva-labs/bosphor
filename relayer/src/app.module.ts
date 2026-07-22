@@ -8,7 +8,6 @@ import { IntentModule } from './intent/intent.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
-import { WaitlistModule } from './waitlist/waitlist.module';
 import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
@@ -18,7 +17,6 @@ import { ObservabilityModule } from './observability/observability.module';
     ObservabilityModule,
     MetricsModule,
     LifecycleModule,
-    WaitlistModule,
     EvmModule,
     SuiModule,
     WalrusModule,
