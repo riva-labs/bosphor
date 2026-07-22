@@ -1,0 +1,10 @@
+# Optional overlay to run the canary against TESTNET (free) instead of the
+# mainnet .env. Loaded last so .env.canary-testnet overrides .env per-variable.
+# Bring up only the canary, without touching the running relayer/monitoring:
+#   docker compose -f docker-compose.yml -f docker-compose.hosting.yml \
+#     -f docker-compose.canary-testnet.yml up -d --build --no-deps canary
+services:
+  canary:
+    env_file:
+      - .env
+      - .env.canary-testnet
