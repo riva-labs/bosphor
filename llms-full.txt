@@ -1560,9 +1560,44 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 
 The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
 
+## Waitlist
+
+Adoption-signal capture for early developer interest.
+
+### `POST /public/waitlist`
+
+Register an email. Idempotent: a repeat signup is accepted but not duplicated.
+
+```json
+// request body
+{ "email": "dev@yourteam.dev", "source": "waitlist-page" }
+// response 200
+{ "ok": true, "created": true }
+```
+
+`created` is `false` when the email was already registered. A malformed email returns `400`. If the store is unavailable the endpoint returns `503` rather than a fabricated success.
+
+### `GET /public/waitlist/count`
+
+Public count of unique registrations, for a "N developers waitlisted" tile:
+
+```json
+{ "count": 42 }
+```
+
+### `GET /public/waitlist/export`
+
+Full registration export for evidence. Gated by a bearer token; send `Authorization: Bearer <WAITLIST_EXPORT_TOKEN>`. Returns `403` when the token is not configured and `401` on a wrong token.
+
+```json
+{ "entries": [ { "email": "dev@yourteam.dev", "source": "waitlist-page", "createdAt": 1751731440000 } ], "count": 1 }
+```
+
+A ready-to-deploy signup page lives at `/waitlist.html` (served from the docs site's static assets); it posts to this API and shows the live count.
+
 ## Configuration
 
-The feed is backed by Postgres. Set `DATABASE_URL` in the relayer environment to enable durable storage. When it is unset, the relayer falls back to an in-memory store, which is intended for local development only and does not survive restarts.
+The feed and waitlist are backed by Postgres. Set `DATABASE_URL` in the relayer environment to enable durable storage. When it is unset, the relayer falls back to an in-memory store, which is intended for local development only and does not survive restarts. Set `WAITLIST_EXPORT_TOKEN` to enable the export endpoint.
 
 ---
 
