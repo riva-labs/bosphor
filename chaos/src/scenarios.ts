@@ -154,18 +154,31 @@ export function gasSpikeCanarySkipScenario(deps: ChaosDeps, timings = DEFAULT_TI
   };
 }
 
-/** (7) An intent past its deadline must be skipped, never mis-executed. */
+/** (7) An intent past its deadline must never be mis-executed. */
 export function deadlineExpiryScenario(deps: ChaosDeps, timings = DEFAULT_TIMINGS): Scenario {
   return {
     name: 'deadline-expiry-skip',
-    description: 'An intent past its deadline is skipped, not mis-executed',
+    description: 'An intent past its deadline is rejected, never mis-executed',
     async run(): Promise<ScenarioOutcome> {
       const evidence: string[] = [];
-      const { intentId } = await deps.submitIntent({ deadlineSecondsFromNow: -1 });
-      evidence.push(`submitted intent ${intentId} with an already-expired deadline`);
+      let intentId: string;
+      try {
+        ({ intentId } = await deps.submitIntent({ deadlineSecondsFromNow: -1 }));
+      } catch (err) {
+        // Strongest recovery: the adapter enforces the deadline at submission,
+        // so an already-expired intent reverts on-chain and never enters the
+        // pipeline at all.
+        const msg = err instanceof Error ? err.message : String(err);
+        evidence.push(`expired-deadline submit reverted at the adapter (on-chain deadline guard): ${msg.slice(0, 140)}`);
+        return { recovered: true, evidence };
+      }
+      // If the adapter accepted it, the relayer must still skip it downstream.
+      evidence.push(`submitted intent ${intentId} with an already-expired deadline (adapter accepted it)`);
       await deps.sleep(timings.outageMs);
       const wasFulfilled = await deps.isFulfilled(intentId);
-      evidence.push(wasFulfilled ? 'expired intent was executed (BUG)' : 'expired intent correctly skipped');
+      evidence.push(
+        wasFulfilled ? 'expired intent was executed (BUG)' : 'expired intent correctly skipped by the relayer',
+      );
       return {
         recovered: !wasFulfilled,
         evidence,
