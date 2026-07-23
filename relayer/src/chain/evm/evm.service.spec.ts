@@ -90,7 +90,8 @@ describe('EvmService', () => {
         nonce: 1n,
         deadline: 1000000n,
       });
-      expect(result.newFromBlock).toBe(1001);
+      // Head is 1000 but we stay 3 blocks behind: latest = 997, cursor -> 998.
+      expect(result.newFromBlock).toBe(998);
     });
 
     it('should skip logs that fail to parse', async () => {
@@ -100,7 +101,36 @@ describe('EvmService', () => {
       const result = await service.pollEvents(900);
 
       expect(result.events).toHaveLength(0);
-      expect(result.newFromBlock).toBe(1001);
+      expect(result.newFromBlock).toBe(998);
+    });
+
+    it('should query up to EVM_HEAD_LAG blocks behind head, not to head', async () => {
+      // Head is 1000; the query must stop at 997 so a lagging load-balanced
+      // node never sees a toBlock beyond the head it knows about.
+      await service.pollEvents(900);
+
+      expect(mockAdapter.queryFilter).toHaveBeenCalledWith('mock-filter', 900, 997);
+    });
+
+    it('should make no progress when head-lag window is empty', async () => {
+      // fromBlock sits inside the lag window (998..1000): latest is 997, so
+      // there is nothing to query and the cursor must not advance past head.
+      const result = await service.pollEvents(999);
+
+      expect(result).toEqual({ events: [], newFromBlock: 999 });
+      expect(mockAdapter.queryFilter).not.toHaveBeenCalled();
+    });
+
+    it('should not advance the cursor or throw when getLogs rejects beyond head', async () => {
+      // Load-balanced RPCs reject a range past a lagging node's head with
+      // -32602; that tick must make no progress rather than crash-loop.
+      mockAdapter.queryFilter.mockRejectedValue(
+        new Error('block range extends beyond current head block'),
+      );
+
+      const result = await service.pollEvents(900);
+
+      expect(result).toEqual({ events: [], newFromBlock: 900 });
     });
   });
 
