@@ -8,6 +8,11 @@ import { walrus } from '@mysten/walrus';
 import { ethers } from 'ethers';
 import { SUI_CLOCK_OBJECT } from '../../common/constants';
 
+/** Ceiling (MIST) the relayer will pay as a Walrus upload-relay tip. Mainnet
+ * tips have been observed around 2.58M MIST, above the SDK-default 1M cap that
+ * rejected them with "Tip amount exceeds maximum", so this stays well clear. */
+export const WALRUS_SEND_TIP_MAX_MIST = 20_000_000;
+
 export interface LzInfra {
   endpointV2: string;
   endpointV2Obj: string;
@@ -98,7 +103,7 @@ export class SuiService implements OnModuleInit {
       // The upload relay requires a tip payment; sendTip lets the SDK fetch
       // the relay's tip-config, pay it, and attach the tx id + nonce to the
       // upload request. Without it the relay rejects with HTTP 400.
-      uploadRelay: { host: walrusRelayUrl, sendTip: { max: 1_000_000 } },
+      uploadRelay: { host: walrusRelayUrl, sendTip: { max: WALRUS_SEND_TIP_MAX_MIST } },
     }));
 
     this.logger.log(`Sui package: ${this.packageId}`);
