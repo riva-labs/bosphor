@@ -2,6 +2,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 
+/** Blocks to stay behind head when querying logs, to tolerate load-balanced RPCs
+ * whose nodes lag the one that answered getBlockNumber. */
+const EVM_HEAD_LAG = 3;
+
 const ADAPTER_ABI = [
   'event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)',
   'event IntentExecuted(bytes32 indexed intentId, bytes proof)',
@@ -57,13 +61,24 @@ export class EvmService implements OnModuleInit {
   }
 
   async pollEvents(fromBlock: number): Promise<{ events: EvmIntentEvent[]; newFromBlock: number }> {
-    const latestBlock = await this.provider.getBlockNumber();
+    // Query a few blocks behind head: load-balanced RPCs route consecutive calls
+    // to different nodes, and a node lagging the one that returned getBlockNumber
+    // rejects with -32602 "block range extends beyond current head block".
+    const latestBlock = (await this.provider.getBlockNumber()) - EVM_HEAD_LAG;
     if (fromBlock > latestBlock) {
       return { events: [], newFromBlock: fromBlock };
     }
 
     const filter = this.adapter.filters.IntentSubmitted();
-    const logs = await this.adapter.queryFilter(filter, fromBlock, latestBlock);
+    let logs;
+    try {
+      logs = await this.adapter.queryFilter(filter, fromBlock, latestBlock);
+    } catch (err) {
+      this.logger.warn(
+        `pollEvents getLogs failed (${(err as Error).message?.slice(0, 80)}); retrying next cycle`,
+      );
+      return { events: [], newFromBlock: fromBlock };
+    }
     const events: EvmIntentEvent[] = [];
 
     for (const log of logs) {
@@ -93,15 +108,23 @@ export class EvmService implements OnModuleInit {
    * lifecycle watcher to populate the public feed; does not drive fulfillment.
    */
   async pollLifecycleEvents(fromBlock: number): Promise<EvmLifecycleEvents> {
-    const latestBlock = await this.provider.getBlockNumber();
+    const latestBlock = (await this.provider.getBlockNumber()) - EVM_HEAD_LAG;
     if (fromBlock > latestBlock) {
       return { submitted: [], executed: [], newFromBlock: fromBlock };
     }
 
-    const [submittedLogs, executedLogs] = await Promise.all([
-      this.adapter.queryFilter(this.adapter.filters.IntentSubmitted(), fromBlock, latestBlock),
-      this.adapter.queryFilter(this.adapter.filters.IntentExecuted(), fromBlock, latestBlock),
-    ]);
+    let submittedLogs, executedLogs;
+    try {
+      [submittedLogs, executedLogs] = await Promise.all([
+        this.adapter.queryFilter(this.adapter.filters.IntentSubmitted(), fromBlock, latestBlock),
+        this.adapter.queryFilter(this.adapter.filters.IntentExecuted(), fromBlock, latestBlock),
+      ]);
+    } catch (err) {
+      this.logger.warn(
+        `pollLifecycleEvents getLogs failed (${(err as Error).message?.slice(0, 80)}); retrying next cycle`,
+      );
+      return { submitted: [], executed: [], newFromBlock: fromBlock };
+    }
 
     const submitted = submittedLogs
       .map((log) => {

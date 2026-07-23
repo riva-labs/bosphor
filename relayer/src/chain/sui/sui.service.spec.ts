@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { SuiService } from './sui.service';
+import { SuiService, WALRUS_SEND_TIP_MAX_MIST } from './sui.service';
 
 // Raw 32-byte Ed25519 secret key in base64 (test only)
 const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
@@ -99,5 +99,13 @@ describe('SuiService walrus plugin', () => {
     const client1 = service.getWalrusClient();
     const client2 = service.getWalrusClient();
     expect(client1).toBe(client2);
+  });
+
+  it('should permit mainnet-scale upload-relay tips above the old 1M cap', () => {
+    // Mainnet upload-relay tips have been observed at ~2.58M MIST, which the
+    // old hardcoded 1M cap rejected with "Tip amount exceeds maximum". The
+    // send-tip ceiling must stay well clear of real mainnet tips.
+    const OBSERVED_MAINNET_TIP_MIST = 2_580_000;
+    expect(WALRUS_SEND_TIP_MAX_MIST).toBeGreaterThan(OBSERVED_MAINNET_TIP_MIST);
   });
 });
