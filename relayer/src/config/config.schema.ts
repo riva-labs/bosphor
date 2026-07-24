@@ -9,6 +9,9 @@ export const configValidationSchema = Joi.object({
   EVM_DST_EID: Joi.number().integer().default(40161),
 
   // Sui
+  // Selects network-specific constants (e.g. the WAL coin type). Defaults to
+  // testnet; set SUI_NETWORK=mainnet on the mainnet deployment.
+  SUI_NETWORK: Joi.string().valid('mainnet', 'testnet').default('testnet'),
   SUI_GRPC_URL: Joi.string().uri().default('https://sui-testnet.mystenlabs.com'),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
