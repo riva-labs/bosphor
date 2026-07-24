@@ -13,9 +13,28 @@ export const MAX_BACKOFF_MS = 30_000;
 /** EVM event polling interval (ms). */
 export const POLL_INTERVAL_MS = 5_000;
 
-/** Walrus testnet WAL coin type (the token that pays for storage). */
-export const WAL_COIN_TYPE =
-  '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL';
+/** WAL coin type (the token that pays for storage) per Sui network. */
+export const WAL_COIN_TYPE_BY_NETWORK: Record<'mainnet' | 'testnet', string> = {
+  testnet: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',
+  mainnet: '0x356a26eb9e012a68958082340d4c4116e7f55615cf27affcff209cf0ae544f59::wal::WAL',
+};
+
+/**
+ * Resolve the WAL coin type for a Sui network, defaulting to testnet. Reading
+ * the wrong network's WAL type makes `suix_getBalance` return 0 (the coin does
+ * not exist on the other network), which silently zeroes the balance gauge.
+ */
+export function walCoinType(network?: string): string {
+  return network === 'mainnet'
+    ? WAL_COIN_TYPE_BY_NETWORK.mainnet
+    : WAL_COIN_TYPE_BY_NETWORK.testnet;
+}
+
+/**
+ * Testnet WAL coin type. Kept for the testnet-only SUI->WAL exchange path.
+ * For balance reads use {@link walCoinType} so mainnet resolves correctly.
+ */
+export const WAL_COIN_TYPE = WAL_COIN_TYPE_BY_NETWORK.testnet;
 
 /** Native SUI coin type. */
 export const SUI_COIN_TYPE = '0x2::sui::SUI';
