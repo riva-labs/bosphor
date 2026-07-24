@@ -2,23 +2,27 @@ import { ConfigService } from '@nestjs/config';
 import { WalTopUpService } from './wal-topup.service';
 import { SuiService } from '../chain/sui/sui.service';
 import { MetricsService } from '../metrics/metrics.service';
-import { WAL_COIN_TYPE, SUI_COIN_TYPE } from '../common/constants';
+import { WAL_COIN_TYPE, WAL_COIN_TYPE_BY_NETWORK, SUI_COIN_TYPE } from '../common/constants';
 
 const GWEI = 1_000_000_000n; // 1 whole unit (SUI/WAL have 9 decimals)
 
-function makeConfig() {
-  const defaults: Record<string, number> = {
+function makeConfig(overrides: Record<string, unknown> = {}) {
+  const defaults: Record<string, unknown> = {
     WAL_MIN_BALANCE_MIST: 500_000_000, // 0.5 WAL
     WAL_TOPUP_SUI_MIST: 1_000_000_000, // 1 SUI
     WAL_TOPUP_SUI_RESERVE_MIST: 1_000_000_000, // 1 SUI
+    ...overrides,
   };
-  return { get: (key: string, d?: number) => defaults[key] ?? d } as unknown as ConfigService;
+  return { get: (key: string, d?: unknown) => defaults[key] ?? d } as unknown as ConfigService;
 }
 
-function makeSui(state: { wal: bigint; sui: bigint }) {
+// `walType` is the coin type the service is expected to read WAL under; the
+// mock returns the WAL balance for that type and the SUI balance for anything
+// else, so a mismatch (wrong network) surfaces as a zero WAL read.
+function makeSui(state: { wal: bigint; sui: bigint }, walType: string = WAL_COIN_TYPE) {
   const getBalance = jest.fn(({ coinType }: { coinType: string }) =>
     Promise.resolve({
-      balance: { balance: String(coinType === WAL_COIN_TYPE ? state.wal : state.sui) },
+      balance: { balance: String(coinType === walType ? state.wal : state.sui) },
     }),
   );
   // A successful swap adds 1 WAL to the balance (testnet exchange is ~1:1).
@@ -45,12 +49,14 @@ function makeMetrics() {
   >;
 }
 
-function build(state: { wal: bigint; sui: bigint }) {
-  const { sui, signAndExecute } = makeSui(state);
+function build(state: { wal: bigint; sui: bigint }, network?: string) {
+  const walType = network === 'mainnet' ? WAL_COIN_TYPE_BY_NETWORK.mainnet : WAL_COIN_TYPE;
+  const { sui, signAndExecute, getBalance } = makeSui(state, walType);
   const metrics = makeMetrics();
-  const svc = new WalTopUpService(sui, makeConfig(), metrics as unknown as MetricsService);
+  const config = makeConfig(network ? { SUI_NETWORK: network } : {});
+  const svc = new WalTopUpService(sui, config, metrics as unknown as MetricsService);
   svc.onModuleInit();
-  return { svc, metrics, signAndExecute };
+  return { svc, metrics, signAndExecute, getBalance };
 }
 
 describe('WalTopUpService', () => {
@@ -94,6 +100,19 @@ describe('WalTopUpService', () => {
 
     expect(signAndExecute).not.toHaveBeenCalled();
     expect(metrics.recordWalTopUp).toHaveBeenCalledWith('insufficient_sui');
+  });
+
+  it('reads the WAL balance under the mainnet coin type when SUI_NETWORK=mainnet', async () => {
+    // Regression: WAL_COIN_TYPE was hardcoded to testnet, so on mainnet the
+    // balance query hit a non-existent coin and the gauge read 0.
+    const { svc, metrics, getBalance } = build({ wal: 24n * GWEI, sui: 5n * GWEI }, 'mainnet');
+
+    await svc.ensureWal();
+
+    expect(getBalance).toHaveBeenCalledWith(
+      expect.objectContaining({ coinType: WAL_COIN_TYPE_BY_NETWORK.mainnet }),
+    );
+    expect(metrics.setWalBalance).toHaveBeenCalledWith(24);
   });
 
   it('serializes concurrent calls into a single swap', async () => {

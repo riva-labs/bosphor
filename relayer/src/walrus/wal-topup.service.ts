@@ -5,7 +5,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { SuiService } from '../chain/sui/sui.service';
 import { MetricsService } from '../metrics/metrics.service';
 import {
-  WAL_COIN_TYPE,
+  walCoinType,
   SUI_COIN_TYPE,
   WAL_EXCHANGE_PACKAGE,
   WAL_EXCHANGE_OBJECTS,
@@ -31,6 +31,7 @@ export class WalTopUpService implements OnModuleInit {
   private minBalanceMist!: bigint;
   private topUpSuiMist!: bigint;
   private suiReserveMist!: bigint;
+  private walCoinType!: string;
   // Serialize top-ups so N concurrent intents never launch two swaps at once.
   private inFlight: Promise<void> | null = null;
 
@@ -46,6 +47,7 @@ export class WalTopUpService implements OnModuleInit {
     this.suiReserveMist = BigInt(
       this.config.get<number>('WAL_TOPUP_SUI_RESERVE_MIST', 1_000_000_000),
     );
+    this.walCoinType = walCoinType(this.config.get<string>('SUI_NETWORK'));
     this.logger.log(
       `WAL auto top-up: floor ${this.fmt(this.minBalanceMist)} WAL, ` +
         `swap ${this.fmt(this.topUpSuiMist)} SUI, keep ${this.fmt(this.suiReserveMist)} SUI reserve`,
@@ -78,7 +80,7 @@ export class WalTopUpService implements OnModuleInit {
   private async run(): Promise<void> {
     let walBalance: bigint;
     try {
-      walBalance = await this.getBalance(WAL_COIN_TYPE);
+      walBalance = await this.getBalance(this.walCoinType);
     } catch (err) {
       this.logger.warn(`Could not read WAL balance, skipping top-up check: ${err}`);
       return;
@@ -122,7 +124,7 @@ export class WalTopUpService implements OnModuleInit {
     try {
       const digest = await this.swapSuiForWal(this.topUpSuiMist);
       await this.sui.getClient().core.waitForTransaction({ digest });
-      const newBalance = await this.getBalance(WAL_COIN_TYPE);
+      const newBalance = await this.getBalance(this.walCoinType);
       this.metrics.setWalBalance(this.toUnits(newBalance));
       this.metrics.recordWalTopUp('success');
       this.logger.log(`WAL top-up complete: ${this.fmt(newBalance)} WAL (tx ${digest})`);
