@@ -30,7 +30,7 @@ jobs:
 
       - name: Cache Sui CLI
         id: cache-sui
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /usr/local/bin/sui
           key: sui-cli-${{ runner.os }}-testnet-v1.72.2
