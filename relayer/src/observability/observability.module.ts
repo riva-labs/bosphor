@@ -19,7 +19,7 @@ import { ErrorReporter, NoopErrorReporter, SentryErrorReporter } from './error-r
         const dsn = config.get<string>('SENTRY_DSN');
         const logger = new Logger('ObservabilityModule');
         if (!dsn) {
-          logger.warn('SENTRY_DSN not set — runtime error reporting disabled');
+          logger.warn('SENTRY_DSN not set - runtime error reporting disabled');
           return new NoopErrorReporter();
         }
         Sentry.init({

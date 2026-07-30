@@ -1,4 +1,4 @@
-/* Bosphor status theme — full black (dark-only).
+/* Bosphor status theme - full black (dark-only).
    Forced on BOTH :root and .dark plus html/body so no area falls back to a
    default before the theme class applies. Status colors (green/red/amber) and
    functional blue (#4A8EC7, links/focus only) come from the color settings. */
@@ -31,7 +31,7 @@
   color-scheme: dark;
 }
 
-/* one uniform black base — no gaps at the top/header */
+/* one uniform black base - no gaps at the top/header */
 html,
 body {
   background-color: #000000 !important;

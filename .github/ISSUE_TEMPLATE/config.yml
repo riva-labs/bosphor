@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and Discussions
+    url: https://github.com/riva-labs/bosphor/discussions
+    about: Ask questions, share ideas, and discuss integration here.
+  - name: Report a security vulnerability
+    url: https://github.com/riva-labs/bosphor/security/policy
+    about: Please report security issues privately per our security policy, not as a public issue.
+  - name: Documentation
+    url: https://docs.bosphor.xyz
+    about: Read the integration and operator docs.

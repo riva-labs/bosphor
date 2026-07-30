@@ -1,5 +1,5 @@
 # =============================================================================
-# Kener — public status page for status.bosphor.xyz (replaces Uptime Kuma)
+# Kener - public status page for status.bosphor.xyz (replaces Uptime Kuma)
 #
 # Prebuilt image, no source build. Two services: Redis (internal only) + Kener.
 # SQLite is the default DB, persisted in the named volume `kener_db`.

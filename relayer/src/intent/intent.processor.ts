@@ -106,7 +106,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
 
     if (Date.now() > Number(deadlineMs)) {
-      this.logger.log(`[${event.intentId}] Skipping — deadline expired (via Sui LZ)`);
+      this.logger.log(`[${event.intentId}] Skipping - deadline expired (via Sui LZ)`);
       this.processedIntents.set(event.intentId, Date.now());
       return;
     }
