@@ -13,7 +13,12 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../../.env") });
+// Env file is parameterizable so testnet deploys never read or overwrite the
+// live root .env (mainnet config). Defaults to root .env.
+const ENV_PATH = process.env.BOSPHOR_ENV_FILE
+  ? resolve(process.env.BOSPHOR_ENV_FILE)
+  : resolve(import.meta.dirname, "../../.env");
+config({ path: ENV_PATH });
 
 import { ethers } from "ethers";
 
@@ -35,7 +40,7 @@ const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
 
 // --- Helpers ---
 function updateEnv(updates: Record<string, string>) {
-  const envPath = resolve(import.meta.dirname, "../../.env");
+  const envPath = ENV_PATH;
   let content = readFileSync(envPath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");

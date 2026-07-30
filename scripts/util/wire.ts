@@ -13,7 +13,11 @@
 import { config } from "dotenv";
 import { resolve } from "path";
 import { readFileSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../../.env") });
+config({
+  path: process.env.BOSPHOR_ENV_FILE
+    ? resolve(process.env.BOSPHOR_ENV_FILE)
+    : resolve(import.meta.dirname, "../../.env"),
+});
 
 import { ethers } from "ethers";
 import { Transaction } from "@mysten/sui/transactions";
@@ -67,14 +71,22 @@ function addressToBytes32(addr: string): number[] {
 }
 
 async function suiExec(tx: Transaction, label: string) {
-  const result = await signAndExecute(suiClient, tx, suiKeypair);
-  const { digest, effects } = result.transaction;
-  if (!effects?.status?.success) {
-    console.error(`[FAIL] ${label}:`, effects?.status);
+  const result: any = await signAndExecute(suiClient, tx, suiKeypair);
+  const digest = result.digest;
+  const ok = result.effects?.status?.success ?? result.status?.success;
+  if (!ok) {
+    console.error(`[FAIL] ${label}:`, result.effects?.status ?? result.status);
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${digest}`);
-  await suiClient.core.waitForTransaction({ digest });
+  try {
+    await Promise.race([
+      suiClient.core.waitForTransaction({ digest }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("wait timeout")), 15000)),
+    ]);
+  } catch {
+    /* best effort */
+  }
 }
 
 async function main() {

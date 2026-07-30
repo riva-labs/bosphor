@@ -14,7 +14,12 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../../.env") });
+// Env file is parameterizable so testnet deploys never read or overwrite the
+// live root .env (which holds mainnet config). Defaults to root .env.
+const ENV_PATH = process.env.BOSPHOR_ENV_FILE
+  ? resolve(process.env.BOSPHOR_ENV_FILE)
+  : resolve(import.meta.dirname, "../../.env");
+config({ path: ENV_PATH });
 
 import { Transaction } from "@mysten/sui/transactions";
 import { bcs } from "@mysten/sui/bcs";
@@ -47,7 +52,7 @@ const deployerAddress = keypair.toSuiAddress();
 
 // --- Helpers ---
 function updateEnv(updates: Record<string, string>) {
-  const envPath = resolve(import.meta.dirname, "../../.env");
+  const envPath = ENV_PATH;
   let content = readFileSync(envPath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");
@@ -69,17 +74,106 @@ function addressToBytes32(addr: string): number[] {
   return bytes;
 }
 
-async function exec(tx: Transaction, label: string) {
-  const result = await signAndExecute(suiClient, tx, keypair);
-  const { digest, effects } = result.transaction;
-  if (!effects?.status?.success) {
-    console.error(`[FAIL] ${label}:`, effects?.status);
+async function exec(tx: Transaction, label: string): Promise<any> {
+  const result: any = await signAndExecute(suiClient, tx, keypair);
+  const digest = result.digest;
+  const ok = result.effects?.status?.success ?? result.status?.success;
+  if (!ok) {
+    console.error(`[FAIL] ${label}:`, result.effects?.status ?? result.status);
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${digest}`);
   // Wait for transaction finality to avoid object version conflicts
-  await suiClient.core.waitForTransaction({ digest });
+  await waitTx(digest);
   return result;
+}
+
+// Testnet gRPC intermittently aborts the wait with a timeout even though the
+// transaction is already on-chain. Retry before giving up so a slow indexer
+// does not abort a multi-step deploy.
+async function waitTx(digest: string) {
+  // Prefer waiting on the SAME gRPC node used to build transactions, so the
+  // next tx's gas/object versions resolve consistently (read-after-write). The
+  // v2 gRPC waitForTransaction works; fall back to JSON-RPC polling if it hangs.
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      return await Promise.race([
+        suiClient.core.waitForTransaction({ digest }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("grpc wait timeout")), 15000),
+        ),
+      ]);
+    } catch {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  const rpcs = [
+    process.env.SUI_JSONRPC_URL,
+    "https://sui-testnet-rpc.publicnode.com",
+    "https://rpc-testnet.suiscan.xyz",
+  ].filter(Boolean) as string[];
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sui_getTransactionBlock",
+            params: [digest, { showEffects: true }],
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const j: any = await res.json();
+        if (j?.result?.digest === digest) return j.result;
+      } catch {
+        /* try next rpc / next attempt */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error(`waitTx: ${digest} not indexed after polling`);
+}
+
+// Look up a created object of a given type from a tx's objectChanges via
+// JSON-RPC (the gRPC response shape for created objects is version-dependent).
+async function findCreatedByType(digest: string, typeSubstr: string): Promise<string> {
+  const rpcs = [
+    process.env.SUI_JSONRPC_URL,
+    "https://sui-testnet-rpc.publicnode.com",
+    "https://rpc-testnet.suiscan.xyz",
+  ].filter(Boolean) as string[];
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sui_getTransactionBlock",
+            params: [digest, { showObjectChanges: true }],
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const j: any = await res.json();
+        const changes = j?.result?.objectChanges;
+        if (Array.isArray(changes)) {
+          const hit = changes.find(
+            (c: any) => c.type === "created" && (c.objectType || "").includes(typeSubstr),
+          );
+          return hit?.objectId ?? "";
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return "";
 }
 
 // BCS encode OAppUlnConfig
@@ -96,11 +190,17 @@ function encodeOAppUlnConfig(confirmations: bigint, requiredDvns: string[]): Uin
     use_default_optional_dvns: bcs.bool(),
     uln_config: UlnConfig,
   });
+  // Use LayerZero's endpoint-default DVN set instead of pinning a specific DVN.
+  // The default resolves to LZ Labs' active DVN, which self-heals across their
+  // DVN rotations/outages without us hardcoding a (possibly deprecated) address.
+  const useDefaultDvns = (process.env.LZ_USE_DEFAULT_DVNS ?? "false") === "true";
   return OAppUlnConfig.serialize({
-    use_default_confirmations: false,
-    use_default_required_dvns: false,
+    use_default_confirmations: useDefaultDvns,
+    use_default_required_dvns: useDefaultDvns,
     use_default_optional_dvns: true,
-    uln_config: { confirmations, required_dvns: requiredDvns, optional_dvns: [], optional_dvn_threshold: 0 },
+    uln_config: useDefaultDvns
+      ? { confirmations: 0n, required_dvns: [], optional_dvns: [], optional_dvn_threshold: 0 }
+      : { confirmations, required_dvns: requiredDvns, optional_dvns: [], optional_dvn_threshold: 0 },
   }).toBytes();
 }
 
@@ -153,7 +253,7 @@ async function publish(): Promise<PublishResult> {
   }
   console.log(`[OK] Published: ${result.digest}`);
   // Wait for package to be indexed
-  await suiClient.core.waitForTransaction({ digest: result.digest });
+  await waitTx(result.digest);
 
   const changes: any[] = result.objectChanges || [];
   let packageId = "";
@@ -204,20 +304,30 @@ async function registerOApp(packageId: string, configId: string, oappId: string)
     arguments: [tx.object(configId), tx.object(oappId), tx.object(LZ_ENDPOINT_OBJ), info],
   });
 
-  const result = await exec(tx, "register_oapp");
+  const result: any = await exec(tx, "register_oapp");
 
-  // Find MessagingChannel from created objects via gRPC response
+  // Find the created MessagingChannel. v2 gRPC core exposes effects.changedObjects
+  // plus an objectTypes map; fall back to an objectChanges array shape.
   let messagingChannelId = "";
-  const txResp = result.transaction;
-  const objectTypes = await txResp.objectTypes;
-  const createdObjects = (txResp.effects?.changedObjects ?? []).filter(
-    (c: any) => c.inputState === "DoesNotExist",
-  );
-  for (const obj of createdObjects) {
-    const objType = objectTypes[obj.id] || "";
-    if (objType.includes("::messaging_channel::MessagingChannel")) {
-      messagingChannelId = obj.id;
+  const objectTypes: Record<string, string> = result.objectTypes ?? {};
+  for (const obj of result.effects?.changedObjects ?? []) {
+    const t = objectTypes[obj.id] || obj.objectType || "";
+    if (t.includes("::messaging_channel::MessagingChannel")) messagingChannelId = obj.id;
+  }
+  if (!messagingChannelId) {
+    for (const c of result.objectChanges ?? []) {
+      if ((c.objectType || "").includes("::messaging_channel::MessagingChannel")) {
+        messagingChannelId = c.objectId;
+      }
     }
+  }
+  if (!messagingChannelId) {
+    // gRPC response shapes vary; fall back to a JSON-RPC lookup of the tx's
+    // created objects.
+    messagingChannelId = await findCreatedByType(
+      result.digest,
+      "::messaging_channel::MessagingChannel",
+    );
   }
 
   if (!messagingChannelId) {

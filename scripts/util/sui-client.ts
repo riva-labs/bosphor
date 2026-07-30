@@ -39,12 +39,33 @@ export async function signAndExecute(
   tx: Transaction,
   signer: Ed25519Keypair,
 ) {
-  const bytes = await tx.build({ client });
-  const { signature } = await signer.signTransaction(bytes);
-  return client.core.executeTransaction({
-    transaction: bytes,
-    signatures: [signature],
-  });
+  // Mirrors the relayer's proven @mysten/sui v2 execution path. Requires the
+  // v2 SuiGrpcClient (v1's gRPC build cannot resolve object versions).
+  tx.setSender(signer.toSuiAddress());
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 8; attempt++) {
+    try {
+      // Rebuild each attempt so the gas coin / shared object versions are
+      // re-resolved after the prior tx (cross-node read-after-write lag).
+      const bytes = await tx.build({ client });
+      const { signature } = await signer.signTransaction(bytes);
+      const result: any = await client.core.executeTransaction({
+        transaction: bytes,
+        signatures: [signature],
+      });
+      if (result.$kind === "FailedTransaction") {
+        throw new Error(`Sui tx failed: ${JSON.stringify(result.FailedTransaction.status)}`);
+      }
+      return result.Transaction;
+    } catch (err) {
+      lastErr = err;
+      const msg = decodeURIComponent(String((err as any)?.message ?? err));
+      const retriable = /unavailable for consumption|needs to be rebuilt|is not available|reserved for another|version/i.test(msg);
+      if (attempt === 8 || !retriable) throw err;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  throw lastErr;
 }
 
 /**
