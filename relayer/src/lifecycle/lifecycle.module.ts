@@ -24,7 +24,7 @@ import { PublicController } from './public.controller';
           return new PgIntentLifecycleStore(new Pool({ connectionString: url }));
         }
         new Logger('LifecycleModule').warn(
-          'DATABASE_URL not set — using in-memory intent store (not durable)',
+          'DATABASE_URL not set - using in-memory intent store (not durable)',
         );
         return new InMemoryIntentLifecycleStore();
       },

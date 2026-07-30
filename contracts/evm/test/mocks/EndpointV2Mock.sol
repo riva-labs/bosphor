@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { MessagingParams, MessagingFee, MessagingReceipt, Origin } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
 
-/// @dev Minimal mock for LayerZero EndpointV2 — enough to test OApp send/receive flows.
+/// @dev Minimal mock for LayerZero EndpointV2 - enough to test OApp send/receive flows.
 contract EndpointV2Mock {
     uint256 public constant NATIVE_FEE = 0.001 ether;
     uint64 public nonce;

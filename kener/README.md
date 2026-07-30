@@ -1,4 +1,4 @@
-# Kener — public status page for status.bosphor.xyz
+# Kener - public status page for status.bosphor.xyz
 
 Self-hosted [Kener](https://github.com/rajnandan1/kener) v4, replacing Uptime
 Kuma. Prebuilt image, no source build. Redis (internal) + Kener with SQLite in a
@@ -7,9 +7,9 @@ to a host port, no inbound port opened on the VPS.
 
 ## Files
 
-- `docker-compose.yml` — Redis + Kener. Kener on host port 3008.
-- `.env.example` — `KENER_SECRET_KEY`, `ORIGIN`. Real values in gitignored `.env`.
-- `theme.css` — Bosphor custom CSS (deep navy, grain, serif accent). Source of
+- `docker-compose.yml` - Redis + Kener. Kener on host port 3008.
+- `.env.example` - `KENER_SECRET_KEY`, `ORIGIN`. Real values in gitignored `.env`.
+- `theme.css` - Bosphor custom CSS (deep navy, grain, serif accent). Source of
   truth for the theme; applied into the DB (see below).
 
 ## Deploy
@@ -59,16 +59,16 @@ add a `pages_monitors` link (page_id=1), and `docker restart bosphor-kener`.
 Current set (two categories):
 
 Bosphor
-- Bosphor — `https://api.bosphor.xyz/health` (relayer)
-- Intent Lifecycle API — `https://api.bosphor.xyz/public/intents`
-- Bosphor Website — `https://bosphor.xyz`
+- Bosphor - `https://api.bosphor.xyz/health` (relayer)
+- Intent Lifecycle API - `https://api.bosphor.xyz/public/intents`
+- Bosphor Website - `https://bosphor.xyz`
 
 Dependencies (upstream chains/infra Bosphor relies on; public health endpoints,
 not our keyed providers)
-- Ethereum Sepolia RPC — `https://ethereum-sepolia-rpc.publicnode.com` (POST `eth_blockNumber`)
-- Sui Testnet RPC — `https://fullnode.testnet.sui.io/health`
-- Walrus Testnet — `https://aggregator.walrus-testnet.walrus.space/v1/api`
-- LayerZero Scan API — `https://scan-testnet.layerzero-api.com/v1/swagger`
+- Ethereum Sepolia RPC - `https://ethereum-sepolia-rpc.publicnode.com` (POST `eth_blockNumber`)
+- Sui Testnet RPC - `https://fullnode.testnet.sui.io/health`
+- Walrus Testnet - `https://aggregator.walrus-testnet.walrus.space/v1/api`
+- LayerZero Scan API - `https://scan-testnet.layerzero-api.com/v1/swagger`
 
 ## Cutover from Uptime Kuma (after the page looks right)
 

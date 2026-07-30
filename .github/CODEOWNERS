@@ -1,0 +1,15 @@
+# Code owners for Bosphor. Owners are auto-requested for review on matching paths.
+# See https://docs.github.com/articles/about-code-owners
+
+# Default owner for everything in the repo
+*                       @AliErcanOzgokce
+
+# Smart contracts and cross-chain messaging (security-critical)
+/contracts/evm/         @AliErcanOzgokce
+/sui/                   @AliErcanOzgokce
+
+# Relayer service (holds keys, drives execution)
+/relayer/               @AliErcanOzgokce
+
+# CI, release automation, and repo governance
+/.github/               @AliErcanOzgokce

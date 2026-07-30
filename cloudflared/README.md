@@ -1,4 +1,4 @@
-# Cloudflare Tunnel — public relayer API
+# Cloudflare Tunnel - public relayer API
 
 Exposes the Bosphor relayer's read-only public API as `https://api.bosphor.xyz`
 without opening any inbound port on the VPS. `cloudflared` connects outbound to
@@ -11,10 +11,10 @@ service are untouched. Grafana remains the operator layer, unchanged.
 
 ## Files
 
-- `config.yml` — tunnel id + ingress rules (committed; no secrets).
+- `config.yml` - tunnel id + ingress rules (committed; no secrets).
 - Secrets live only in `~/.cloudflared` on the host and are gitignored:
-  - `cert.pem` — Cloudflare account certificate (from `tunnel login`).
-  - `<tunnel-id>.json` — tunnel credentials (from `tunnel create`).
+  - `cert.pem` - Cloudflare account certificate (from `tunnel login`).
+  - `<tunnel-id>.json` - tunnel credentials (from `tunnel create`).
 
 ## One-time setup
 

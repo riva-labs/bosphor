@@ -17,7 +17,7 @@ export function renderMarkdown(report: RecoveryReport): string {
 
   for (const r of report.results) {
     const badge = r.status === 'pass' ? '✅ PASS' : '❌ FAIL';
-    lines.push(`## ${badge} — ${r.name}`);
+    lines.push(`## ${badge} - ${r.name}`);
     lines.push('');
     lines.push(r.description);
     lines.push('');

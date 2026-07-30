@@ -44,13 +44,13 @@ fails loudly rather than pretending the fault was injected:
 
 | Env var | Purpose | Args |
 |---------|---------|------|
-| `CHAOS_STOP_RELAYER_CMD` | Stop the relayer process | — |
-| `CHAOS_START_RELAYER_CMD` | Start the relayer process | — |
-| `CHAOS_SUI_RPC_DOWN_CMD` / `CHAOS_SUI_RPC_UP_CMD` | Block / restore Sui RPC | — |
-| `CHAOS_EVM_RPC_DOWN_CMD` / `CHAOS_EVM_RPC_UP_CMD` | Block / restore EVM RPC | — |
-| `CHAOS_WAL_BALANCE_CMD` | Print the relayer WAL balance in MIST | — |
+| `CHAOS_STOP_RELAYER_CMD` | Stop the relayer process | - |
+| `CHAOS_START_RELAYER_CMD` | Start the relayer process | - |
+| `CHAOS_SUI_RPC_DOWN_CMD` / `CHAOS_SUI_RPC_UP_CMD` | Block / restore Sui RPC | - |
+| `CHAOS_EVM_RPC_DOWN_CMD` / `CHAOS_EVM_RPC_UP_CMD` | Block / restore EVM RPC | - |
+| `CHAOS_WAL_BALANCE_CMD` | Print the relayer WAL balance in MIST | - |
 | `CHAOS_DRAIN_WAL_CMD` | Drain WAL to a target | `<mist>` |
-| `CHAOS_WALRUS_ROLLOVER_CMD` | Force a Walrus epoch rollover | — |
+| `CHAOS_WALRUS_ROLLOVER_CMD` | Force a Walrus epoch rollover | - |
 | `CHAOS_SET_GAS_CMD` | Set the observed EVM gas price | `<gwei>` |
 
 Example, using systemd for the relayer:

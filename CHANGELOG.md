@@ -1,26 +1,26 @@
 # Changelog
 
-## [v0.1.0] — 2026-03-05
+## [v0.1.0] - 2026-03-05
 
 ### Summary
 First working proof-of-concept of Bosphor cross-chain storage intent routing.
 Full E2E flow verified on testnet: EVM → LayerZero → Sui → Walrus → EVM.
 
 ### Added
-- **BosphorAdapter.sol** — EVM OApp contract (LayerZero v2)
-  - `submitIntent` — sends storage intent via LayerZero
-  - `_lzReceive` — accepts proof from Sui
-  - `confirmExecution` — relayer hybrid path
-  - `quote()` — LZ fee estimation
-- **lz_receiver.move** — Sui LZ OApp receiver
-  - `lz_receive` — processes incoming LZ messages
+- **BosphorAdapter.sol** - EVM OApp contract (LayerZero v2)
+  - `submitIntent` - sends storage intent via LayerZero
+  - `_lzReceive` - accepts proof from Sui
+  - `confirmExecution` - relayer hybrid path
+  - `quote()` - LZ fee estimation
+- **lz_receiver.move** - Sui LZ OApp receiver
+  - `lz_receive` - processes incoming LZ messages
   - `IntentReceived` event for relayer
-  - `register_oapp` — OAppInfoV1-compatible endpoint registration
-- **walrus_executor.move** — Sui Walrus executor
-  - `execute_store` — stores blob on Walrus
-- **ptb_builder.move** — PTB builder with OAppInfoV1 format
-- **Relayer** (Node.js/TypeScript) — event-driven, Docker-ready
-- **Deployment scripts** — automated deploy + wire + e2e test
+  - `register_oapp` - OAppInfoV1-compatible endpoint registration
+- **walrus_executor.move** - Sui Walrus executor
+  - `execute_store` - stores blob on Walrus
+- **ptb_builder.move** - PTB builder with OAppInfoV1 format
+- **Relayer** (Node.js/TypeScript) - event-driven, Docker-ready
+- **Deployment scripts** - automated deploy + wire + e2e test
 
 ### Key Fix
 LZ executor requires `oapp_info_v1` format for OApp registration.

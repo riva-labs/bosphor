@@ -71,3 +71,16 @@ jobs:
       - name: Test
         run: npm test
         working-directory: relayer
+
+  brand-check:
+    name: Brand Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No em dashes in tracked files
+        run: |
+          if git grep -lP "\x{2014}" -- . ; then
+            echo "::error::Em dash (U+2014) found in tracked files. Use a hyphen, comma, or period per the brand rule."
+            exit 1
+          fi
