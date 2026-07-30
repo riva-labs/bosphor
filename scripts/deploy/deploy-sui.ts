@@ -14,7 +14,12 @@ import { config } from "dotenv";
 import { resolve } from "path";
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync, unlinkSync, existsSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../../.env") });
+// Env file is parameterizable so testnet deploys never read or overwrite the
+// live root .env (which holds mainnet config). Defaults to root .env.
+const ENV_PATH = process.env.BOSPHOR_ENV_FILE
+  ? resolve(process.env.BOSPHOR_ENV_FILE)
+  : resolve(import.meta.dirname, "../../.env");
+config({ path: ENV_PATH });
 
 import { Transaction } from "@mysten/sui/transactions";
 import { bcs } from "@mysten/sui/bcs";
@@ -47,7 +52,7 @@ const deployerAddress = keypair.toSuiAddress();
 
 // --- Helpers ---
 function updateEnv(updates: Record<string, string>) {
-  const envPath = resolve(import.meta.dirname, "../../.env");
+  const envPath = ENV_PATH;
   let content = readFileSync(envPath, "utf-8");
   for (const [key, value] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, "m");
@@ -96,11 +101,17 @@ function encodeOAppUlnConfig(confirmations: bigint, requiredDvns: string[]): Uin
     use_default_optional_dvns: bcs.bool(),
     uln_config: UlnConfig,
   });
+  // Use LayerZero's endpoint-default DVN set instead of pinning a specific DVN.
+  // The default resolves to LZ Labs' active DVN, which self-heals across their
+  // DVN rotations/outages without us hardcoding a (possibly deprecated) address.
+  const useDefaultDvns = (process.env.LZ_USE_DEFAULT_DVNS ?? "false") === "true";
   return OAppUlnConfig.serialize({
-    use_default_confirmations: false,
-    use_default_required_dvns: false,
+    use_default_confirmations: useDefaultDvns,
+    use_default_required_dvns: useDefaultDvns,
     use_default_optional_dvns: true,
-    uln_config: { confirmations, required_dvns: requiredDvns, optional_dvns: [], optional_dvn_threshold: 0 },
+    uln_config: useDefaultDvns
+      ? { confirmations: 0n, required_dvns: [], optional_dvns: [], optional_dvn_threshold: 0 }
+      : { confirmations, required_dvns: requiredDvns, optional_dvns: [], optional_dvn_threshold: 0 },
   }).toBytes();
 }
 

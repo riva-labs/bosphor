@@ -13,7 +13,11 @@
 import { config } from "dotenv";
 import { resolve } from "path";
 import { readFileSync } from "fs";
-config({ path: resolve(import.meta.dirname, "../../.env") });
+config({
+  path: process.env.BOSPHOR_ENV_FILE
+    ? resolve(process.env.BOSPHOR_ENV_FILE)
+    : resolve(import.meta.dirname, "../../.env"),
+});
 
 import { ethers } from "ethers";
 import { Transaction } from "@mysten/sui/transactions";
