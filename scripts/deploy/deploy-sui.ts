@@ -92,9 +92,21 @@ async function exec(tx: Transaction, label: string): Promise<any> {
 // transaction is already on-chain. Retry before giving up so a slow indexer
 // does not abort a multi-step deploy.
 async function waitTx(digest: string) {
-  // The gRPC waitForTransaction against the testnet fullnode is currently
-  // unreliable, so confirm finality by polling a plain JSON-RPC endpoint for
-  // the digest instead. The publish/execute txs themselves land fine.
+  // Prefer waiting on the SAME gRPC node used to build transactions, so the
+  // next tx's gas/object versions resolve consistently (read-after-write). The
+  // v2 gRPC waitForTransaction works; fall back to JSON-RPC polling if it hangs.
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    try {
+      return await Promise.race([
+        suiClient.core.waitForTransaction({ digest }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("grpc wait timeout")), 15000),
+        ),
+      ]);
+    } catch {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
   const rpcs = [
     process.env.SUI_JSONRPC_URL,
     "https://sui-testnet-rpc.publicnode.com",
@@ -123,6 +135,45 @@ async function waitTx(digest: string) {
     await new Promise((r) => setTimeout(r, 3000));
   }
   throw new Error(`waitTx: ${digest} not indexed after polling`);
+}
+
+// Look up a created object of a given type from a tx's objectChanges via
+// JSON-RPC (the gRPC response shape for created objects is version-dependent).
+async function findCreatedByType(digest: string, typeSubstr: string): Promise<string> {
+  const rpcs = [
+    process.env.SUI_JSONRPC_URL,
+    "https://sui-testnet-rpc.publicnode.com",
+    "https://rpc-testnet.suiscan.xyz",
+  ].filter(Boolean) as string[];
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sui_getTransactionBlock",
+            params: [digest, { showObjectChanges: true }],
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const j: any = await res.json();
+        const changes = j?.result?.objectChanges;
+        if (Array.isArray(changes)) {
+          const hit = changes.find(
+            (c: any) => c.type === "created" && (c.objectType || "").includes(typeSubstr),
+          );
+          return hit?.objectId ?? "";
+        }
+      } catch {
+        /* try next */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return "";
 }
 
 // BCS encode OAppUlnConfig
@@ -269,6 +320,14 @@ async function registerOApp(packageId: string, configId: string, oappId: string)
         messagingChannelId = c.objectId;
       }
     }
+  }
+  if (!messagingChannelId) {
+    // gRPC response shapes vary; fall back to a JSON-RPC lookup of the tx's
+    // created objects.
+    messagingChannelId = await findCreatedByType(
+      result.digest,
+      "::messaging_channel::MessagingChannel",
+    );
   }
 
   if (!messagingChannelId) {
