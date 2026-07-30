@@ -120,5 +120,5 @@ Where `lz_receive_info` itself contains:
 | Relayer is centralized (trusted operator) | Medium | Permissionless relayer auction (Milestone 4) |
 | No origin-chain payment flow | Medium | Escrow-based payment (Milestone 4) |
 | Sui testnet only | Low | Mainnet after Milestone 2 |
-| Single DVN (LZ Labs) | Low | Multi-DVN in hardening phase |
+| Cross-chain path uses a self-operated LayerZero DVN | Low | Multi-DVN in further hardening |
 | Relayer triggers proof verification | Low | Permissionless relayer auction (Milestone 4) |
