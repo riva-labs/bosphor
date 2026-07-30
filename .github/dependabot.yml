@@ -1,6 +1,10 @@
 version: 2
+
+# Policy: auto-propose minor/patch only. Major bumps are deliberate migrations
+# (they have broken the build before: TypeScript 7, Babel 8, OpenZeppelin 5),
+# so we ignore semver-major here and bump those by hand when ready.
+
 updates:
-  # npm packages, one entry per lockfile in the monorepo
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -9,6 +13,9 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /relayer
@@ -18,6 +25,9 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /website
@@ -27,6 +37,9 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /canary
@@ -36,6 +49,9 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /chaos
@@ -45,15 +61,25 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
-  # GitHub Actions used in workflows
+  # GitHub Actions: allow minor/patch and major (CI validates them), but hold
+  # release-please-action on v4 (release-critical, not exercised by PR CI).
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "googleapis/release-please-action"
 
-  # Git submodules (contracts/evm/lib/*)
+  # Git submodules (forge-std, openzeppelin-contracts): minor/patch only.
+  # OpenZeppelin v5 breaks the LayerZero v2 OApp Ownable pattern.
   - package-ecosystem: gitsubmodule
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
