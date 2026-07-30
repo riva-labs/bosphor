@@ -123,7 +123,7 @@ Where `lz_receive_info` itself contains:
 | Relayer is centralized (trusted operator) | Medium | Permissionless relayer auction (Milestone 4) |
 | No origin-chain payment flow | Medium | Escrow-based payment (Milestone 4) |
 | Sui testnet only | Low | Mainnet after Milestone 2 |
-| Single DVN (LZ Labs) | Low | Multi-DVN in hardening phase |
+| Cross-chain path uses a self-operated LayerZero DVN | Low | Multi-DVN in further hardening |
 | Relayer triggers proof verification | Low | Permissionless relayer auction (Milestone 4) |
 
 ---
@@ -162,11 +162,11 @@ The canary exposes Prometheus metrics at `GET /metrics` on `CANARY_PORT` (defaul
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
 | `bosphor_canary_roundtrip_total` | counter | `result` (`success`/`failure`) | Synthetic round-trips by outcome |
-| `bosphor_canary_roundtrip_duration_seconds` | histogram | — | Full round-trip duration |
+| `bosphor_canary_roundtrip_duration_seconds` | histogram | (none) | Full round-trip duration |
 | `bosphor_canary_stage_duration_seconds` | histogram | `stage` (`forward_delivery`/`return_delivery`) | Per-leg duration |
-| `bosphor_canary_last_success_timestamp_seconds` | gauge | — | Unix time of the last successful round-trip |
-| `bosphor_canary_wallet_balance_eth` | gauge | — | Sender wallet balance in ETH |
-| `bosphor_canary_gas_price_gwei` | gauge | — | Current network gas price in gwei |
+| `bosphor_canary_last_success_timestamp_seconds` | gauge | (none) | Unix time of the last successful round-trip |
+| `bosphor_canary_wallet_balance_eth` | gauge | (none) | Sender wallet balance in ETH |
+| `bosphor_canary_gas_price_gwei` | gauge | (none) | Current network gas price in gwei |
 | `bosphor_canary_skipped_total` | counter | `reason` (`low_balance`/`high_gas`) | Probes skipped by the preflight guard |
 
 ## Alerts
@@ -202,6 +202,38 @@ The canary reports failed probes to Sentry when `SENTRY_DSN` is set, tagged with
 ## Changelog
 
 
+## v0.2.0, Milestone 2: Proof Validation & System Stabilization
+
+Operational hardening of the cross-chain pipeline: live monitoring, continuous validation, a public data surface, and resilience improvements.
+
+### Added
+
+- **Monitoring stack**: Prometheus metrics and Grafana dashboards across the relayer and canary, plus a self-hosted Kener status page at status.bosphor.xyz. See [Relayer](relayer.md) and [Canary Monitoring](canary.md).
+
+- **Continuous canary**: A standalone service that runs real synthetic end-to-end round-trips on a fixed interval, submitting an intent on EVM and confirming the proof returns. It is the primary signal that the whole cross-chain path is healthy. See [Canary Monitoring](canary.md).
+
+- **Per-intent lifecycle store + public feed API**: The relayer records each intent's lifecycle and exposes a read-only `GET /public/intents` feed at api.bosphor.xyz. See [Public API](public-api.md).
+
+- **Sentry error tracking**: The relayer and canary report runtime errors and failed probes to Sentry when `SENTRY_DSN` is configured.
+
+- **Chaos harness**: An on-demand harness for exercising the relayer's resilience under injected failures. See [Chaos Harness](chaos-harness.md).
+
+- **Self-operated LayerZero DVN**: After a sui-testnet DVN outage, Bosphor now operates its own LayerZero DVN, so the cross-chain path no longer relies on a single third-party DVN. The full cross-chain round-trip was validated on Ethereum mainnet.
+
+### Changed
+
+- **Relayer stabilization**: Reliability fixes for checkpoint handling, network-aware WAL coin type resolution, and consecutive Sui transaction sequencing.
+
+### Deployed contracts (testnet, current)
+
+| Component | Address |
+|-----------|---------|
+| BosphorAdapter (Sepolia) | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
+| Sui Package | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |
+| Sui OApp Object | `0x4a5bf89e083c16bd8034b027454057d30ec336c734a7cc274e857a9125540026` |
+
+LZ Endpoint (Sepolia): `0x6EDCE65403992e310A62460808c4b910D972f10f` (EID 40161). Sui testnet EID: 40378.
+
 ## v0.1.0, Milestone 1: Cross-Chain Execution Core
 
 The initial release establishing the complete cross-chain storage intent pipeline from EVM to Walrus and back.
@@ -223,6 +255,8 @@ The initial release establishing the complete cross-chain storage intent pipelin
 - **Documentation site**: Docusaurus-powered docs with architecture guides, contract reference, deployment instructions, and operator guides.
 
 ### Deployed contracts (testnet)
+
+> Note: these are the v0.1.0-era addresses. They have since been superseded by the v0.2.0 addresses listed above. Use the v0.2.0 addresses for all current integration.
 
 | Component | Address |
 |-----------|---------|
@@ -331,7 +365,7 @@ function quote(
 ) external view returns (MessagingFee memory);
 ```
 
-**Returns**: `MessagingFee { nativeFee, lzTokenFee }` -- pass `nativeFee` as `msg.value` to `submitIntent`.
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`.
 
 ### confirmExecution
 
@@ -1004,11 +1038,11 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 ## Prerequisites
 
-- **Node.js 22** -- pinned via `.nvmrc` (`nvm use`)
-- **Foundry** -- `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-- **Sui CLI** -- https://docs.sui.io/build/install
-- **Sepolia ETH** -- for EVM contract deployment and LZ fees
-- **Sui testnet SUI** -- for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
+- **Node.js 22**: pinned via `.nvmrc` (`nvm use`)
+- **Foundry**: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Sui CLI**: https://docs.sui.io/build/install
+- **Sepolia ETH**: for EVM contract deployment and LZ fees
+- **Sui testnet SUI**: for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
 
 ## Environment Setup
 
@@ -1027,7 +1061,7 @@ cp .env.example .env
 
 ### Auto-populated Variables
 
-These are written by deployment scripts -- leave empty:
+These are written by deployment scripts; leave empty:
 
 | Variable | Populated by |
 |----------|-------------|
@@ -1067,7 +1101,7 @@ This runs sequentially:
 
 ### 3. `npm run wire`
 
-1. EVM `setPeer(40378, suiPackageId)` -- uses PACKAGE ID, not OApp object
+1. EVM `setPeer(40378, suiPackageId)`: uses PACKAGE ID, not OApp object
 2. Sui `set_peer(40161, evmAdapterAddress)`
 
 ### 4. `npm run test:e2e`
@@ -1103,10 +1137,10 @@ The relayer container:
 
 After deployment, verify:
 
-1. **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` -- status should be DELIVERED
-2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` -- verify OApp exists
-3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` -- verify contract
-4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>` -- verify blob retrieval
+1. **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>`, status should be DELIVERED
+2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>`, verify OApp exists
+3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>`, verify contract
+4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>`, verify blob retrieval
 5. **Move Registry**: search `@bosphor/core` at https://www.moveregistry.com or run `mvr resolve @bosphor/core --network testnet`
 
 ### Move Registry
@@ -1210,7 +1244,7 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 - [ ] Understand the emergency `confirmExecution` fallback and who holds the owner key
 - [ ] Review gas costs and fee sustainability
 - [ ] Plan for relayer monitoring and alerting
-- [ ] Note that mainnet deployment is not yet supported (Sui testnet only)
+- [ ] Note that Walrus storage runs on Sui testnet only. The full cross-chain round-trip has been validated on Ethereum mainnet, but production mainnet operation is not yet the default deployment.
 
 ## Related
 
@@ -1258,7 +1292,7 @@ Bosphor connects three protocols:
 
 ## Current status
 
-**Milestone 1 complete.** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow.
+**Milestone 2 complete (v0.2.0).** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow, and the full cross-chain round-trip has been validated on Ethereum mainnet.
 
 Components shipped:
 
@@ -1268,6 +1302,11 @@ Components shipped:
 - NestJS relayer with health monitoring, deduplication, and retry logic
 - E2E test suite and CI pipeline
 - Documentation site
+- Live monitoring stack: Prometheus metrics and Grafana dashboards, plus a self-hosted Kener status page at status.bosphor.xyz
+- A continuous synthetic canary running real cross-chain round-trips
+- A per-intent lifecycle store and a read-only public intent feed API (`GET /public/intents`) at api.bosphor.xyz
+- Sentry runtime error tracking and an on-demand chaos harness
+- A self-operated LayerZero DVN for resilience, so the path no longer relies on a single third-party DVN
 
 ## Next steps
 
@@ -1281,7 +1320,7 @@ Components shipped:
 ## Known Limitations
 
 
-Current constraints and limitations of the Bosphor protocol as of Milestone 1.
+Current constraints and limitations of the Bosphor protocol as of Milestone 2 (v0.2.0).
 
 ## Single relayer trust model
 
@@ -1295,9 +1334,9 @@ The roadmap includes a competing relayer model where multiple relayers can race 
 
 ## Supported chains
 
-- **EVM origin:** Sepolia testnet only. Mainnet deployment support exists but is not yet activated.
+- **EVM origin:** Sepolia testnet is the primary target. The full cross-chain round-trip has been validated on Ethereum mainnet, but production mainnet operation is not yet the default deployment.
 - **Storage destination:** Walrus on Sui testnet only.
-- **Cross-chain messaging:** LayerZero v2 with a single DVN configuration.
+- **Cross-chain messaging:** LayerZero v2. The path no longer relies on a single third-party DVN; Bosphor operates its own LayerZero DVN for resilience.
 
 Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. Solana origin support is planned for Milestone 3.
 
@@ -1329,7 +1368,7 @@ Once an intent is submitted on EVM, there is no mechanism for the sender to canc
 
 ## Testnet vs. mainnet differences
 
-- Testnet deployments use the LayerZero Labs DVN. Mainnet deployments may use different DVN configurations.
+- Bosphor operates its own LayerZero DVN for the cross-chain path, so verification no longer depends on a single third-party DVN. Mainnet deployments may use different DVN configurations.
 - Walrus testnet blob availability and durability guarantees differ from mainnet.
 - Sui testnet may have different epoch durations and gas pricing than mainnet.
 - The `EVM_DST_EID` config default targets Sepolia testnet (EID 40161). Mainnet requires changing this to the appropriate chain EID.
@@ -1839,10 +1878,10 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 |--------|------|--------|---------|
 | `bosphor_relayer_intents_processed_total` | counter | `result` (`success`/`failure`), `path` (`evm`/`sui_lz`) | Intents processed, split by detection path and outcome |
 | `bosphor_relayer_lz_send_total` | counter | `result` (`success`/`failure`) | LayerZero proof sends back to EVM |
-| `bosphor_relayer_checkpoint_cursor_lag` | gauge | — | Latest Sui checkpoint minus the processed cursor |
-| `bosphor_relayer_walrus_upload_seconds` | histogram | — | Walrus upload duration in seconds |
-| `bosphor_relayer_wal_balance_wal` | gauge | — | Relayer WAL balance (the Walrus storage token) |
-| `bosphor_relayer_sui_balance_sui` | gauge | — | Relayer SUI balance (gas + WAL swap funding) |
+| `bosphor_relayer_checkpoint_cursor_lag` | gauge | (none) | Latest Sui checkpoint minus the processed cursor |
+| `bosphor_relayer_walrus_upload_seconds` | histogram | (none) | Walrus upload duration in seconds |
+| `bosphor_relayer_wal_balance_wal` | gauge | (none) | Relayer WAL balance (the Walrus storage token) |
+| `bosphor_relayer_sui_balance_sui` | gauge | (none) | Relayer SUI balance (gas + WAL swap funding) |
 | `bosphor_relayer_wal_topup_total` | counter | `result` (`success`/`failure`/`insufficient_sui`) | SUI→WAL auto top-up attempts |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
@@ -1937,20 +1976,20 @@ This function bypasses the DVN-verified proof path. It should only be used when 
 
 ## DVN configuration
 
-Bosphor currently uses a single DVN: **LayerZero Labs DVN**.
+The cross-chain path no longer relies on a single third-party DVN. Bosphor operates its own LayerZero DVN for resilience, adopted after a sui-testnet DVN outage.
 
 - Confirmation depth: 2 blocks (EVM to Sui)
 - Verification: both message directions (forward and return) pass through DVN verification
 - The DVN configuration is set during OApp registration and can be updated through LayerZero's endpoint
 
-A single-DVN setup means that DVN compromise would compromise message verification. Multi-DVN support (requiring multiple independent verifiers to agree) is planned for the hardening phase.
+Running our own DVN removes the dependency on a single external verifier. Multi-DVN support (requiring multiple independent verifiers to agree) remains planned for further hardening.
 
 ## Attack surface summary
 
 | Vector | Mitigation |
 |--------|-----------|
 | Relayer compromise | Relayer cannot forge proofs (DVN-verified). Can only delay or censor. Owner fallback available. |
-| DVN compromise | Single DVN risk. Multi-DVN planned. |
+| DVN compromise | Bosphor operates its own LayerZero DVN, removing the single third-party DVN dependency. Multi-DVN planned for further hardening. |
 | Walrus publisher outage | SDK handles retries internally. Intents expire gracefully if storage nodes remain unavailable. |
 | LZ endpoint compromise | Protocol-level risk shared with all LayerZero applications. |
 | Contract owner key compromise | Owner can call `confirmExecution` and `setRelayer`. Standard key management practices apply. |
