@@ -51,20 +51,20 @@ This function bypasses the DVN-verified proof path. It should only be used when 
 
 ## DVN configuration
 
-Bosphor currently uses a single DVN: **LayerZero Labs DVN**.
+The cross-chain path no longer relies on a single third-party DVN. Bosphor operates its own LayerZero DVN for resilience, adopted after a sui-testnet DVN outage.
 
 - Confirmation depth: 2 blocks (EVM to Sui)
 - Verification: both message directions (forward and return) pass through DVN verification
 - The DVN configuration is set during OApp registration and can be updated through LayerZero's endpoint
 
-A single-DVN setup means that DVN compromise would compromise message verification. Multi-DVN support (requiring multiple independent verifiers to agree) is planned for the hardening phase.
+Running our own DVN removes the dependency on a single external verifier. Multi-DVN support (requiring multiple independent verifiers to agree) remains planned for further hardening.
 
 ## Attack surface summary
 
 | Vector | Mitigation |
 |--------|-----------|
 | Relayer compromise | Relayer cannot forge proofs (DVN-verified). Can only delay or censor. Owner fallback available. |
-| DVN compromise | Single DVN risk. Multi-DVN planned. |
+| DVN compromise | Bosphor operates its own LayerZero DVN, removing the single third-party DVN dependency. Multi-DVN planned for further hardening. |
 | Walrus publisher outage | SDK handles retries internally. Intents expire gracefully if storage nodes remain unavailable. |
 | LZ endpoint compromise | Protocol-level risk shared with all LayerZero applications. |
 | Contract owner key compromise | Owner can call `confirmExecution` and `setRelayer`. Standard key management practices apply. |

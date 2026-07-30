@@ -11,11 +11,11 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 ## Prerequisites
 
-- **Node.js 22** -- pinned via `.nvmrc` (`nvm use`)
-- **Foundry** -- `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-- **Sui CLI** -- https://docs.sui.io/build/install
-- **Sepolia ETH** -- for EVM contract deployment and LZ fees
-- **Sui testnet SUI** -- for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
+- **Node.js 22**: pinned via `.nvmrc` (`nvm use`)
+- **Foundry**: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
+- **Sui CLI**: https://docs.sui.io/build/install
+- **Sepolia ETH**: for EVM contract deployment and LZ fees
+- **Sui testnet SUI**: for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
 
 ## Environment Setup
 
@@ -34,7 +34,7 @@ cp .env.example .env
 
 ### Auto-populated Variables
 
-These are written by deployment scripts -- leave empty:
+These are written by deployment scripts; leave empty:
 
 | Variable | Populated by |
 |----------|-------------|
@@ -74,7 +74,7 @@ This runs sequentially:
 
 ### 3. `npm run wire`
 
-1. EVM `setPeer(40378, suiPackageId)` -- uses PACKAGE ID, not OApp object
+1. EVM `setPeer(40378, suiPackageId)`: uses PACKAGE ID, not OApp object
 2. Sui `set_peer(40161, evmAdapterAddress)`
 
 ### 4. `npm run test:e2e`
@@ -110,10 +110,10 @@ The relayer container:
 
 After deployment, verify:
 
-1. **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` -- status should be DELIVERED
-2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` -- verify OApp exists
-3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` -- verify contract
-4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>` -- verify blob retrieval
+1. **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>`, status should be DELIVERED
+2. **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>`, verify OApp exists
+3. **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>`, verify contract
+4. **Walrus**: `https://aggregator.walrus-testnet.walrus.space/v1/blobs/<blob_id>`, verify blob retrieval
 5. **Move Registry**: search `@bosphor/core` at https://www.moveregistry.com or run `mvr resolve @bosphor/core --network testnet`
 
 ### Move Registry

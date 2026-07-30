@@ -54,7 +54,7 @@ function quote(
 ) external view returns (MessagingFee memory);
 ```
 
-**Returns**: `MessagingFee { nativeFee, lzTokenFee }` -- pass `nativeFee` as `msg.value` to `submitIntent`.
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`.
 
 ### confirmExecution
 

@@ -78,7 +78,7 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 - [ ] Understand the emergency `confirmExecution` fallback and who holds the owner key
 - [ ] Review gas costs and fee sustainability
 - [ ] Plan for relayer monitoring and alerting
-- [ ] Note that mainnet deployment is not yet supported (Sui testnet only)
+- [ ] Note that Walrus storage runs on Sui testnet only. The full cross-chain round-trip has been validated on Ethereum mainnet, but production mainnet operation is not yet the default deployment.
 
 ## Related
 

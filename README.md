@@ -33,7 +33,11 @@ flowchart LR
 | Sui LZ OApp (Testnet) | Deployed |
 | Relayer | Running (NestJS) |
 | LZ Executor | Verified (DELIVERED) |
-| Mainnet | Planned |
+| Monitoring stack | Live (Prometheus + Grafana) |
+| Canary | Running (continuous round-trips) |
+| Public API | Live (`GET /public/intents` at api.bosphor.xyz) |
+| Status page | Live (Kener at status.bosphor.xyz) |
+| Mainnet | Validated (round-trip on mainnet) |
 
 ## Prerequisites
 
@@ -55,20 +59,23 @@ See [website/docs/deployment.md](website/docs/deployment.md) for detailed setup 
 
 ## Architecture
 
-- `contracts/evm/src/BosphorAdapter.sol` — EVM OApp (LayerZero v2)
-- `sui/lz-receiver/sources/lz_receiver.move` — Sui LZ receiver
-- `sui/executor/sources/walrus_executor.move` — Walrus blob executor
-- `relayer/` — NestJS relayer service with health endpoint
+- `contracts/evm/src/BosphorAdapter.sol`: EVM OApp (LayerZero v2)
+- `sui/lz-receiver/sources/lz_receiver.move`: Sui LZ receiver
+- `sui/executor/sources/walrus_executor.move`: Walrus blob executor
+- `relayer/`: NestJS relayer service with health endpoint
 
 See [website/docs/architecture.md](website/docs/architecture.md) for the full design.
 
 ## Documentation
 
-- [Architecture](https://docs.bosphor.xyz/architecture) — system design and message flow
-- [Contract Interface](https://docs.bosphor.xyz/contract-interface) — EVM and Sui function reference
-- [Deployment](https://docs.bosphor.xyz/deployment) — setup and deployment guide
-- [Relayer](https://docs.bosphor.xyz/relayer) — operator guide, configuration, health endpoint
-- [Testing](https://docs.bosphor.xyz/testing) — test suites, CI pipeline, E2E verification
+- [Architecture](https://docs.bosphor.xyz/architecture): system design and message flow
+- [Contract Interface](https://docs.bosphor.xyz/contract-interface): EVM and Sui function reference
+- [Deployment](https://docs.bosphor.xyz/deployment): setup and deployment guide
+- [Relayer](https://docs.bosphor.xyz/relayer): operator guide, configuration, health endpoint
+- [Testing](https://docs.bosphor.xyz/testing): test suites, CI pipeline, E2E verification
+- [Public API](https://docs.bosphor.xyz/public-api): read-only intent feed (`GET /public/intents`)
+- [Canary](https://docs.bosphor.xyz/canary): continuous synthetic round-trip monitoring
+- [Chaos Harness](https://docs.bosphor.xyz/chaos-harness): on-demand resilience testing
 
 ## Testnet Evidence
 
@@ -91,7 +98,7 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 ## Docker
 
 ```bash
-docker-compose up -d    # starts relayer + prometheus + grafana
+docker-compose up -d    # starts relayer + canary + prometheus + grafana
 ```
 
 ## Contributing

@@ -4,7 +4,7 @@ sidebar_position: 8
 
 # Known Limitations
 
-Current constraints and limitations of the Bosphor protocol as of Milestone 1.
+Current constraints and limitations of the Bosphor protocol as of Milestone 2 (v0.2.0).
 
 ## Single relayer trust model
 
@@ -18,9 +18,9 @@ The roadmap includes a competing relayer model where multiple relayers can race 
 
 ## Supported chains
 
-- **EVM origin:** Sepolia testnet only. Mainnet deployment support exists but is not yet activated.
+- **EVM origin:** Sepolia testnet is the primary target. The full cross-chain round-trip has been validated on Ethereum mainnet, but production mainnet operation is not yet the default deployment.
 - **Storage destination:** Walrus on Sui testnet only.
-- **Cross-chain messaging:** LayerZero v2 with a single DVN configuration.
+- **Cross-chain messaging:** LayerZero v2. The path no longer relies on a single third-party DVN; Bosphor operates its own LayerZero DVN for resilience.
 
 Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. Solana origin support is planned for Milestone 3.
 
@@ -52,7 +52,7 @@ Once an intent is submitted on EVM, there is no mechanism for the sender to canc
 
 ## Testnet vs. mainnet differences
 
-- Testnet deployments use the LayerZero Labs DVN. Mainnet deployments may use different DVN configurations.
+- Bosphor operates its own LayerZero DVN for the cross-chain path, so verification no longer depends on a single third-party DVN. Mainnet deployments may use different DVN configurations.
 - Walrus testnet blob availability and durability guarantees differ from mainnet.
 - Sui testnet may have different epoch durations and gas pricing than mainnet.
 - The `EVM_DST_EID` config default targets Sepolia testnet (EID 40161). Mainnet requires changing this to the appropriate chain EID.
