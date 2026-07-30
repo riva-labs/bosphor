@@ -74,17 +74,55 @@ function addressToBytes32(addr: string): number[] {
   return bytes;
 }
 
-async function exec(tx: Transaction, label: string) {
-  const result = await signAndExecute(suiClient, tx, keypair);
-  const { digest, effects } = result.transaction;
-  if (!effects?.status?.success) {
-    console.error(`[FAIL] ${label}:`, effects?.status);
+async function exec(tx: Transaction, label: string): Promise<any> {
+  const result: any = await signAndExecute(suiClient, tx, keypair);
+  const digest = result.digest;
+  const ok = result.effects?.status?.success ?? result.status?.success;
+  if (!ok) {
+    console.error(`[FAIL] ${label}:`, result.effects?.status ?? result.status);
     throw new Error(`${label} failed`);
   }
   console.log(`[OK] ${label}: ${digest}`);
   // Wait for transaction finality to avoid object version conflicts
-  await suiClient.core.waitForTransaction({ digest });
+  await waitTx(digest);
   return result;
+}
+
+// Testnet gRPC intermittently aborts the wait with a timeout even though the
+// transaction is already on-chain. Retry before giving up so a slow indexer
+// does not abort a multi-step deploy.
+async function waitTx(digest: string) {
+  // The gRPC waitForTransaction against the testnet fullnode is currently
+  // unreliable, so confirm finality by polling a plain JSON-RPC endpoint for
+  // the digest instead. The publish/execute txs themselves land fine.
+  const rpcs = [
+    process.env.SUI_JSONRPC_URL,
+    "https://sui-testnet-rpc.publicnode.com",
+    "https://rpc-testnet.suiscan.xyz",
+  ].filter(Boolean) as string[];
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    for (const rpc of rpcs) {
+      try {
+        const res = await fetch(rpc, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sui_getTransactionBlock",
+            params: [digest, { showEffects: true }],
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const j: any = await res.json();
+        if (j?.result?.digest === digest) return j.result;
+      } catch {
+        /* try next rpc / next attempt */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error(`waitTx: ${digest} not indexed after polling`);
 }
 
 // BCS encode OAppUlnConfig
@@ -164,7 +202,7 @@ async function publish(): Promise<PublishResult> {
   }
   console.log(`[OK] Published: ${result.digest}`);
   // Wait for package to be indexed
-  await suiClient.core.waitForTransaction({ digest: result.digest });
+  await waitTx(result.digest);
 
   const changes: any[] = result.objectChanges || [];
   let packageId = "";
@@ -215,19 +253,21 @@ async function registerOApp(packageId: string, configId: string, oappId: string)
     arguments: [tx.object(configId), tx.object(oappId), tx.object(LZ_ENDPOINT_OBJ), info],
   });
 
-  const result = await exec(tx, "register_oapp");
+  const result: any = await exec(tx, "register_oapp");
 
-  // Find MessagingChannel from created objects via gRPC response
+  // Find the created MessagingChannel. v2 gRPC core exposes effects.changedObjects
+  // plus an objectTypes map; fall back to an objectChanges array shape.
   let messagingChannelId = "";
-  const txResp = result.transaction;
-  const objectTypes = await txResp.objectTypes;
-  const createdObjects = (txResp.effects?.changedObjects ?? []).filter(
-    (c: any) => c.inputState === "DoesNotExist",
-  );
-  for (const obj of createdObjects) {
-    const objType = objectTypes[obj.id] || "";
-    if (objType.includes("::messaging_channel::MessagingChannel")) {
-      messagingChannelId = obj.id;
+  const objectTypes: Record<string, string> = result.objectTypes ?? {};
+  for (const obj of result.effects?.changedObjects ?? []) {
+    const t = objectTypes[obj.id] || obj.objectType || "";
+    if (t.includes("::messaging_channel::MessagingChannel")) messagingChannelId = obj.id;
+  }
+  if (!messagingChannelId) {
+    for (const c of result.objectChanges ?? []) {
+      if ((c.objectType || "").includes("::messaging_channel::MessagingChannel")) {
+        messagingChannelId = c.objectId;
+      }
     }
   }
 

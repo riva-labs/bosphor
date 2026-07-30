@@ -39,12 +39,19 @@ export async function signAndExecute(
   tx: Transaction,
   signer: Ed25519Keypair,
 ) {
+  // Mirrors the relayer's proven @mysten/sui v2 execution path. Requires the
+  // v2 SuiGrpcClient (v1's gRPC build cannot resolve object versions).
+  tx.setSender(signer.toSuiAddress());
   const bytes = await tx.build({ client });
   const { signature } = await signer.signTransaction(bytes);
-  return client.core.executeTransaction({
+  const result: any = await client.core.executeTransaction({
     transaction: bytes,
     signatures: [signature],
   });
+  if (result.$kind === "FailedTransaction") {
+    throw new Error(`Sui tx failed: ${JSON.stringify(result.FailedTransaction.status)}`);
+  }
+  return result.Transaction;
 }
 
 /**
