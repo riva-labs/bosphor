@@ -68,6 +68,17 @@
     "ws": "8.21.0",
     "fast-uri": "3.1.4",
     "brace-expansion": "2.0.2",
-    "piscina": "4.9.3"
+    "piscina": "4.9.3",
+    "multer": "2.2.0",
+    "qs": "6.15.2",
+    "valibot": "1.4.2",
+    "body-parser": "2.3.0",
+    "esbuild": "0.28.1",
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "3.15.0"
+    },
+    "cosmiconfig": {
+      "js-yaml": "4.3.0"
+    }
   }
 }

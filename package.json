@@ -39,6 +39,8 @@
     "typescript": "^5.4.0"
   },
   "overrides": {
-    "ws": "8.21.0"
+    "ws": "8.21.0",
+    "valibot": "1.4.2",
+    "esbuild": "0.28.1"
   }
 }
