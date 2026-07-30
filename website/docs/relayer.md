@@ -156,10 +156,10 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 |--------|------|--------|---------|
 | `bosphor_relayer_intents_processed_total` | counter | `result` (`success`/`failure`), `path` (`evm`/`sui_lz`) | Intents processed, split by detection path and outcome |
 | `bosphor_relayer_lz_send_total` | counter | `result` (`success`/`failure`) | LayerZero proof sends back to EVM |
-| `bosphor_relayer_checkpoint_cursor_lag` | gauge | — | Latest Sui checkpoint minus the processed cursor |
-| `bosphor_relayer_walrus_upload_seconds` | histogram | — | Walrus upload duration in seconds |
-| `bosphor_relayer_wal_balance_wal` | gauge | — | Relayer WAL balance (the Walrus storage token) |
-| `bosphor_relayer_sui_balance_sui` | gauge | — | Relayer SUI balance (gas + WAL swap funding) |
+| `bosphor_relayer_checkpoint_cursor_lag` | gauge | (none) | Latest Sui checkpoint minus the processed cursor |
+| `bosphor_relayer_walrus_upload_seconds` | histogram | (none) | Walrus upload duration in seconds |
+| `bosphor_relayer_wal_balance_wal` | gauge | (none) | Relayer WAL balance (the Walrus storage token) |
+| `bosphor_relayer_sui_balance_sui` | gauge | (none) | Relayer SUI balance (gas + WAL swap funding) |
 | `bosphor_relayer_wal_topup_total` | counter | `result` (`success`/`failure`/`insufficient_sui`) | SUI→WAL auto top-up attempts |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.

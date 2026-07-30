@@ -36,11 +36,11 @@ The canary exposes Prometheus metrics at `GET /metrics` on `CANARY_PORT` (defaul
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
 | `bosphor_canary_roundtrip_total` | counter | `result` (`success`/`failure`) | Synthetic round-trips by outcome |
-| `bosphor_canary_roundtrip_duration_seconds` | histogram | — | Full round-trip duration |
+| `bosphor_canary_roundtrip_duration_seconds` | histogram | (none) | Full round-trip duration |
 | `bosphor_canary_stage_duration_seconds` | histogram | `stage` (`forward_delivery`/`return_delivery`) | Per-leg duration |
-| `bosphor_canary_last_success_timestamp_seconds` | gauge | — | Unix time of the last successful round-trip |
-| `bosphor_canary_wallet_balance_eth` | gauge | — | Sender wallet balance in ETH |
-| `bosphor_canary_gas_price_gwei` | gauge | — | Current network gas price in gwei |
+| `bosphor_canary_last_success_timestamp_seconds` | gauge | (none) | Unix time of the last successful round-trip |
+| `bosphor_canary_wallet_balance_eth` | gauge | (none) | Sender wallet balance in ETH |
+| `bosphor_canary_gas_price_gwei` | gauge | (none) | Current network gas price in gwei |
 | `bosphor_canary_skipped_total` | counter | `reason` (`low_balance`/`high_gas`) | Probes skipped by the preflight guard |
 
 ## Alerts

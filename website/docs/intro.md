@@ -39,7 +39,7 @@ Bosphor connects three protocols:
 
 ## Current status
 
-**Milestone 1 complete.** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow.
+**Milestone 2 complete (v0.2.0).** Deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow, and the full cross-chain round-trip has been validated on Ethereum mainnet.
 
 Components shipped:
 
@@ -49,6 +49,11 @@ Components shipped:
 - NestJS relayer with health monitoring, deduplication, and retry logic
 - E2E test suite and CI pipeline
 - Documentation site
+- Live monitoring stack: Prometheus metrics and Grafana dashboards, plus a self-hosted Kener status page at status.bosphor.xyz
+- A continuous synthetic canary running real cross-chain round-trips
+- A per-intent lifecycle store and a read-only public intent feed API (`GET /public/intents`) at api.bosphor.xyz
+- Sentry runtime error tracking and an on-demand chaos harness
+- A self-operated LayerZero DVN for resilience, so the path no longer relies on a single third-party DVN
 
 ## Next steps
 
