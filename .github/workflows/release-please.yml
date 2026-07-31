@@ -15,12 +15,14 @@ jobs:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          # Use a PAT when available so the release-PR merge below re-triggers
-          # this workflow to create the component tags/releases. The default
-          # GITHUB_TOKEN cannot trigger workflows, so an auto-merged release PR
-          # is left "untagged" and blocks every future release. Falls back to
-          # GITHUB_TOKEN when the secret is absent (PR creation still works).
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # The action itself uses GITHUB_TOKEN to open the release PR and create
+          # tags: it has the needed contents/PR write scope and is proven to work
+          # (it created #97 and #190). The PAT is only used for the AUTO-MERGE
+          # step below, so that merging the release PR re-triggers this workflow
+          # to tag it (a GITHUB_TOKEN merge cannot trigger workflows). Using the
+          # PAT for the action instead failed tree creation ("Error adding to
+          # tree") when the fine-grained token lacked contents write.
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
