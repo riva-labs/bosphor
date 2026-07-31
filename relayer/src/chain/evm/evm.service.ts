@@ -49,6 +49,13 @@ export class EvmService implements OnModuleInit {
       staticNetwork: true,
       polling: true,
     });
+    // The background block poller (needed by tx.wait) makes RPC calls that
+    // reject on transient public-RPC errors (520, timeout). Give ethers an
+    // error listener so those are logged here as warnings instead of bubbling
+    // up as unhandled rejections.
+    this.provider.on('error', (err) => {
+      this.logger.warn(`EVM provider error (transient, retrying): ${(err as Error)?.message ?? err}`);
+    });
     this.wallet = new ethers.Wallet(privateKey, this.provider);
     this.adapter = new ethers.Contract(adapterAddress, ADAPTER_ABI, this.wallet);
 
