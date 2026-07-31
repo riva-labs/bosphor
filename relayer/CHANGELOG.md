@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.2...relayer-v0.1.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **relayer:** stop transient RPC blips flooding Sentry as errors ([#226](https://github.com/riva-labs/bosphor/issues/226)) ([1efe14a](https://github.com/riva-labs/bosphor/commit/1efe14a7464debf63e2f79b12bb01ef0796f0531))
+
 ## [0.1.2](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.1...relayer-v0.1.2) (2026-07-30)
 
 
