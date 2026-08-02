@@ -1,2 +1,5 @@
 node_modules/
-reports/
+reports/*
+# Publish the consolidated M2 recovery report as public milestone evidence;
+# keep the machine-generated per-run artifacts private.
+!reports/M2-recovery-report.md
