@@ -1,4 +1,9 @@
-import { HopDetails, IntentHop, IntentLifecycleRecord } from './intent-lifecycle.types';
+import {
+  HopDetails,
+  IntentCommitment,
+  IntentHop,
+  IntentLifecycleRecord,
+} from './intent-lifecycle.types';
 
 /**
  * Persistence port for the public intent feed. Kept deliberately small: callers
@@ -18,4 +23,11 @@ export abstract class IntentLifecycleStore {
 
   /** Recent intents, newest-first. */
   abstract getRecentIntents(limit?: number): Promise<IntentLifecycleRecord[]>;
+
+  /**
+   * Return the on-chain commitment for `intentId`, or null if unknown or if the
+   * commitment fields have not been recorded yet. Used by the ingest path to
+   * bind out-of-band bytes to what the sender committed to.
+   */
+  abstract getCommitment(intentId: string): Promise<IntentCommitment | null>;
 }

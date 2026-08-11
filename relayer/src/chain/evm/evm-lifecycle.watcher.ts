@@ -42,7 +42,15 @@ export class EvmLifecycleWatcher implements OnModuleInit {
     const { submitted, executed, newFromBlock } = await this.evm.pollLifecycleEvents(this.cursor);
 
     for (const e of submitted) {
-      await this.trackHop(e.intentId, 'submitted', { sender: e.sender, txHash: e.txHash });
+      // Record the on-chain commitment (blobId, size, deadline) alongside the
+      // submitted hop so the ingest path can bind out-of-band bytes to it.
+      await this.trackHop(e.intentId, 'submitted', {
+        sender: e.sender,
+        txHash: e.txHash,
+        committedBlobId: e.blobId,
+        size: e.size,
+        deadline: e.deadlineMs,
+      });
     }
     for (const e of executed) {
       await this.trackHop(e.intentId, 'confirmed', { txHash: e.txHash });

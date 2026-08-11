@@ -66,19 +66,27 @@ describe('SuiCheckpointService.processCheckpoint', () => {
 
   function makeCheckpoint(events: any[]) {
     return {
-      transactions: [{
-        digest: 'txdigest123',
-        events: { events },
-      }],
+      transactions: [
+        {
+          digest: 'txdigest123',
+          events: { events },
+        },
+      ],
     };
   }
 
   // Build an event `json` field in the gRPC protobuf Value shape that
-  // ledgerService/subscriptionService return: byte vectors are base64
-  // stringValue, u32 is numberValue, u64 is stringValue.
+  // ledgerService/subscriptionService return. M3 (#238): the event carries the
+  // committed reference (committed_blob_id u256, size u32, encoding_type u8,
+  // storage_epochs u32, deadline u64) instead of the in-band payload. Byte
+  // vectors are base64 stringValue, u32/u8 numberValue, u64/u256 stringValue.
   function eventJson(fields: {
     intent_id: number[];
-    payload: number[];
+    committed_blob_id?: string;
+    size?: number;
+    encoding_type?: number;
+    storage_epochs?: number;
+    deadline?: string;
     src_eid: number;
     nonce: string;
   }) {
@@ -88,7 +96,11 @@ describe('SuiCheckpointService.processCheckpoint', () => {
         structValue: {
           fields: {
             intent_id: { kind: { stringValue: b64(fields.intent_id) } },
-            payload: { kind: { stringValue: b64(fields.payload) } },
+            committed_blob_id: { kind: { stringValue: fields.committed_blob_id ?? '0' } },
+            size: { kind: { numberValue: fields.size ?? 0 } },
+            encoding_type: { kind: { numberValue: fields.encoding_type ?? 0 } },
+            storage_epochs: { kind: { numberValue: fields.storage_epochs ?? 0 } },
+            deadline: { kind: { stringValue: fields.deadline ?? '0' } },
             src_eid: { kind: { numberValue: fields.src_eid } },
             nonce: { kind: { stringValue: fields.nonce } },
           },
@@ -99,30 +111,38 @@ describe('SuiCheckpointService.processCheckpoint', () => {
 
   it('should invoke callback for matching IntentReceived events', async () => {
     const intentBytes = Array.from({ length: 32 }, (_, i) => i);
-    const checkpoint = makeCheckpoint([{
-      eventType: EVENT_TYPE,
-      json: eventJson({
-        intent_id: intentBytes,
-        payload: [1, 2, 3],
-        src_eid: 40161,
-        nonce: '1',
-      }),
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: EVENT_TYPE,
+        json: eventJson({
+          intent_id: intentBytes,
+          committed_blob_id: '123',
+          size: 3,
+          deadline: '1700000000',
+          src_eid: 40161,
+          nonce: '1',
+        }),
+      },
+    ]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
 
     expect(mockCallback).toHaveBeenCalledTimes(1);
     const event = mockCallback.mock.calls[0][0];
     expect(event.intentId).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(event.payload).toEqual([1, 2, 3]);
+    expect(event.committedBlobId).toBe('123');
+    expect(event.size).toBe(3);
+    expect(event.deadline).toBe(1700000000n);
     expect(event.srcEid).toBe(40161);
   });
 
   it('should skip events with non-matching event type', async () => {
-    const checkpoint = makeCheckpoint([{
-      eventType: `${LZ_PKG}::lz_receiver::ProofSent`,
-      json: eventJson({ intent_id: [1], payload: [], src_eid: 1, nonce: '0' }),
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: `${LZ_PKG}::lz_receiver::ProofSent`,
+        json: eventJson({ intent_id: [1], src_eid: 1, nonce: '0' }),
+      },
+    ]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
 
@@ -130,10 +150,12 @@ describe('SuiCheckpointService.processCheckpoint', () => {
   });
 
   it('should skip events with no json value', async () => {
-    const checkpoint = makeCheckpoint([{
-      eventType: EVENT_TYPE,
-      json: null,
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: EVENT_TYPE,
+        json: null,
+      },
+    ]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
 
@@ -141,10 +163,12 @@ describe('SuiCheckpointService.processCheckpoint', () => {
   });
 
   it('should skip events whose struct is missing intent_id', async () => {
-    const checkpoint = makeCheckpoint([{
-      eventType: EVENT_TYPE,
-      json: { kind: { structValue: { fields: {} } } },
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: EVENT_TYPE,
+        json: { kind: { structValue: { fields: {} } } },
+      },
+    ]);
 
     await checkpointService.processCheckpoint(checkpoint, 100n);
 
@@ -153,22 +177,26 @@ describe('SuiCheckpointService.processCheckpoint', () => {
 
   it('should decode base64-encoded byte fields', async () => {
     const intentBytes = Array.from({ length: 32 }, () => 0xab);
-    const checkpoint = makeCheckpoint([{
-      eventType: EVENT_TYPE,
-      json: eventJson({
-        intent_id: intentBytes,
-        payload: [10, 20],
-        src_eid: 40378,
-        nonce: '5',
-      }),
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: EVENT_TYPE,
+        json: eventJson({
+          intent_id: intentBytes,
+          committed_blob_id: '456',
+          size: 2,
+          src_eid: 40378,
+          nonce: '5',
+        }),
+      },
+    ]);
 
     await checkpointService.processCheckpoint(checkpoint, 200n);
 
     expect(mockCallback).toHaveBeenCalledTimes(1);
     const event = mockCallback.mock.calls[0][0];
     expect(event.srcEid).toBe(40378);
-    expect(event.payload).toEqual([10, 20]);
+    expect(event.committedBlobId).toBe('456');
+    expect(event.size).toBe(2);
     expect(event.intentId).toBe('0x' + 'ab'.repeat(32));
   });
 
@@ -177,10 +205,12 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     (checkpointService as any).onEventCallback = undefined;
 
     const intentBytes = Array.from({ length: 32 }, () => 0);
-    const checkpoint = makeCheckpoint([{
-      eventType: EVENT_TYPE,
-      json: eventJson({ intent_id: intentBytes, payload: [], src_eid: 1, nonce: '0' }),
-    }]);
+    const checkpoint = makeCheckpoint([
+      {
+        eventType: EVENT_TYPE,
+        json: eventJson({ intent_id: intentBytes, src_eid: 1, nonce: '0' }),
+      },
+    ]);
 
     // Should not throw
     await checkpointService.processCheckpoint(checkpoint, 100n);
