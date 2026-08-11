@@ -51,6 +51,7 @@ const sidebars: SidebarsConfig = {
       label: 'Reference',
       collapsed: false,
       items: [
+        'commitment-format',
         'sui-executor',
         'known-limitations',
         'changelog',
