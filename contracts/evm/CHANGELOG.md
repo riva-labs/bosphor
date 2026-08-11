@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 (2026-08-11)
+
+### Features
+
+- feat(contracts): add BosphorProof verification library
+
 ## 0.3.0 (2026-08-11)
 
 ### Breaking Changes
