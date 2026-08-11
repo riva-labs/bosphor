@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-08-11)
+
+### Features
+
+- feat(sdk): Unified SDK v2 EVM core with one-call store()
+
 ## 0.2.0 (2026-08-11)
 
 ### Features

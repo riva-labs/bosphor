@@ -1,0 +1,75 @@
+/**
+ * Client-side Walrus blob id computation.
+ *
+ * The blob id is derived locally from the raw bytes by `@mysten/walrus`
+ * `encodeBlob`; it needs no SUI, no WAL, and no Sui RPC. Computing it client-side
+ * lets the SDK put the exact same id on the commitment that the relayer recomputes
+ * on ingest, so the two match byte for byte.
+ *
+ * `@mysten/walrus` is a heavy, optional dependency. It is loaded through a lazy
+ * dynamic import so that (a) non-EVM or codec-only consumers never pull it, and
+ * (b) unit tests can inject a stub `computeBlob` and never trigger the import.
+ */
+
+import type { BlobEncoding, ComputeBlob, Hex } from "./types.ts";
+
+/** Walrus `encodeBlob` returns the blob id as a base64url string. */
+function base64UrlToBytes32Hex(base64url: string): Hex {
+  const bytes = Buffer.from(base64url, "base64url");
+  if (bytes.length !== 32) {
+    throw new Error(
+      `expected a 32-byte Walrus blob id, decoded ${bytes.length} bytes from "${base64url}"`,
+    );
+  }
+  return `0x${bytes.toString("hex")}`;
+}
+
+/**
+ * The default, `@mysten/walrus`-backed blob-id computation. Lazily imports the
+ * Walrus SDK on first use. The Walrus `WalrusClient.encodeBlob` API derives the id
+ * offline, so this makes no network call.
+ *
+ * If `@mysten/walrus` is not installed (e.g. an offline install skipped the
+ * optional chain SDK), this throws loudly with guidance rather than silently
+ * fabricating an id.
+ */
+export const defaultComputeBlob: ComputeBlob = async (
+  data: Uint8Array,
+): Promise<BlobEncoding> => {
+  // Import specifiers are held in variables so TypeScript does not try to resolve
+  // (and typecheck) the optional peers at compile time. They are only pulled in at
+  // runtime, when a consumer actually opts into the real Walrus-backed impl.
+  const walrusSpec = "@mysten/walrus";
+  const suiSpec = "@mysten/sui/client";
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  let walrusMod: any;
+  let suiMod: any;
+  try {
+    [walrusMod, suiMod] = await Promise.all([import(walrusSpec), import(suiSpec)]);
+  } catch (err) {
+    throw new Error(
+      "computeBlob requires the optional peer dependencies '@mysten/walrus' and " +
+        "'@mysten/sui'. Install them (npm install @mysten/walrus @mysten/sui) or " +
+        `pass a custom computeBlob to the client. Underlying error: ${String(err)}`,
+    );
+  }
+
+  // The relayer computes the same id via `client.walrus.encodeBlob`. Mirror that
+  // exact seam so the client-computed id matches the relayer's recomputation byte
+  // for byte. encodeBlob derives the id locally from the bytes; no RPC is made.
+  const suiClient = new suiMod.SuiClient({
+    url: suiMod.getFullnodeUrl("testnet"),
+  }).$extend(walrusMod.walrus());
+  const { blobId } = await suiClient.walrus.encodeBlob(new Uint8Array(data));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+
+  return {
+    blobId: base64UrlToBytes32Hex(blobId),
+    size: data.length,
+    // Walrus RedStuff is encoding type 0 (the only Walrus encoding today).
+    encodingType: 0,
+  };
+};
+
+export { base64UrlToBytes32Hex };
