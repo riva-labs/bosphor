@@ -17,8 +17,35 @@ class FakePool implements PgQueryable {
     if (sql.includes('create table') || sql.includes('create index')) return { rows: [] };
 
     if (sql.startsWith('insert into')) {
-      const [intentId, status, sender, blobId, suiObjectId, endEpoch, hops, createdAt, updatedAt] =
-        params as [string, string, string, string, string, number, string, number, number];
+      const [
+        intentId,
+        status,
+        sender,
+        blobId,
+        suiObjectId,
+        endEpoch,
+        committedBlobId,
+        size,
+        deadline,
+        walCostMist,
+        hops,
+        createdAt,
+        updatedAt,
+      ] = params as [
+        string,
+        string,
+        string,
+        string,
+        string,
+        number,
+        string | null,
+        number | null,
+        number | null,
+        string | null,
+        string,
+        number,
+        number,
+      ];
       this.rows.set(intentId, {
         intent_id: intentId,
         status,
@@ -26,12 +53,18 @@ class FakePool implements PgQueryable {
         blob_id: blobId,
         sui_object_id: suiObjectId,
         end_epoch: endEpoch,
+        committed_blob_id: committedBlobId,
+        size,
+        deadline,
+        wal_cost_mist: walCostMist,
         hops: JSON.parse(hops),
         created_at: createdAt,
         updated_at: updatedAt,
       });
       return { rows: [] };
     }
+
+    if (sql.startsWith('alter table')) return { rows: [] };
 
     if (sql.includes('where intent_id')) {
       const row = this.rows.get(params[0] as string);
@@ -96,6 +129,37 @@ describe('PgIntentLifecycleStore', () => {
     expect(record.hops.map((h) => h.hop)).toEqual(['submitted', 'received']);
     expect(record.createdAt).toBe(1000);
     expect(record.updatedAt).toBe(2000);
+  });
+
+  it('returns the on-chain commitment recorded at submit', async () => {
+    const pool = new FakePool();
+    const store = new PgIntentLifecycleStore(pool);
+
+    await store.recordHop('0xintent', 'submitted', {
+      sender: '0xsender',
+      committedBlobId: '0x' + 'cd'.repeat(32),
+      size: 5,
+      deadline: 1700000000000,
+      timestamp: 1000,
+    });
+
+    const commitment = await store.getCommitment('0xintent');
+    expect(commitment).toEqual({
+      intentId: '0xintent',
+      committedBlobId: '0x' + 'cd'.repeat(32),
+      size: 5,
+      deadline: 1700000000000,
+      sender: '0xsender',
+      status: 'submitted',
+    });
+  });
+
+  it('returns null commitment when the committed fields are absent', async () => {
+    const pool = new FakePool();
+    const store = new PgIntentLifecycleStore(pool);
+    await store.recordHop('0xintent', 'received', { sender: '0xsender' });
+    expect(await store.getCommitment('0xintent')).toBeNull();
+    expect(await store.getCommitment('0xmissing')).toBeNull();
   });
 
   it('honours the limit in the recent query', async () => {

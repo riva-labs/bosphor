@@ -7,7 +7,10 @@ import { ethers } from 'ethers';
 const EVM_HEAD_LAG = 3;
 
 const ADAPTER_ABI = [
-  'event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)',
+  // M3 (#238): the intent carries only a commitment. IntentSubmitted now emits
+  // the committed blobId, size, encodingType and storageEpochs instead of the
+  // raw payload bytes, which reach the relayer out-of-band.
+  'event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)',
   'event IntentExecuted(bytes32 indexed intentId, bytes proof)',
   'function confirmExecution(bytes32 intentId, bytes proof) external',
   'function executed(bytes32) view returns (bool)',
@@ -19,14 +22,29 @@ export interface EvmIntentEvent {
   intentId: string;
   sender: string;
   targetChainId: bigint;
-  payload: string;
+  /** Committed Walrus blob id as a 0x hex bytes32 (M3: the on-chain commitment). */
+  blobId: string;
+  /** Committed blob size in bytes. */
+  size: number;
+  encodingType: number;
+  storageEpochs: number;
   nonce: bigint;
   deadline: bigint;
 }
 
 /** The two EVM-side lifecycle bookend events, with the tx hash that carried them. */
 export interface EvmLifecycleEvents {
-  submitted: { intentId: string; sender: string; txHash: string }[];
+  submitted: {
+    intentId: string;
+    sender: string;
+    /** Committed blob id as a 0x hex bytes32. */
+    blobId: string;
+    /** Committed blob size in bytes. */
+    size: number;
+    /** Intent deadline in epoch ms (seconds on-chain, converted here). */
+    deadlineMs: number;
+    txHash: string;
+  }[];
   executed: { intentId: string; txHash: string }[];
   newFromBlock: number;
 }
@@ -54,7 +72,9 @@ export class EvmService implements OnModuleInit {
     // error listener so those are logged here as warnings instead of bubbling
     // up as unhandled rejections.
     this.provider.on('error', (err) => {
-      this.logger.warn(`EVM provider error (transient, retrying): ${(err as Error)?.message ?? err}`);
+      this.logger.warn(
+        `EVM provider error (transient, retrying): ${(err as Error)?.message ?? err}`,
+      );
     });
     this.wallet = new ethers.Wallet(privateKey, this.provider);
     this.adapter = new ethers.Contract(adapterAddress, ADAPTER_ABI, this.wallet);
@@ -95,12 +115,25 @@ export class EvmService implements OnModuleInit {
       });
       if (!parsed) continue;
 
-      const { intentId, sender, targetChainId, payload, nonce, deadline } = parsed.args;
+      const {
+        intentId,
+        sender,
+        targetChainId,
+        blobId,
+        size,
+        encodingType,
+        storageEpochs,
+        nonce,
+        deadline,
+      } = parsed.args;
       events.push({
         intentId,
         sender,
         targetChainId,
-        payload,
+        blobId,
+        size: Number(size),
+        encodingType: Number(encodingType),
+        storageEpochs: Number(storageEpochs),
         nonce,
         deadline,
       });
@@ -143,6 +176,11 @@ export class EvmService implements OnModuleInit {
         return {
           intentId: parsed.args.intentId as string,
           sender: parsed.args.sender as string,
+          blobId: parsed.args.blobId as string,
+          size: Number(parsed.args.size),
+          // On-chain deadline is unix seconds; the ingest path compares against
+          // Date.now() in ms, so convert once here at the boundary.
+          deadlineMs: Number(parsed.args.deadline) * 1000,
           txHash: log.transactionHash,
         };
       })

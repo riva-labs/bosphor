@@ -34,7 +34,17 @@ export interface LzInfra {
 
 export interface SuiLzEvent {
   intentId: string;
-  payload: number[];
+  /**
+   * Committed Walrus blob id as a big-endian u256 from the on-chain event,
+   * carried as a decimal string (gRPC serializes u256 as a string).
+   */
+  committedBlobId: string;
+  /** Committed blob size in bytes. */
+  size: number;
+  encodingType: number;
+  storageEpochs: number;
+  /** Committed intent deadline as a unix timestamp in seconds. */
+  deadline: bigint;
   srcEid: number;
   nonce: bigint;
 }
@@ -83,7 +93,7 @@ export class SuiService implements OnModuleInit {
       treasuryObj: this.config.get<string>('SUI_LZ_TREASURY_OBJ', ''),
     };
 
-    const network = grpcUrl.includes('mainnet') ? 'mainnet' as const : 'testnet' as const;
+    const network = grpcUrl.includes('mainnet') ? ('mainnet' as const) : ('testnet' as const);
     this.client = new SuiGrpcClient({ network, baseUrl: grpcUrl });
 
     if (relayerKey.startsWith('suipriv')) {
@@ -99,12 +109,14 @@ export class SuiService implements OnModuleInit {
     }
 
     const walrusRelayUrl = this.config.getOrThrow<string>('WALRUS_RELAY_URL');
-    this.walrusClient = this.client.$extend(walrus({
-      // The upload relay requires a tip payment; sendTip lets the SDK fetch
-      // the relay's tip-config, pay it, and attach the tx id + nonce to the
-      // upload request. Without it the relay rejects with HTTP 400.
-      uploadRelay: { host: walrusRelayUrl, sendTip: { max: WALRUS_SEND_TIP_MAX_MIST } },
-    }));
+    this.walrusClient = this.client.$extend(
+      walrus({
+        // The upload relay requires a tip payment; sendTip lets the SDK fetch
+        // the relay's tip-config, pay it, and attach the tx id + nonce to the
+        // upload request. Without it the relay rejects with HTTP 400.
+        uploadRelay: { host: walrusRelayUrl, sendTip: { max: WALRUS_SEND_TIP_MAX_MIST } },
+      }),
+    );
 
     this.logger.log(`Sui package: ${this.packageId}`);
     this.logger.log(`Sui LZ pkg: ${this.lzPackageId || '(not configured)'}`);
@@ -175,11 +187,22 @@ export class SuiService implements OnModuleInit {
     blobObjectId: string,
     deadlineMs: bigint,
   ): Promise<string> {
+    const lzConfigId = this.lzConfigId;
+    const walrusSystemId = this.config.getOrThrow<string>('SUI_WALRUS_SYSTEM_ID');
+    if (!lzConfigId) {
+      throw new Error('execute_store requires SUI_LZ_CONFIG_ID');
+    }
+
+    // M3 (#238) execute_store signature:
+    //   execute_store(config, lz_config, system, intent_id, blob, deadline_ms,
+    //                 clock, original_sender, ctx)
     const tx = new Transaction();
     tx.moveCall({
       target: `${this.packageId}::walrus_executor::execute_store`,
       arguments: [
         tx.object(this.configId),
+        tx.object(lzConfigId),
+        tx.object(walrusSystemId),
         tx.pure.vector('u8', Array.from(ethers.getBytes(intentId))),
         tx.object(blobObjectId),
         tx.pure.u64(deadlineMs),

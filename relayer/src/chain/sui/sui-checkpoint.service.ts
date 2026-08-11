@@ -103,7 +103,9 @@ export class SuiCheckpointService {
   private async backfill(fromCheckpoint: bigint) {
     const client = this.sui.getClient();
     const current = BigInt(await this.sui.getCheckpoint());
-    this.metrics.setCheckpointCursorLag(Number(current > fromCheckpoint ? current - fromCheckpoint : 0n));
+    this.metrics.setCheckpointCursorLag(
+      Number(current > fromCheckpoint ? current - fromCheckpoint : 0n),
+    );
     if (fromCheckpoint >= current) return;
 
     // Only announce sizeable catch-ups; steady-state polling advances a handful
@@ -139,8 +141,10 @@ export class SuiCheckpointService {
         // gRPC returns event.json as a protobuf Value:
         //   { kind: { structValue: { fields: { <name>: Value, ... } } } }
         // where each field is itself a Value with a `kind` oneof. Byte vectors
-        // (intent_id, payload) arrive base64-encoded as stringValue, u32 as
-        // numberValue, and u64 (nonce) as stringValue.
+        // (intent_id) arrive base64-encoded as stringValue, u32/u8 as
+        // numberValue, and u64/u256 (deadline, nonce, committed_blob_id) as
+        // stringValue. M3 (#238) replaced the in-band `payload` with the
+        // committed reference fields.
         const structFields = event.json?.kind?.structValue?.fields;
         if (!structFields) continue;
 
@@ -151,12 +155,15 @@ export class SuiCheckpointService {
 
         const intentIdBytes = b64Bytes(strVal(structFields.intent_id));
         if (intentIdBytes.length === 0) continue;
-        const intentId =
-          '0x' + intentIdBytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+        const intentId = '0x' + intentIdBytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 
         const lzEvent: SuiLzEvent = {
           intentId,
-          payload: b64Bytes(strVal(structFields.payload)),
+          committedBlobId: strVal(structFields.committed_blob_id) ?? '0',
+          size: numVal(structFields.size) ?? 0,
+          encodingType: numVal(structFields.encoding_type) ?? 0,
+          storageEpochs: numVal(structFields.storage_epochs) ?? 0,
+          deadline: BigInt(strVal(structFields.deadline) ?? '0'),
           srcEid: numVal(structFields.src_eid) ?? 0,
           nonce: BigInt(strVal(structFields.nonce) ?? '0'),
         };

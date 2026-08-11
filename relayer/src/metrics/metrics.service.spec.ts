@@ -14,9 +14,7 @@ describe('MetricsService', () => {
 
     const out = await service.getMetrics();
 
-    expect(out).toContain(
-      'bosphor_relayer_intents_processed_total{result="success",path="evm"} 2',
-    );
+    expect(out).toContain('bosphor_relayer_intents_processed_total{result="success",path="evm"} 2');
     expect(out).toContain(
       'bosphor_relayer_intents_processed_total{result="failure",path="sui_lz"} 1',
     );

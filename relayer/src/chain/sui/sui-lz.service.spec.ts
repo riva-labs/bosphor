@@ -251,7 +251,12 @@ describe('SuiLzService.quoteLzFee', () => {
     );
 
     await expect(
-      lzService.quoteLzFee('0x' + 'ab'.repeat(32), 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0', 100, 40161),
+      lzService.quoteLzFee(
+        '0x' + 'ab'.repeat(32),
+        'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0',
+        100,
+        40161,
+      ),
     ).rejects.toThrow(/Failed to parse LZ fee quote/);
   });
 });

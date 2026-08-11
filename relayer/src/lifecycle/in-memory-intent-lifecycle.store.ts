@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { IntentLifecycleStore } from './intent-lifecycle.store';
 import { applyHop } from './intent-lifecycle.merge';
-import { HopDetails, IntentHop, IntentLifecycleRecord } from './intent-lifecycle.types';
+import {
+  HopDetails,
+  IntentCommitment,
+  IntentHop,
+  IntentLifecycleRecord,
+} from './intent-lifecycle.types';
 
 /**
  * In-memory IntentLifecycleStore. A real, correct implementation used for unit
@@ -20,5 +25,20 @@ export class InMemoryIntentLifecycleStore extends IntentLifecycleStore {
   async getRecentIntents(limit?: number): Promise<IntentLifecycleRecord[]> {
     const all = [...this.records.values()].sort((a, b) => b.createdAt - a.createdAt);
     return limit === undefined ? all : all.slice(0, limit);
+  }
+
+  async getCommitment(intentId: string): Promise<IntentCommitment | null> {
+    const r = this.records.get(intentId);
+    if (!r || r.committedBlobId === undefined || r.size === undefined || r.deadline === undefined) {
+      return null;
+    }
+    return {
+      intentId: r.intentId,
+      committedBlobId: r.committedBlobId,
+      size: r.size,
+      deadline: r.deadline,
+      sender: r.sender,
+      status: r.status,
+    };
   }
 }

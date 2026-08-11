@@ -6,6 +6,14 @@ export interface WalrusBlobInfo {
   blobId: string;
   suiObjectId: string;
   endEpoch: number;
+  /**
+   * WAL spent to store this blob, in MIST. Metering hook for the M4 user-pays
+   * model. The Walrus SDK writeBlob result does not surface the exact charge
+   * today, so this is undefined until the SDK exposes it (or we compute it from
+   * the storage-payment PTB). Callers must treat undefined as "unknown cost",
+   * never as zero. TODO(M4): populate from the real storage payment.
+   */
+  walCostMist?: bigint;
 }
 
 @Injectable()
@@ -77,6 +85,11 @@ export class WalrusService implements OnModuleInit {
       blobId: result.blobId,
       suiObjectId: result.blobObject.id,
       endEpoch: result.blobObject.storage.end_epoch,
+      // TODO(M4): the SDK writeBlob result does not expose the WAL charge; leave
+      // undefined ("unknown cost") rather than fabricate a value. When the SDK
+      // surfaces it (or we read the storage-payment PTB), populate it here and
+      // the metering hook in the processor will record it automatically.
+      walCostMist: undefined,
     };
   }
 

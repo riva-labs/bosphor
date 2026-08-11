@@ -16,6 +16,9 @@ export const configValidationSchema = Joi.object({
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
+  // Walrus System shared object. Required by the M3 execute_store PTB, which
+  // takes the System object to bind the stored blob to the on-chain commitment.
+  SUI_WALRUS_SYSTEM_ID: Joi.string().required(),
   SUI_LZ_PACKAGE_ID: Joi.string().optional().allow(''),
   SUI_LZ_CONFIG_ID: Joi.string().optional().allow(''),
   SUI_LZ_OAPP_ID: Joi.string().optional().allow(''),
@@ -52,7 +55,10 @@ export const configValidationSchema = Joi.object({
   // Public intent feed / dashboard
   // Postgres connection for the IntentLifecycleStore. When unset, the relayer
   // falls back to an in-memory store (local dev / tests only; not durable).
-  DATABASE_URL: Joi.string().uri({ scheme: ['postgres', 'postgresql'] }).optional().allow(''),
+  DATABASE_URL: Joi.string()
+    .uri({ scheme: ['postgres', 'postgresql'] })
+    .optional()
+    .allow(''),
   // Origin allowed to read the public API (CORS). The deployed dashboard.
   DASHBOARD_ORIGIN: Joi.string().uri().default('https://status.bosphor.xyz'),
 
@@ -60,6 +66,11 @@ export const configValidationSchema = Joi.object({
   // error reporting is disabled (the relayer runs unchanged).
   SENTRY_DSN: Joi.string().uri().optional().allow(''),
   SENTRY_ENVIRONMENT: Joi.string().default('production'),
+
+  // M3 out-of-band ingest: absolute upper bound on an ingested blob, an
+  // early safety cap before the exact committed-size check. Rejects an
+  // oversized upload with a distinct reason (413) rather than allocating it.
+  MAX_INGEST_BLOB_BYTES: Joi.number().integer().default(10485760), // 10 MiB
 
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),

@@ -101,9 +101,7 @@ describe('WalrusService', () => {
 
       await service.upload(Buffer.from('data'));
 
-      expect(mockWriteBlob).toHaveBeenCalledWith(
-        expect.objectContaining({ epochs: 10 }),
-      );
+      expect(mockWriteBlob).toHaveBeenCalledWith(expect.objectContaining({ epochs: 10 }));
     });
 
     it('should reset the SDK cache and retry once on the stale-cache balance::split abort', async () => {
@@ -137,7 +135,7 @@ describe('WalrusService', () => {
       mockWriteBlob
         .mockRejectedValueOnce(
           new Error(
-            "MoveAbort in 5th command, abort code: 0, in " +
+            'MoveAbort in 5th command, abort code: 0, in ' +
               "'0x0000000000000000000000000000000000000000000000000000000000000002::balance::destroy_zero' (instruction 8)",
           ),
         )
@@ -164,9 +162,7 @@ describe('WalrusService', () => {
       // proactive reset still runs before the one attempt.
       mockWriteBlob.mockRejectedValue(new Error('socket hang up'));
 
-      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
-        'socket hang up',
-      );
+      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow('socket hang up');
       expect(mockReset).toHaveBeenCalledTimes(1);
       expect(mockWriteBlob).toHaveBeenCalledTimes(1);
     });
@@ -178,9 +174,7 @@ describe('WalrusService', () => {
         new Error('MoveAbort in 4th command, abort code: 2, in 0x2::balance::split'),
       );
 
-      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow(
-        'balance::split',
-      );
+      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow('balance::split');
       // One proactive reset + one on the retry.
       expect(mockReset).toHaveBeenCalledTimes(2);
       expect(mockWriteBlob).toHaveBeenCalledTimes(2);

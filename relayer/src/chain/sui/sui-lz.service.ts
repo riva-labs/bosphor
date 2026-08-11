@@ -157,16 +157,14 @@ export class SuiLzService {
     const client = this.sui.getClient();
     tx.setSender(this.sui.getAddress());
     const bytes = await tx.build({ client });
-    const { response } = await client.transactionExecutionService.simulateTransaction(
-      {
-        transaction: { bcs: { value: bytes } },
-        // FieldMask paths are proto field names (snake_case). The repeated
-        // command results only populate when the leaf path is requested
-        // explicitly; the camelCase parent 'commandOutputs' returns an empty
-        // array and the fee parse below fails, forcing the oversized fallback.
-        readMask: { paths: ['command_outputs.return_values'] },
-      },
-    );
+    const { response } = await client.transactionExecutionService.simulateTransaction({
+      transaction: { bcs: { value: bytes } },
+      // FieldMask paths are proto field names (snake_case). The repeated
+      // command results only populate when the leaf path is requested
+      // explicitly; the camelCase parent 'commandOutputs' returns an empty
+      // array and the fee parse below fails, forcing the oversized fallback.
+      readMask: { paths: ['command_outputs.return_values'] },
+    });
 
     const outputs = response.commandOutputs ?? [];
     const lastOutput = outputs[outputs.length - 1];

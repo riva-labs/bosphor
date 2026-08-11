@@ -61,7 +61,10 @@ describe('EvmLifecycleWatcher', () => {
       .fn()
       .mockResolvedValueOnce({ submitted: [], executed: [], newFromBlock: 150 })
       .mockResolvedValueOnce({ submitted: [], executed: [], newFromBlock: 175 });
-    const evm = makeEvm({ getBlockNumber: jest.fn().mockResolvedValue(100), pollLifecycleEvents: poll });
+    const evm = makeEvm({
+      getBlockNumber: jest.fn().mockResolvedValue(100),
+      pollLifecycleEvents: poll,
+    });
     const watcher = new EvmLifecycleWatcher(evm, store);
 
     await watcher.onModuleInit(); // seeds cursor from current block (100)

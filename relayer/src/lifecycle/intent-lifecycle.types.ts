@@ -4,12 +4,7 @@
  * LZ proof back -> EVM confirm. `status` on a record is the furthest hop reached.
  */
 export type IntentHop =
-  | 'submitted'
-  | 'received'
-  | 'stored_walrus'
-  | 'recorded_sui'
-  | 'proof_sent'
-  | 'confirmed';
+  'submitted' | 'received' | 'stored_walrus' | 'recorded_sui' | 'proof_sent' | 'confirmed';
 
 /** Optional per-hop context captured as an intent progresses. */
 export interface HopDetails {
@@ -23,6 +18,21 @@ export interface HopDetails {
   suiObjectId?: string;
   /** Walrus storage expiry epoch (set at stored_walrus). */
   endEpoch?: number;
+  /**
+   * Committed Walrus blob id from the on-chain IntentSubmitted event, as a 0x
+   * hex bytes32. In M3 the raw bytes travel out-of-band, so this commitment is
+   * what ingest binds the received bytes to (set at submitted).
+   */
+  committedBlobId?: string;
+  /** Committed blob size in bytes from IntentSubmitted (set at submitted). */
+  size?: number;
+  /** Intent deadline in epoch ms from IntentSubmitted (set at submitted). */
+  deadline?: number;
+  /**
+   * WAL spent to store this intent's blob, in MIST. Metering hook for the
+   * Milestone 4 user-pays model; recorded at stored_walrus when known.
+   */
+  walCostMist?: string;
   /** Hop time in epoch ms. Defaults to now when omitted. */
   timestamp?: number;
 }
@@ -43,6 +53,33 @@ export interface IntentLifecycleRecord {
   blobId?: string;
   suiObjectId?: string;
   endEpoch?: number;
+  /** On-chain committed blob id (0x hex bytes32). See HopDetails.committedBlobId. */
+  committedBlobId?: string;
+  /** Committed blob size in bytes. */
+  size?: number;
+  /** Intent deadline in epoch ms. */
+  deadline?: number;
+  /** WAL spent to store the blob, in MIST (metering hook for M4 user-pays). */
+  walCostMist?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * The on-chain commitment recorded at IntentSubmitted, used by the ingest path
+ * to bind out-of-band bytes to what the sender committed to. A subset of the
+ * lifecycle record, exposed so ingest does not depend on the full feed shape.
+ */
+export interface IntentCommitment {
+  intentId: string;
+  /** Committed Walrus blob id as a 0x hex bytes32. */
+  committedBlobId: string;
+  /** Committed blob size in bytes. */
+  size: number;
+  /** Intent deadline in epoch ms. */
+  deadline: number;
+  /** EVM sender that submitted the intent; receives the blob on Sui. */
+  sender?: string;
+  /** Furthest hop reached; ingest uses this to detect already-executed intents. */
+  status: IntentHop;
 }

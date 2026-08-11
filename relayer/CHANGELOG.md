@@ -1,14 +1,19 @@
 # Changelog
 
-## [0.1.3](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.2...relayer-v0.1.3) (2026-07-31)
+## 0.2.0 (2026-08-11)
 
+### Features
+
+- feat(relayer): intent-aware ingest endpoint and commitment-bound store
+- feat(relayer): track on-chain commitment and update execute_store PTB
+
+## [0.1.3](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.2...relayer-v0.1.3) (2026-07-31)
 
 ### Bug Fixes
 
 * **relayer:** stop transient RPC blips flooding Sentry as errors ([#226](https://github.com/riva-labs/bosphor/issues/226)) ([1efe14a](https://github.com/riva-labs/bosphor/commit/1efe14a7464debf63e2f79b12bb01ef0796f0531))
 
 ## [0.1.2](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.1...relayer-v0.1.2) (2026-07-30)
-
 
 ### Features
 
@@ -22,7 +27,6 @@
 * **relayer:** Sentry runtime error tracking for relayer + canary ([#158](https://github.com/riva-labs/bosphor/issues/158)) ([6c4cafc](https://github.com/riva-labs/bosphor/commit/6c4cafc14c6099d50465ca88574a3eba33df2b38))
 * waitlist capture API + CTA page (M2 adoption signals) ([#172](https://github.com/riva-labs/bosphor/issues/172)) ([60133dd](https://github.com/riva-labs/bosphor/commit/60133dd86a314dc7fa69e2233172b49c1074553b))
 
-
 ### Bug Fixes
 
 * **relayer:** make Sui return path reliable end-to-end ([#128](https://github.com/riva-labs/bosphor/issues/128)) ([34ea6a5](https://github.com/riva-labs/bosphor/commit/34ea6a51755982f7bd9008d6d7e8428e7e90043d))
@@ -33,7 +37,6 @@
 * **relayer:** stabilization fixes (getLogs head-lag + Walrus tip cap) ([#185](https://github.com/riva-labs/bosphor/issues/185)) ([3211e0b](https://github.com/riva-labs/bosphor/commit/3211e0b4b3cac14f3f508fd35b37f5d928d5abe4))
 
 ## [0.1.1](https://github.com/riva-labs/bosphor/compare/relayer-v0.1.0...relayer-v0.1.1) (2026-06-06)
-
 
 ### Features
 

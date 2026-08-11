@@ -48,10 +48,7 @@ describe('SuiService.getCheckpoint', () => {
     });
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SuiService,
-        { provide: ConfigService, useValue: makeConfigService() },
-      ],
+      providers: [SuiService, { provide: ConfigService, useValue: makeConfigService() }],
     }).compile();
 
     service = module.get<SuiService>(SuiService);
@@ -73,10 +70,7 @@ describe('SuiService walrus plugin', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SuiService,
-        { provide: ConfigService, useValue: makeConfigService() },
-      ],
+      providers: [SuiService, { provide: ConfigService, useValue: makeConfigService() }],
     }).compile();
 
     service = module.get<SuiService>(SuiService);

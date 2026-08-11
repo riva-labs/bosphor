@@ -33,6 +33,10 @@ export function applyHop(
   if (details.blobId !== undefined) record.blobId = details.blobId;
   if (details.suiObjectId !== undefined) record.suiObjectId = details.suiObjectId;
   if (details.endEpoch !== undefined) record.endEpoch = details.endEpoch;
+  if (details.committedBlobId !== undefined) record.committedBlobId = details.committedBlobId;
+  if (details.size !== undefined) record.size = details.size;
+  if (details.deadline !== undefined) record.deadline = details.deadline;
+  if (details.walCostMist !== undefined) record.walCostMist = details.walCostMist;
 
   return record;
 }
