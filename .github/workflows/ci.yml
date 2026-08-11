@@ -72,6 +72,39 @@ jobs:
         run: npm test
         working-directory: relayer
 
+  sdk-tests:
+    name: SDK Tests & Parity Vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: sdk
+
+      - name: Run parity + unit tests
+        run: npm test
+        working-directory: sdk
+
+      - name: Parity vectors are in sync with the reference codec
+        run: |
+          npm --prefix sdk run gen:vectors
+          if ! git diff --exit-code -- shared/parity/commitment-vectors.json sui/lz-receiver/tests/commitment_vectors.move; then
+            echo "::error::Parity vectors drifted from the TypeScript reference codec. Run 'npm run gen:vectors' in sdk/ and commit the result."
+            exit 1
+          fi
+
   brand-check:
     name: Brand Check
     runs-on: ubuntu-latest
