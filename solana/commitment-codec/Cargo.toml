@@ -1,0 +1,15 @@
+[package]
+name = "bosphor-commitment-codec"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Bosphor commitment codec: Rust reference for the Solana adapter, pinned to the shared cross-chain parity vectors."
+
+[lib]
+name = "bosphor_commitment_codec"
+path = "src/lib.rs"
+
+# Dependency-free on purpose: the canonical keccak256 is vendored so the crate
+# builds offline and the Solana program can later swap in solana_program::keccak
+# (identical output) without changing the codec logic.
+[dependencies]
