@@ -1,0 +1,42 @@
+name: Release Tag
+
+# After a PR merges to main, create <component>-v<version> tags from the version
+# files. Deterministic and idempotent: only missing tags are created, so there is
+# no release PR and nothing to deadlock. The public Releases page stays
+# milestone-only, so this creates git tags only, not GitHub Releases.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag Components
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install tsx
+        run: npm ci
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push missing tags
+        run: npx tsx scripts/release/tag.ts
