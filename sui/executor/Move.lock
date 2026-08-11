@@ -46,44 +46,86 @@ use_environment = "mainnet"
 manifest_digest = "15E0A8196C7F4E7FC8D4BD29D9FB198E9FC49C17FA016A0431B622E0AD3BB7B8"
 deps = { Walrus = "Walrus", std = "MoveStdlib", sui = "Sui" }
 
+[pinned.testnet.Call]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/dynamic-call/call", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+use_environment = "testnet"
+manifest_digest = "202FB34793F4B22F7502D5497A63D781CFEDFA798B571C7B21B98BABA415CF8E"
+deps = { Utils = "Utils", std = "MoveStdlib", sui = "Sui" }
+
+[pinned.testnet.EndpointV2]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/endpoint-v2", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+use_environment = "testnet"
+manifest_digest = "10F82802C5BE6E39999F4FCC71CCD7D387392DAF11D6A1F2ADEC120D3EAEF286"
+deps = { Call = "Call", Zro = "Zro", std = "MoveStdlib", sui = "Sui" }
+
 [pinned.testnet.MoveStdlib]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "868c226359ef914f1f3b080518f27eb13d8967f5" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "85400e2bd37b490fcd057776e700d3fdca643396" }
 use_environment = "testnet"
 manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
 deps = {}
 
 [pinned.testnet.MoveStdlib_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "4e8aa9ee8b307b294cc85baf7d08af1f432e3d93" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "94ad8ccd0ed6c089a9fe072ff80c918b5ab44943" }
 use_environment = "testnet"
 manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
 deps = {}
 
+[pinned.testnet.OApp]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/oapps/oapp", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+use_environment = "testnet"
+manifest_digest = "5CBBB48C5520ABB41388131D56EE0CA8B17985E35FC6FBEA4BE3DFEED60105EC"
+deps = { EndpointV2 = "EndpointV2", std = "MoveStdlib", sui = "Sui" }
+
+[pinned.testnet.PtbMoveCall]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/ptb-builders/ptb-move-call", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+use_environment = "testnet"
+manifest_digest = "202FB34793F4B22F7502D5497A63D781CFEDFA798B571C7B21B98BABA415CF8E"
+deps = { Utils = "Utils", std = "MoveStdlib", sui = "Sui" }
+
 [pinned.testnet.Sui]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "868c226359ef914f1f3b080518f27eb13d8967f5" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "85400e2bd37b490fcd057776e700d3fdca643396" }
 use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib" }
 
 [pinned.testnet.Sui_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "4e8aa9ee8b307b294cc85baf7d08af1f432e3d93" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "94ad8ccd0ed6c089a9fe072ff80c918b5ab44943" }
 use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib_1" }
 
-[pinned.testnet.WAL]
-source = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "1507953f7aec620589a6287501d14861f76a940a" }
+[pinned.testnet.Utils]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/utils", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
 use_environment = "testnet"
-manifest_digest = "8472F8E6EF249B4ADA3FBCB042D6BABAB922AE4C80F08D227C05A766AF7ED0FA"
+manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
+deps = { std = "MoveStdlib", sui = "Sui" }
+
+[pinned.testnet.WAL]
+source = { local = "deps/wal" }
+use_environment = "testnet"
+manifest_digest = "F0817A27EEB09499A677D94F47D2C46D1E5D370D1DDB38CAF44830C0F77E50FF"
 deps = { Sui = "Sui_1" }
 
 [pinned.testnet.Walrus]
-source = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "1507953f7aec620589a6287501d14861f76a940a" }
+source = { local = "deps/walrus" }
 use_environment = "testnet"
-manifest_digest = "4B30DF6A85C68E29D86BFBEA9C2F0E719E5F2A26086CA42BC2CFA3E897F5F9A6"
+manifest_digest = "D43C634C4C144C2DCC4B227CC3400ADE79BD5D31766E27710A2B7BA7F97647B0"
 deps = { Sui = "Sui_1", WAL = "WAL" }
+
+[pinned.testnet.Zro]
+source = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/zro", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+use_environment = "testnet"
+manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
+deps = { std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.bosphor]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "07C044F3559E1446F2B5370A4219D8F57A70CFF23EEB3782BCB25C5C8DA839DA"
-deps = { Walrus = "Walrus", std = "MoveStdlib", sui = "Sui" }
+manifest_digest = "1272BB8E1FAF52D6C36E2CEA15DBDBF60565A4FDB9F72E2A667BA0E770D36E99"
+deps = { Walrus = "Walrus", bosphor_lz = "bosphor_lz", std = "MoveStdlib", sui = "Sui" }
+
+[pinned.testnet.bosphor_lz]
+source = { local = "../lz-receiver" }
+use_environment = "testnet"
+manifest_digest = "F0B7DE3BE559725CA1B723B6B958F23A01EBD7B5605D7B0A620E90499F1310C8"
+deps = { OApp = "OApp", PtbMoveCall = "PtbMoveCall", std = "MoveStdlib", sui = "Sui" }

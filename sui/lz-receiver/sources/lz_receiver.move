@@ -14,6 +14,7 @@
 module bosphor_lz::lz_receiver;
 
 use bosphor_lz::codec;
+use bosphor_lz::commitment_codec;
 use call::call::{Call, Void};
 use call::call_cap::CallCap;
 use endpoint_v2::endpoint_quote::QuoteParam;
@@ -34,7 +35,7 @@ use zro::zro::ZRO;
 
 /// Intent with this ID was already received and recorded.
 const EIntentAlreadyReceived: u64 = 0;
-/// Message payload is shorter than the minimum 32 bytes (missing intent_id).
+/// Message is not exactly 81 bytes (intent_id(32) ++ commitment(49)).
 const EInvalidMessageLength: u64 = 1;
 /// Caller is not the authorized relayer.
 const EUnauthorizedRelayer: u64 = 2;
@@ -65,9 +66,14 @@ public struct LzReceiverConfig has key {
 /// Record of a received cross-chain intent.
 ///
 /// Stored in `LzReceiverConfig.received_intents` after successful `lz_receive`.
+/// Holds the committed Walrus blob id and storage terms so that `execute_store`
+/// can verify a certified blob against the values fixed at intent time. Relayer
+/// supplied arguments are never trusted for the commitment.
 public struct IntentRecord has store {
-    /// Full ABI-encoded message payload from the EVM source.
-    payload: vector<u8>,
+    /// Committed Walrus blob id (32-byte commitment blobId as a big-endian u256).
+    committed_blob_id: u256,
+    /// Committed number of storage epochs the blob must remain available for.
+    committed_storage_epochs: u32,
     /// LayerZero endpoint ID of the source chain (e.g. 40161 for Sepolia).
     src_eid: u32,
     /// LayerZero message nonce for ordering and replay protection.
@@ -82,8 +88,16 @@ public struct IntentRecord has store {
 public struct IntentReceived has copy, drop {
     /// 32-byte unique identifier extracted from the first 32 bytes of the message.
     intent_id: vector<u8>,
-    /// Full ABI-encoded message payload from EVM.
-    payload: vector<u8>,
+    /// Committed Walrus blob id (32-byte commitment blobId as a big-endian u256).
+    committed_blob_id: u256,
+    /// Committed blob size in bytes.
+    size: u32,
+    /// Committed Walrus encoding type discriminant.
+    encoding_type: u8,
+    /// Committed number of storage epochs the blob must remain available for.
+    storage_epochs: u32,
+    /// Committed intent execution deadline as a unix timestamp.
+    deadline: u64,
     /// LayerZero endpoint ID of the source chain.
     src_eid: u32,
     /// LayerZero message nonce.
@@ -134,19 +148,21 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
 ///
 /// Any SUI value attached to the message is forwarded to the transaction sender.
 ///
-/// Message format from EVM (abi.encode):
+/// Message format from EVM (M3 reference commitment, big-endian, 81 bytes):
 ///   [0:32]    intentId (bytes32)
-///   [32:64]   sender (address, left-padded to 32 bytes)
-///   [64:96]   offset to payload data
-///   [96:128]  deadline (uint256)
-///   [128:160] payload length
-///   [160:...] payload data
+///   [32:81]   commitment (49 bytes):
+///               blobId(32) ++ size(u32) ++ encodingType(u8)
+///               ++ storageEpochs(u32) ++ deadline(u64)
+///
+/// The committed blob id and storage epochs are decoded and stored in the
+/// IntentRecord. `execute_store` in the executor package reads these back and
+/// asserts the certified Walrus blob matches; relayer arguments are not trusted.
 ///
 /// * `config` - Shared LzReceiverConfig holding the CallCap and intent table.
 /// * `oapp` - The OApp shared object for peer/endpoint validation.
 /// * `call` - Hot-potato Call object from the LZ executor.
 ///
-/// Aborts with `EInvalidMessageLength` if the message is shorter than 32 bytes.
+/// Aborts with `EInvalidMessageLength` if the message is not exactly 81 bytes.
 /// Aborts with `EIntentAlreadyReceived` if the intent ID is already recorded.
 public fun lz_receive(
     config: &mut LzReceiverConfig,
@@ -158,23 +174,31 @@ public fun lz_receive(
     let param = oapp.lz_receive(&config.oapp_cap, call);
     let (src_eid, _sender, nonce, guid, message, _executor, _extra, value) = param.destroy();
 
-    // Extract intent_id: first 32 bytes of ABI-encoded message
-    assert!(message.length() >= 32, EInvalidMessageLength);
+    // Message is intent_id(32) ++ commitment(49) = 81 bytes.
+    assert!(message.length() == 81, EInvalidMessageLength);
     let intent_id = slice(&message, 0, 32);
+    let commitment = slice(&message, 32, 49);
 
     assert!(!config.received_intents.contains(intent_id), EIntentAlreadyReceived);
 
-    let payload = message;
+    let (blob_id_bytes, size, encoding_type, storage_epochs, deadline) =
+        commitment_codec::decode(&commitment);
+    let committed_blob_id = bytes32_to_u256(&blob_id_bytes);
 
     config.received_intents.add(intent_id, IntentRecord {
-        payload,
+        committed_blob_id,
+        committed_storage_epochs: storage_epochs,
         src_eid,
         nonce,
     });
 
     event::emit(IntentReceived {
         intent_id,
-        payload,
+        committed_blob_id,
+        size,
+        encoding_type,
+        storage_epochs,
+        deadline,
         src_eid,
         nonce,
         guid,
@@ -341,6 +365,31 @@ public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool {
     config.received_intents.contains(intent_id)
 }
 
+/// Returns the committed Walrus blob id for a received intent.
+///
+/// The value was fixed at intent time from the LZ commitment. `execute_store`
+/// reads this to verify a certified blob against the committed reference.
+///
+/// * `config` - Shared LzReceiverConfig object.
+/// * `intent_id` - 32-byte intent identifier.
+///
+/// Aborts with `EIntentNotReceived` if the intent has not been received.
+public fun committed_blob_id(config: &LzReceiverConfig, intent_id: vector<u8>): u256 {
+    assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
+    config.received_intents.borrow(intent_id).committed_blob_id
+}
+
+/// Returns the committed number of storage epochs for a received intent.
+///
+/// * `config` - Shared LzReceiverConfig object.
+/// * `intent_id` - 32-byte intent identifier.
+///
+/// Aborts with `EIntentNotReceived` if the intent has not been received.
+public fun committed_storage_epochs(config: &LzReceiverConfig, intent_id: vector<u8>): u32 {
+    assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
+    config.received_intents.borrow(intent_id).committed_storage_epochs
+}
+
 /// Returns the OApp CallCap ID. Used by the PTB builder for constructing
 /// executor move calls.
 ///
@@ -408,6 +457,22 @@ fun slice(data: &vector<u8>, start: u64, len: u64): vector<u8> {
     result
 }
 
+/// Converts a 32-byte big-endian vector into a `u256`.
+///
+/// The committed blob id in the commitment is the Walrus blob id (a `u256`)
+/// serialized big-endian into 32 bytes. This reconstructs that `u256`.
+///
+/// * `bytes` - 32-byte big-endian blob id.
+fun bytes32_to_u256(bytes: &vector<u8>): u256 {
+    let mut result: u256 = 0;
+    let mut i = 0u64;
+    while (i < 32) {
+        result = (result << 8) | (*bytes.borrow(i) as u256);
+        i = i + 1;
+    };
+    result
+}
+
 /// Decodes a u64 from a 32-byte big-endian uint256 at the given offset.
 ///
 /// Reads the last 8 bytes (offset+24..offset+32) as big-endian u64,
@@ -434,4 +499,24 @@ fun decode_u64_from_u256(data: &vector<u8>, offset: u64): u64 {
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(LZ_RECEIVER {}, ctx);
+}
+
+/// Test-only helper that inserts an IntentRecord directly, bypassing the full
+/// LZ endpoint Call flow. Lets accessor tests exercise `committed_blob_id` and
+/// `committed_storage_epochs` without constructing a hot-potato Call.
+#[test_only]
+public fun record_intent_for_testing(
+    config: &mut LzReceiverConfig,
+    intent_id: vector<u8>,
+    committed_blob_id: u256,
+    committed_storage_epochs: u32,
+    src_eid: u32,
+    nonce: u64,
+) {
+    config.received_intents.add(intent_id, IntentRecord {
+        committed_blob_id,
+        committed_storage_epochs,
+        src_eid,
+        nonce,
+    });
 }

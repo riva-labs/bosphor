@@ -4,6 +4,7 @@ edition = "2024.beta"
 
 [dependencies]
 Walrus = { local = "deps/walrus" }
+bosphor_lz = { local = "../lz-receiver" }
 
 [addresses]
 bosphor = "0x0"
