@@ -13,7 +13,8 @@
   },
   "scripts": {
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gen:vectors": "node --import tsx scripts/gen-parity-vectors.ts"
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0"
