@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { OApp, Origin, MessagingFee, MessagingReceipt } from "@layerzerolabs/oapp-evm/contracts/oapp/OApp.sol";
 import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
+import { CommitmentCodec } from "./CommitmentCodec.sol";
 
 /// @title BosphorAdapter
 /// @author Riva Labs
@@ -10,11 +11,16 @@ import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
 ///         receives execution proofs back, enabling cross-chain decentralised storage.
 /// @dev Intents flow EVM -> LayerZero v2 -> Sui lz_receive -> Walrus upload -> proof
 ///      back to this contract via either a LayerZero message or a trusted relayer call.
+///      Milestone 3 replaces the arbitrary payload with a compact storage commitment
+///      that references a Walrus blob by id. The forward message carries only the intent
+///      id and the encoded commitment, never the raw blob contents. The returned proof is
+///      checked against the committed blob id before the intent is marked executed.
 contract BosphorAdapter is OApp, IBosphorAdapter {
     // --- State ---
     address public trustedRelayer;
     mapping(bytes32 => bool) public intents;
     mapping(bytes32 => bool) public executed;
+    mapping(bytes32 => bytes32) public committedBlobId;
     mapping(bytes32 => uint256) public intentDeadlines;
     mapping(address => uint256) public nonces;
 
@@ -37,32 +43,45 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     /// @inheritdoc IBosphorAdapter
     function submitIntent(
         uint32 _dstEid,
-        bytes calldata _payload,
-        uint256 _deadline,
+        bytes32 _blobId,
+        uint32 _size,
+        uint8 _encodingType,
+        uint32 _storageEpochs,
+        uint64 _deadline,
         bytes calldata _options
     ) external payable returns (bytes32 intentId) {
         if (block.timestamp > _deadline) revert DeadlineExpired();
 
         uint256 nonce = nonces[msg.sender]++;
 
-        intentId = keccak256(
-            abi.encodePacked(msg.sender, uint64(_dstEid), _payload, nonce, _deadline)
+        CommitmentCodec.Commitment memory c =
+            CommitmentCodec.Commitment(_blobId, _size, _encodingType, _storageEpochs, _deadline);
+
+        intentId = CommitmentCodec.deriveIntentId(
+            c,
+            bytes32(uint256(uint160(msg.sender))),
+            uint64(nonce)
         );
 
         if (intents[intentId]) revert IntentAlreadyExists();
         intents[intentId] = true;
+        committedBlobId[intentId] = _blobId;
         intentDeadlines[intentId] = _deadline;
 
-        // Encode intent data and send via LayerZero
-        bytes memory message = abi.encode(intentId, msg.sender, _payload, _deadline);
+        // The forward message carries only the intent id and the encoded commitment,
+        // 32 + 49 = 81 bytes. No raw blob contents are placed on the wire.
+        bytes memory message = abi.encodePacked(intentId, CommitmentCodec.encode(c));
         _lzSend(_dstEid, message, _options, MessagingFee(msg.value, 0), msg.sender);
 
         emit IntentSubmitted(
             intentId,
             msg.sender,
             uint64(_dstEid),
-            _payload,
-            nonce,
+            _blobId,
+            _size,
+            _encodingType,
+            _storageEpochs,
+            uint64(nonce),
             _deadline
         );
     }
@@ -71,8 +90,10 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     /// @notice Handles incoming LayerZero messages from the remote chain.
     /// @dev The first byte is a message type discriminator:
     ///      - Type 1: Execution proof from Sui. Remaining bytes are ABI-encoded as
-    ///        `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The intent is
-    ///        marked as executed and `IntentExecuted` is emitted with the proof.
+    ///        `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The returned blob id
+    ///        is checked against the blob id committed at submission time; a mismatch reverts
+    ///        with `BlobIdMismatch`. On success the intent is marked executed and
+    ///        `IntentExecuted` is emitted with the proof.
     ///      - All other types revert with `UnknownMessageType`.
     function _lzReceive(
         Origin calldata /*_origin*/,
@@ -86,6 +107,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
         if (msgType == 1) {
             (bytes32 intentId, bytes32 blobId, uint256 endEpoch) =
                 abi.decode(_message[1:], (bytes32, bytes32, uint256));
+            if (blobId != committedBlobId[intentId]) revert BlobIdMismatch();
             _markExecuted(intentId, abi.encode(blobId, endEpoch));
         } else {
             revert UnknownMessageType();
@@ -121,11 +143,17 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     /// @inheritdoc IBosphorAdapter
     function quote(
         uint32 _dstEid,
-        bytes calldata _payload,
-        uint256 _deadline,
+        bytes32 _blobId,
+        uint32 _size,
+        uint8 _encodingType,
+        uint32 _storageEpochs,
+        uint64 _deadline,
         bytes calldata _options
     ) external view returns (MessagingFee memory fee) {
-        bytes memory message = abi.encode(bytes32(0), msg.sender, _payload, _deadline);
+        CommitmentCodec.Commitment memory c =
+            CommitmentCodec.Commitment(_blobId, _size, _encodingType, _storageEpochs, _deadline);
+        // Same 81-byte shape as submitIntent, with a zeroed intent id placeholder.
+        bytes memory message = abi.encodePacked(bytes32(0), CommitmentCodec.encode(c));
         return _quote(_dstEid, message, _options, false);
     }
 
@@ -142,13 +170,17 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     /// @inheritdoc IBosphorAdapter
     function getIntentId(
         address _sender,
-        uint64 _targetChainId,
-        bytes calldata _payload,
-        uint256 _nonce,
-        uint256 _deadline
+        bytes32 _blobId,
+        uint32 _size,
+        uint8 _encodingType,
+        uint32 _storageEpochs,
+        uint64 _deadline,
+        uint64 _nonce
     ) external pure returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(_sender, _targetChainId, _payload, _nonce, _deadline)
+        return CommitmentCodec.deriveIntentId(
+            CommitmentCodec.Commitment(_blobId, _size, _encodingType, _storageEpochs, _deadline),
+            bytes32(uint256(uint160(_sender))),
+            _nonce
         );
     }
 }
