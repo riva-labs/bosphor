@@ -19,10 +19,7 @@ describe('MetricsController', () => {
 
     const body = await controller.scrape(res as never);
 
-    expect(res.set).toHaveBeenCalledWith(
-      'Content-Type',
-      expect.stringContaining('text/plain'),
-    );
+    expect(res.set).toHaveBeenCalledWith('Content-Type', expect.stringContaining('text/plain'));
     expect(body).toContain('process_cpu_seconds_total');
   });
 });

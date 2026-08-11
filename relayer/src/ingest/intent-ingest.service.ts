@@ -1,0 +1,155 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { SuiService } from '../chain/sui/sui.service';
+import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
+import { IngestRejected, IngestResult } from './intent-ingest.types';
+
+/** A buffered blob awaiting storage after the Sui IntentReceived event. */
+export interface BufferedBlob {
+  bytes: Buffer;
+  /** Recomputed Walrus blob id (base64url) that matched the commitment. */
+  blobId: string;
+  /** Committed size, re-checked before the WAL spend. */
+  size: number;
+}
+
+/**
+ * Binds out-of-band bytes to an on-chain commitment.
+ *
+ * M3 moved the blob data off the LayerZero message. The intent now carries only
+ * a commitment (blob id + size + deadline, emitted by EVM IntentSubmitted); the
+ * raw bytes reach the relayer out-of-band via the ingest endpoint. This service
+ * is the gate: it proves the received bytes are exactly what the sender
+ * committed to before any WAL is spent, then buffers them in memory for the
+ * processor to store after IntentReceived fires (the reorg guard).
+ *
+ * No upload happens here. The Walrus blob id is recomputed locally via the SDK's
+ * encodeBlob, which derives the id without contacting the network.
+ */
+@Injectable()
+export class IntentIngest {
+  private readonly logger = new Logger(IntentIngest.name);
+  private readonly maxIngestBytes: number;
+  /** Accepted bytes keyed by intent id, awaiting store after IntentReceived. */
+  private readonly buffered = new Map<string, BufferedBlob>();
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly sui: SuiService,
+    private readonly lifecycle: IntentLifecycleStore,
+  ) {
+    this.maxIngestBytes = this.config.get<number>('MAX_INGEST_BLOB_BYTES') ?? 10_485_760;
+  }
+
+  /**
+   * Validate and buffer out-of-band bytes for `intentId`. Validation runs in a
+   * fixed order, each failure returning a distinct typed reason:
+   *   unknown -> already-executed -> expired -> oversized -> wrong-size -> wrong-blob-id.
+   * On acceptance the bytes are buffered in memory (not uploaded) keyed by
+   * intent id for the processor to store after IntentReceived.
+   */
+  async ingest(intentId: string, bytes: Buffer): Promise<IngestResult> {
+    const commitment = await this.lifecycle.getCommitment(intentId);
+    if (!commitment) {
+      return this.reject(intentId, 'unknown', 'no pending intent for this id');
+    }
+
+    // An intent is "executed" once it has stored on Walrus or gone further. Re-
+    // ingesting is a no-op the relayer must refuse rather than re-buffer.
+    if (this.isExecuted(commitment.status)) {
+      return this.reject(intentId, 'already-executed', 'intent already executed');
+    }
+
+    if (Date.now() > commitment.deadline) {
+      return this.reject(intentId, 'expired', 'intent deadline has passed');
+    }
+
+    // Absolute cap first, before the exact-size check, so an oversized upload is
+    // rejected with its own reason instead of being read as a size mismatch.
+    if (bytes.length > this.maxIngestBytes) {
+      return this.reject(
+        intentId,
+        'oversized',
+        `blob exceeds MAX_INGEST_BLOB_BYTES (${bytes.length} > ${this.maxIngestBytes})`,
+      );
+    }
+
+    if (bytes.length !== commitment.size) {
+      return this.reject(
+        intentId,
+        'wrong-size',
+        `blob size ${bytes.length} does not match committed size ${commitment.size}`,
+      );
+    }
+
+    // Recompute the Walrus blob id locally (no upload) and require it to equal
+    // the on-chain commitment. This is the load-bearing binding: it proves the
+    // bytes are exactly what the sender paid to store.
+    const walrusClient = this.sui.getWalrusClient();
+    const { blobId } = await walrusClient.walrus.encodeBlob(new Uint8Array(bytes));
+    if (!blobIdMatches(blobId, commitment.committedBlobId)) {
+      return this.reject(
+        intentId,
+        'wrong-blob-id',
+        `recomputed blob id ${blobId} does not match committed ${commitment.committedBlobId}`,
+      );
+    }
+
+    this.buffered.set(intentId, { bytes, blobId, size: bytes.length });
+    this.logger.log(
+      `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (buffered for store)`,
+    );
+    return { ok: true, intentId, blobId, size: bytes.length };
+  }
+
+  /** Take (and remove) the buffered bytes for an intent, if any have arrived. */
+  take(intentId: string): BufferedBlob | undefined {
+    const blob = this.buffered.get(intentId);
+    if (blob) this.buffered.delete(intentId);
+    return blob;
+  }
+
+  /** Peek buffered bytes without removing them (used to re-verify before spend). */
+  peek(intentId: string): BufferedBlob | undefined {
+    return this.buffered.get(intentId);
+  }
+
+  /** Drop buffered bytes for an intent (e.g. after a terminal failure). */
+  drop(intentId: string): void {
+    this.buffered.delete(intentId);
+  }
+
+  private isExecuted(status: string): boolean {
+    // Any hop at or past stored_walrus means WAL was already spent for this id.
+    return (
+      status === 'stored_walrus' ||
+      status === 'recorded_sui' ||
+      status === 'proof_sent' ||
+      status === 'confirmed'
+    );
+  }
+
+  private reject(
+    intentId: string,
+    reason: IngestRejected['reason'],
+    message: string,
+  ): IngestRejected {
+    this.logger.warn(`[${intentId}] Ingest rejected (${reason}): ${message}`);
+    return { ok: false, intentId, reason, message };
+  }
+}
+
+/**
+ * Compare a recomputed Walrus blob id (base64url) against an on-chain commitment
+ * (0x hex bytes32). Both decode to the same 32 raw bytes; comparing the decoded
+ * bytes avoids brittle string-format assumptions between the two encodings.
+ */
+export function blobIdMatches(recomputedBase64Url: string, committedHex: string): boolean {
+  try {
+    const recomputed = Buffer.from(recomputedBase64Url, 'base64url');
+    const committed = Buffer.from(committedHex.replace(/^0x/i, ''), 'hex');
+    return recomputed.length > 0 && recomputed.equals(committed);
+  } catch {
+    return false;
+  }
+}

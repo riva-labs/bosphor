@@ -1,9 +1,8 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
-import { ethers } from 'ethers';
 import { EvmService } from '../chain/evm/evm.service';
-import { SuiService } from '../chain/sui/sui.service';
+import { SuiService, SuiLzEvent } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
 import { WalrusService } from '../walrus/walrus.service';
@@ -12,6 +11,8 @@ import { MetricsService } from '../metrics/metrics.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
+import { IntentIngest, BufferedBlob } from '../ingest/intent-ingest.service';
+import { blobIdMatches } from '../ingest/intent-ingest.service';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -34,6 +35,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly metrics: MetricsService,
     private readonly lifecycle: IntentLifecycleStore,
     private readonly errorReporter: ErrorReporter,
+    private readonly ingest: IntentIngest,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
@@ -75,51 +77,54 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Called by SuiService when an IntentReceived event is detected
-   * via checkpoint streaming.
+   * Called by SuiCheckpointService when an IntentReceived event is detected.
+   *
+   * M3 (#238): the event no longer carries the blob bytes, only the committed
+   * reference. The bytes arrive out-of-band via the ingest endpoint and are
+   * buffered by IntentIngest. Storage happens only here, after IntentReceived
+   * (the reorg guard): if the bytes have not been ingested yet the event is a
+   * no-op and is retried on the next checkpoint pass, so the intent naturally
+   * expires at its deadline if bytes never arrive. Nothing is fabricated.
    */
-  async handleSuiLzEvent(event: {
-    intentId: string;
-    payload: number[];
-    srcEid: number;
-  }): Promise<void> {
+  async handleSuiLzEvent(event: SuiLzEvent): Promise<void> {
     if (this.processedIntents.has(event.intentId)) return;
 
-    const payloadHex =
-      '0x' + event.payload.map((b: number) => b.toString(16).padStart(2, '0')).join('');
-
-    let sender: string;
-    let userPayload: string;
-    let deadlineMs: bigint;
-    try {
-      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-        ['bytes32', 'address', 'bytes', 'uint256'],
-        payloadHex,
-      );
-      sender = decoded[1];
-      userPayload = decoded[2];
-      deadlineMs = BigInt(decoded[3]) * 1000n;
-    } catch {
-      this.logger.error(`[${event.intentId}] Failed to decode ABI payload`);
-      this.processedIntents.set(event.intentId, Date.now());
-      return;
-    }
-
+    const deadlineMs = event.deadline * 1000n;
     if (Date.now() > Number(deadlineMs)) {
       this.logger.log(`[${event.intentId}] Skipping - deadline expired (via Sui LZ)`);
       this.processedIntents.set(event.intentId, Date.now());
+      this.ingest.drop(event.intentId);
       return;
     }
 
-    this.logger.log(
-      `[${event.intentId}] Intent received via Sui LZ (sender: ${sender}, src_eid: ${event.srcEid})`,
-    );
+    // The bytes must already be ingested and bound to the commitment. If not,
+    // do NOT mark processed: wait for ingest and retry on the next pass.
+    const buffered = this.ingest.peek(event.intentId);
+    if (!buffered) {
+      this.logger.log(
+        `[${event.intentId}] IntentReceived but no ingested bytes yet - waiting for out-of-band upload`,
+      );
+      return;
+    }
+
+    // original_sender for execute_store comes from the EVM commitment recorded
+    // at submit. Without it we cannot transfer the blob to the right address.
+    const commitment = await this.lifecycle.getCommitment(event.intentId);
+    const sender = commitment?.sender;
+    if (!sender) {
+      this.logger.warn(
+        `[${event.intentId}] IntentReceived but no committed sender recorded yet - waiting`,
+      );
+      return;
+    }
+
+    this.logger.log(`[${event.intentId}] Intent received via Sui LZ (src_eid: ${event.srcEid})`);
     await this.trackHop(event.intentId, 'received', { sender });
 
     try {
-      const payloadBytes = ethers.getBytes(userPayload);
-      await this.processIntent(event.intentId, sender, Buffer.from(payloadBytes), deadlineMs);
+      await this.processIntent(event.intentId, sender, buffered, deadlineMs, event.committedBlobId);
       this.processedIntents.set(event.intentId, Date.now());
+      this.ingest.drop(event.intentId);
       this.metrics.recordIntentProcessed('sui_lz', 'success');
       this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
     } catch (err) {
@@ -141,30 +146,52 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private async processIntent(
     intentId: string,
     sender: string,
-    payload: Buffer,
+    buffered: BufferedBlob,
     deadlineMs: bigint,
+    committedBlobIdFromEvent: string,
   ): Promise<void> {
     // 0. Ensure the relayer holds enough WAL to pay for storage. Refills from
     // SUI via the Walrus exchange when low, so an exhausted WAL balance never
     // silently blocks fulfillment (a live failure mode we hit on testnet).
     await this.walTopUp.ensureWal();
 
-    // 1. Upload payload to Walrus
-    this.logger.log(`[${intentId}] Uploading to Walrus...`);
+    // 1. Re-verify the recomputed blob id equals the committed id BEFORE
+    // spending WAL. Ingest already checked this, but the check is cheap and
+    // guards against a stale/tampered buffer between accept and store. Prefer
+    // the on-chain commitment recorded at submit; fall back to the event's
+    // committed id (u256 decimal) if the EVM commitment is unavailable.
+    const commitment = await this.lifecycle.getCommitment(intentId);
+    const committedRef = commitment?.committedBlobId ?? u256ToHex(committedBlobIdFromEvent);
+    if (!blobIdMatches(buffered.blobId, committedRef)) {
+      throw new Error(
+        `[${intentId}] Refusing to store: buffered blob id ${buffered.blobId} no longer ` +
+          `matches committed reference ${committedRef}`,
+      );
+    }
+
+    // 2. Upload the ingested bytes to Walrus
+    this.logger.log(`[${intentId}] Uploading ingested bytes to Walrus...`);
     const uploadStart = Date.now();
-    const walrusInfo = await this.walrus.upload(payload);
+    const walrusInfo = await this.walrus.upload(buffered.bytes);
     this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
     this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
     this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
     this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
-    this.logger.log(`[${intentId}] Verify blobId: ${walrusInfo.blobId}`);
+
+    // Metering hook: record the per-intent WAL cost for the M4 user-pays model.
+    // The SDK does not surface the exact charge yet, so walCostMist may be
+    // undefined ("unknown cost"); we record it when present and never fabricate.
+    if (walrusInfo.walCostMist !== undefined) {
+      this.metrics.recordWalStorageCost(Number(walrusInfo.walCostMist));
+    }
     await this.trackHop(intentId, 'stored_walrus', {
       blobId: walrusInfo.blobId,
       suiObjectId: walrusInfo.suiObjectId,
       endEpoch: walrusInfo.endEpoch,
+      walCostMist: walrusInfo.walCostMist?.toString(),
     });
 
-    // 2. Record on Sui (skip if already executed from a prior attempt)
+    // 3. Record on Sui (skip if already executed from a prior attempt)
     const blobObjectId = walrusInfo.suiObjectId;
     let storeDigest: string | undefined;
     try {
@@ -187,7 +214,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
     await this.trackHop(intentId, 'recorded_sui', { txHash: storeDigest });
 
-    // 3. Quote the real LZ fee on-chain, then send the proof back to EVM.
+    // 4. Quote the real LZ fee on-chain, then send the proof back to EVM.
     // The quoted fee is authoritative. We never substitute a fabricated
     // fallback: a bad fee either overpays (drains the relayer) or underpays
     // (the send reverts). If the quote fails, fail loudly so it gets fixed.
@@ -241,5 +268,19 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`[${intentId}] Failed to record ${hop} hop: ${err}`);
     }
+  }
+}
+
+/**
+ * Convert a big-endian u256 (decimal string from the on-chain event) into a
+ * 0x-prefixed 32-byte hex string, so it can be compared to a recomputed blob id
+ * the same way the EVM commitment is.
+ */
+function u256ToHex(decimal: string): string {
+  try {
+    const hex = BigInt(decimal).toString(16).padStart(64, '0');
+    return '0x' + hex;
+  } catch {
+    return '0x' + '00'.repeat(32);
   }
 }

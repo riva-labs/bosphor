@@ -54,6 +54,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Per-intent WAL storage cost, in MIST. Metering hook for the Milestone 4
+  // user-pays model: today the relayer absorbs this cost, so tracking it per
+  // fulfilled intent is what M4 will turn into a charge without reworking the
+  // fulfillment path. The running total is exposed for cost dashboards.
+  private readonly walStorageCost = new Counter({
+    name: 'bosphor_relayer_wal_storage_cost_mist_total',
+    help: 'Total WAL spent on blob storage across fulfilled intents, in MIST',
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -90,6 +100,15 @@ export class MetricsService {
 
   recordWalTopUp(result: 'success' | 'failure' | 'insufficient_sui'): void {
     this.walTopUp.inc({ result });
+  }
+
+  /**
+   * Record the WAL cost (MIST) of storing one intent's blob. Metering hook for
+   * the M4 user-pays model; a no-op guard keeps a missing/negative cost from
+   * corrupting the counter.
+   */
+  recordWalStorageCost(costMist: number): void {
+    if (Number.isFinite(costMist) && costMist >= 0) this.walStorageCost.inc(costMist);
   }
 
   get contentType(): string {

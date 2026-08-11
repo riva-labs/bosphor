@@ -5,6 +5,7 @@ import { EvmModule } from './chain/evm/evm.module';
 import { SuiModule } from './chain/sui/sui.module';
 import { WalrusModule } from './walrus/walrus.module';
 import { IntentModule } from './intent/intent.module';
+import { IngestModule } from './ingest/ingest.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
@@ -20,6 +21,7 @@ import { ObservabilityModule } from './observability/observability.module';
     EvmModule,
     SuiModule,
     WalrusModule,
+    IngestModule,
     IntentModule,
     HealthModule,
   ],
