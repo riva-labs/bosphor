@@ -100,10 +100,23 @@ jobs:
       - name: Parity vectors are in sync with the reference codec
         run: |
           npm --prefix sdk run gen:vectors
-          if ! git diff --exit-code -- shared/parity/commitment-vectors.json sui/lz-receiver/tests/commitment_vectors.move; then
+          if ! git diff --exit-code -- shared/parity/commitment-vectors.json sui/lz-receiver/tests/commitment_vectors.move solana/commitment-codec/tests/parity_vectors.rs; then
             echo "::error::Parity vectors drifted from the TypeScript reference codec. Run 'npm run gen:vectors' in sdk/ and commit the result."
             exit 1
           fi
+
+  rust-commitment-codec:
+    name: Rust Commitment Codec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test
+        working-directory: solana/commitment-codec
 
   brand-check:
     name: Brand Check
