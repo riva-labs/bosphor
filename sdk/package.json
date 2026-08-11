@@ -1,0 +1,27 @@
+{
+  "name": "@bosphor/sdk",
+  "version": "0.2.0",
+  "description": "Bosphor SDK: cross-chain storage intents for Walrus",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "exports": {
+    "./commitment": "./src/commitment-codec.ts"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "gen:vectors": "node --import tsx scripts/gen-parity-vectors.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "@types/node": "^26.1.2"
+  }
+}

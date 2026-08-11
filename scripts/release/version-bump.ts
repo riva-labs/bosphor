@@ -57,7 +57,9 @@ for (const component of components) {
   const current = readCurrentVersion(component);
   if (!current) continue; // component not present on this branch
 
-  const baseVersion = readVersionAtRef(base, component) ?? current;
+  const baseVersion = readVersionAtRef(base, component);
+  if (baseVersion === null) continue; // new component: current version is its initial release, no bump to enforce
+
   const target = applyBump(baseVersion, bump);
   plans.push({
     component,
