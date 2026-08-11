@@ -55,6 +55,68 @@ fun test_admin_cap_transferred_to_sender() {
     scenario.end();
 }
 
+// === committed reference accessor tests ===
+
+#[test]
+fun test_committed_accessors_return_recorded_values() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let mut config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        let intent_id = x"0000000000000000000000000000000000000000000000000000000000000001";
+        let blob_id: u256 = 0xDEADBEEF;
+        let storage_epochs: u32 = 12;
+        lz_receiver::record_intent_for_testing(
+            &mut config,
+            intent_id,
+            blob_id,
+            storage_epochs,
+            40161,
+            7,
+        );
+        assert!(lz_receiver::is_received(&config, intent_id), 0);
+        assert!(lz_receiver::committed_blob_id(&config, intent_id) == blob_id, 1);
+        assert!(lz_receiver::committed_storage_epochs(&config, intent_id) == storage_epochs, 2);
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EIntentNotReceived)]
+fun test_committed_blob_id_aborts_when_absent() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        lz_receiver::committed_blob_id(&config, b"missing_intent_id");
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EIntentNotReceived)]
+fun test_committed_storage_epochs_aborts_when_absent() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        lz_receiver::committed_storage_epochs(&config, b"missing_intent_id");
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
 // === codec::encode tests ===
 
 #[test]

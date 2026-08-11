@@ -58,6 +58,51 @@ module bosphor::walrus_executor_tests {
         scenario.end();
     }
 
+    // === assert_reference tests (pure, no Blob/System) ===
+
+    #[test]
+    fun test_assert_reference_accepts_matching_blob_and_epochs() {
+        // end_epoch exactly current + committed epochs.
+        walrus_executor::assert_reference(
+            0xABCDEF,
+            10,
+            0xABCDEF,
+            110,
+            100,
+        );
+        // end_epoch comfortably above the minimum.
+        walrus_executor::assert_reference(
+            0xABCDEF,
+            10,
+            0xABCDEF,
+            500,
+            100,
+        );
+    }
+
+    #[test, expected_failure(abort_code = walrus_executor::EBlobIdMismatch)]
+    fun test_assert_reference_rejects_wrong_blob_id() {
+        walrus_executor::assert_reference(
+            0xABCDEF,
+            10,
+            0x123456,
+            500,
+            100,
+        );
+    }
+
+    #[test, expected_failure(abort_code = walrus_executor::EInsufficientStorageEpochs)]
+    fun test_assert_reference_rejects_insufficient_epochs() {
+        // end_epoch one below current + committed epochs (109 < 110).
+        walrus_executor::assert_reference(
+            0xABCDEF,
+            10,
+            0xABCDEF,
+            109,
+            100,
+        );
+    }
+
     #[test]
     fun test_is_executed_returns_false_for_new_intent() {
         let mut scenario = test_scenario::begin(RELAYER);

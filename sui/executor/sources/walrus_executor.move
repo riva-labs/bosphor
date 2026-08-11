@@ -9,10 +9,12 @@
 /// prevents double-execution, and transfers ownership to the original sender.
 module bosphor::walrus_executor;
 
+use bosphor_lz::lz_receiver::LzReceiverConfig;
 use sui::clock::Clock;
 use sui::event;
 use sui::table::{Self, Table};
 use walrus::blob::Blob;
+use walrus::system::System;
 
 // === Errors ===
 
@@ -24,6 +26,10 @@ const EBlobNotCertified: u64 = 1;
 const EIntentAlreadyExecuted: u64 = 2;
 /// Current timestamp exceeds the intent deadline.
 const EDeadlineExpired: u64 = 3;
+/// Certified blob id does not match the committed reference from `lz_receive`.
+const EBlobIdMismatch: u64 = 4;
+/// Certified blob does not cover the committed number of storage epochs.
+const EInsufficientStorageEpochs: u64 = 5;
 
 // === Structs ===
 
@@ -97,11 +103,20 @@ fun init(ctx: &mut TxContext) {
 
 // === Public-Mutative ===
 
-/// Executes a storage intent by verifying a certified Walrus blob, recording
-/// the execution, and transferring the blob and a `StorageReceipt` to the
-/// original sender.
+/// Executes a storage intent by verifying a certified Walrus blob against the
+/// committed reference recorded at intent time, recording the execution, and
+/// transferring the blob and a `StorageReceipt` to the original sender.
+///
+/// Beyond relayer auth, certification, dedup, and deadline, this asserts the
+/// certified blob matches the on-chain commitment fixed by `lz_receive`:
+///   1. the blob id equals the committed blob id (`EBlobIdMismatch`);
+///   2. the blob's end epoch covers `current_epoch + committed_storage_epochs`
+///      (`EInsufficientStorageEpochs`).
+/// The committed values come from `lz_config`, not from relayer arguments.
 ///
 /// * `config` - Shared ExecutorConfig (checks relayer authorization and dedup).
+/// * `lz_config` - Shared LzReceiverConfig holding the committed reference for the intent.
+/// * `system` - Walrus System object, used to read the current epoch.
 /// * `intent_id` - Unique identifier of the storage intent.
 /// * `blob` - Certified Walrus Blob object to be stored.
 /// * `deadline_ms` - Intent deadline in milliseconds; execution must happen before this.
@@ -112,8 +127,12 @@ fun init(ctx: &mut TxContext) {
 /// Aborts with `EBlobNotCertified` if the blob has not been certified.
 /// Aborts with `EIntentAlreadyExecuted` if this intent was already executed.
 /// Aborts with `EDeadlineExpired` if the current time exceeds the deadline.
+/// Aborts with `EBlobIdMismatch` if the blob id differs from the committed reference.
+/// Aborts with `EInsufficientStorageEpochs` if the blob does not cover the committed epochs.
 public fun execute_store(
     config: &mut ExecutorConfig,
+    lz_config: &LzReceiverConfig,
+    system: &System,
     intent_id: vector<u8>,
     blob: Blob,
     deadline_ms: u64,
@@ -125,6 +144,17 @@ public fun execute_store(
     assert!(blob.certified_epoch().is_some(), EBlobNotCertified);
     assert!(!config.executed_intents.contains(intent_id), EIntentAlreadyExecuted);
     assert!(clock.timestamp_ms() <= deadline_ms, EDeadlineExpired);
+
+    // Verify the certified blob against the reference committed by `lz_receive`.
+    let committed_id = bosphor_lz::lz_receiver::committed_blob_id(lz_config, intent_id);
+    let committed_epochs = bosphor_lz::lz_receiver::committed_storage_epochs(lz_config, intent_id);
+    assert_reference(
+        committed_id,
+        committed_epochs,
+        blob.blob_id(),
+        blob.end_epoch(),
+        system.epoch(),
+    );
 
     config.executed_intents.add(intent_id, true);
 
@@ -158,6 +188,38 @@ public fun execute_store(
 /// * `intent_id` - Unique identifier of the intent to check.
 public fun is_executed(config: &ExecutorConfig, intent_id: vector<u8>): bool {
     config.executed_intents.contains(intent_id)
+}
+
+/// Pure reference-verification logic shared by `execute_store`.
+///
+/// Asserts that a certified Walrus blob matches the committed reference:
+///   1. the actual blob id equals the committed blob id;
+///   2. the actual end epoch covers `current_epoch + committed_storage_epochs`.
+/// The epoch sum is widened to `u64` to avoid `u32` overflow.
+///
+/// This helper takes plain scalars so it can be unit-tested directly without
+/// constructing a certified Walrus Blob or System object.
+///
+/// * `committed_blob_id` - Blob id fixed at intent time by `lz_receive`.
+/// * `committed_storage_epochs` - Storage epochs the blob must remain available for.
+/// * `actual_blob_id` - Blob id of the certified blob.
+/// * `actual_end_epoch` - End epoch of the certified blob.
+/// * `current_epoch` - Current Walrus epoch.
+///
+/// Aborts with `EBlobIdMismatch` if the blob ids differ.
+/// Aborts with `EInsufficientStorageEpochs` if the blob does not cover the committed epochs.
+public fun assert_reference(
+    committed_blob_id: u256,
+    committed_storage_epochs: u32,
+    actual_blob_id: u256,
+    actual_end_epoch: u32,
+    current_epoch: u32,
+) {
+    assert!(actual_blob_id == committed_blob_id, EBlobIdMismatch);
+    assert!(
+        (actual_end_epoch as u64) >= (current_epoch as u64) + (committed_storage_epochs as u64),
+        EInsufficientStorageEpochs,
+    );
 }
 
 // === Admin ===
