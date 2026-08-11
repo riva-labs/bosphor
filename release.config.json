@@ -1,0 +1,41 @@
+{
+  "$comment": "Component registry for the deterministic version-bump tooling in scripts/release. Replaces release-please. Versions are pre-1.0: feat -> minor, fix/perf -> patch, breaking -> minor. Tags are <tagPrefix><version>.",
+  "components": [
+    {
+      "name": "contracts-evm",
+      "dir": "contracts/evm",
+      "type": "plain",
+      "versionFile": "contracts/evm/VERSION",
+      "changelog": "contracts/evm/CHANGELOG.md",
+      "tagPrefix": "contracts-evm-v",
+      "scopes": ["contracts"]
+    },
+    {
+      "name": "sui",
+      "dir": "sui",
+      "type": "plain",
+      "versionFile": "sui/VERSION",
+      "changelog": "sui/CHANGELOG.md",
+      "tagPrefix": "sui-v",
+      "scopes": ["sui"]
+    },
+    {
+      "name": "relayer",
+      "dir": "relayer",
+      "type": "node",
+      "versionFile": "relayer/package.json",
+      "changelog": "relayer/CHANGELOG.md",
+      "tagPrefix": "relayer-v",
+      "scopes": ["relayer"]
+    },
+    {
+      "name": "sdk",
+      "dir": "sdk",
+      "type": "node",
+      "versionFile": "sdk/package.json",
+      "changelog": "sdk/CHANGELOG.md",
+      "tagPrefix": "sdk-v",
+      "scopes": ["sdk"]
+    }
+  ]
+}

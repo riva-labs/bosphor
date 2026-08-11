@@ -1,0 +1,30 @@
+name: Release Guard
+
+# Fails a PR whose commits require a component version bump that is missing.
+# This replaces the release-please release PR: the bump is made on the feature
+# branch (via `npm run version:bump`) before merge, and this job verifies it.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    name: Version Bump Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the merge-base with main and per-commit paths resolve.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install tsx
+        run: npm ci
+
+      - name: Check component version bumps
+        run: npx tsx scripts/release/version-bump.ts --check --base origin/${{ github.base_ref }}

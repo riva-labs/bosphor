@@ -65,14 +65,11 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # GitHub Actions: allow minor/patch and major (CI validates them), but hold
-  # release-please-action on v4 (release-critical, not exercised by PR CI).
+  # GitHub Actions: allow minor/patch and major (CI validates them).
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    ignore:
-      - dependency-name: "googleapis/release-please-action"
 
   # Git submodules (forge-std, openzeppelin-contracts): minor/patch only.
   # OpenZeppelin v5 breaks the LayerZero v2 OApp Ownable pattern.

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#
+# Block a push whose commits require a component version bump that is missing.
+# Mirrors the Release Guard CI check locally so you catch it before the PR.
+#
+# Enable with: npm run hooks:install   (sets core.hooksPath to .githooks)
+# Bypass once with: git push --no-verify
+set -euo pipefail
+
+# Only guard pushes toward main; feature-branch pushes are fine mid-flight.
+base="origin/main"
+git rev-parse --verify "$base" >/dev/null 2>&1 || base="main"
+
+if ! npx tsx scripts/release/version-bump.ts --check --base "$base"; then
+  echo ""
+  echo "pre-push blocked: run 'npm run version:bump', commit the result, then push."
+  echo "(bypass with 'git push --no-verify' if you know what you are doing)"
+  exit 1
+fi
