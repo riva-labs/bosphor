@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      solana: ${{ steps.filter.outputs.solana }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            solana:
+              - 'solana/**'
+              - '.github/workflows/ci.yml'
+
   forge-tests:
     name: Forge Tests
     runs-on: ubuntu-latest
@@ -117,6 +133,73 @@ jobs:
       - name: Test
         run: cargo test
         working-directory: solana/commitment-codec
+
+  solana-build:
+    name: Solana Program Build
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.solana == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      # avm and the SBF build need different Rust toolchains. avm compiles from
+      # source and needs a recent stable (its deps require rustc >= 1.91), so keep
+      # stable as the default. The SBF build uses the nightly pinned by
+      # solana/rust-toolchain.toml for host-side macro expansion; install it too so
+      # anchor build does not have to fetch it on demand.
+      - name: Install Rust toolchains
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup toolchain install nightly-2025-06-30 --profile minimal --component rustfmt --component clippy
+          rustup default stable
+
+      # agave 3.1.10 + anchor 0.32.1 + the SBF platform-tools are all heavy to
+      # install (avm compiles anchor from source), so cache them across runs.
+      - name: Cache Solana + Anchor toolchain
+        id: cache-toolchain
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.local/share/solana/install/releases/3.1.10
+            ~/.cache/solana
+            ~/.avm
+            ~/.cargo/bin/avm
+            ~/.cargo/bin/anchor
+          key: solana-toolchain-${{ runner.os }}-agave3.1.10-anchor0.32.1-v2
+
+      - name: Install Solana CLI (agave 3.1.10)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.10/install)"
+
+      - name: Install Anchor 0.32.1 via avm
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor avm --locked --force
+          avm install 0.32.1
+
+      # Put the pinned solana release first on PATH (the installer's active_release
+      # symlink can point at an incomplete build) and select anchor 0.32.1.
+      - name: Configure toolchain PATH
+        run: |
+          echo "$HOME/.local/share/solana/install/releases/3.1.10/solana-release/bin" >> "$GITHUB_PATH"
+          avm use 0.32.1
+
+      - name: Cache Solana build target
+        uses: actions/cache@v6
+        with:
+          path: solana/target
+          key: solana-target-${{ runner.os }}-${{ hashFiles('solana/Cargo.lock') }}
+          restore-keys: |
+            solana-target-${{ runner.os }}-
+
+      # --no-idl: default anchor build fails only in IDL generation because the
+      # vendored LZ endpoint-interface macros do not expand under 0.32.1 idl-build.
+      # The compiled .so is correct; the SDK owns the program interface (no IDL).
+      - name: Build Solana program
+        run: anchor build --no-idl
+        working-directory: solana
 
   brand-check:
     name: Brand Check
