@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@mysten/sui": "^2.23.1",
+    "@mysten/walrus": "^1.1.7",
     "dotenv": "^17.4.2",
     "ethers": "^6.17.0"
   },

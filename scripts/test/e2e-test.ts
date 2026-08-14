@@ -1,17 +1,26 @@
 /**
  * e2e-test.ts
  *
- * Two-step E2E verification: tests the full Bosphor round-trip.
+ * Two-step E2E verification of the full Bosphor M3 round-trip.
  *
- * Phase 1 (Forward): EVM submitIntent -> LayerZero -> Sui delivery
- * Phase 2 (Return):  Relayer -> Walrus upload -> execute_store -> LZ return -> EVM proof receipt
+ * Phase 1 (Forward): EVM submitIntent (commitment) -> LayerZero -> Sui delivery
+ * Phase 2 (Return):  Relayer -> Walrus store -> execute_store -> LZ return -> EVM proof
  *
- * Polls LayerZero Scan API and on-chain state to verify both directions.
- * Reports the full TX chain with explorer links for Foundation verification.
+ * M3 is reference-based: the forward LayerZero message carries only the intent id
+ * and the 49-byte commitment, never the blob bytes. The blob id is computed
+ * client-side (offline) and the raw bytes are handed to the relayer out-of-band
+ * via `POST {RELAYER_URL}/blob/{intentId}`. This mirrors exactly what an SDK
+ * consumer does through `BosphorEvmClient.store()`; the script reuses the SDK's
+ * `encode` (blob-id compute), `quote`, and `upload` steps so the e2e exercises the
+ * same path integrators use.
+ *
+ * Polls LayerZero Scan and on-chain state to verify both directions, and reports
+ * the full TX chain with explorer links for Foundation verification.
  *
  * Usage: npm run test:e2e
- * Required env: EVM_RPC_URL, EVM_ADAPTER_ADDRESS, EVM_RELAYER_KEY
- * Optional env: SUI_GRPC_URL, SUI_PACKAGE_ID, SUI_LZ_PACKAGE_ID (for Sui event details)
+ * Required env: EVM_RPC_URL, EVM_ADAPTER_ADDRESS, EVM_RELAYER_KEY, RELAYER_URL
+ * Optional env: SUI_GRPC_URL, SUI_PACKAGE_ID, SUI_LZ_PACKAGE_ID (for Sui event details),
+ *               SUI_EID, WALRUS_STORE_EPOCHS, LZ_OPTIONS
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -23,11 +32,13 @@ config({
 
 import { ethers, EventLog } from "ethers";
 import { createSuiClient } from "../util/sui-client.js";
+import { createBosphorClient, defaultComputeBlob } from "../../sdk/src/evm/index.ts";
 
 // --- Config ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS!;
 const EVM_RELAYER_KEY = process.env.EVM_RELAYER_KEY!;
+const RELAYER_URL = process.env.RELAYER_URL || "http://localhost:3000";
 
 for (const [k, v] of Object.entries({
   EVM_RPC_URL,
@@ -44,19 +55,23 @@ for (const [k, v] of Object.entries({
 const SUI_PACKAGE_ID = process.env.SUI_PACKAGE_ID;
 const SUI_LZ_PACKAGE_ID = process.env.SUI_LZ_PACKAGE_ID;
 
+// M3 adapter ABI: submitIntent/quote take the commitment fields (no payload).
 const ADAPTER_ABI = [
-  "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+  "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
   "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
   "function confirmExecution(bytes32 intentId, bytes proof) external",
   "function executed(bytes32) view returns (bool)",
   "function nonces(address) view returns (uint256)",
   "function intents(bytes32) view returns (bool)",
-  "function quote(uint32 dstEid, bytes payload, uint256 deadline, bytes options) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-  "function submitIntent(uint32 dstEid, bytes payload, uint256 deadline, bytes options) payable returns (bytes32)",
+  "function committedBlobId(bytes32) view returns (bytes32)",
+  "function quote(uint32 dstEid, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 deadline, bytes options) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+  "function submitIntent(uint32 dstEid, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 deadline, bytes options) payable returns (bytes32)",
+  "function getIntentId(address sender, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 deadline, uint64 nonce) view returns (bytes32)",
 ];
 
 const DST_EID = Number(process.env.SUI_EID) || 40378;
-const LZ_OPTIONS = "0x00030100110100000000000000000000000000030d40";
+const STORAGE_EPOCHS = Number(process.env.WALRUS_STORE_EPOCHS) || 5;
+const LZ_OPTIONS = process.env.LZ_OPTIONS || "0x00030100110100000000000000000000000000030d40";
 const MAX_WAIT = 15 * 60 * 1000; // 15 minutes per phase
 const isMainnet = !EVM_RPC_URL.includes("sepolia") && !EVM_RPC_URL.includes("testnet");
 const LZ_SCAN_BASE = isMainnet ? "https://scan.layerzero-api.com" : "https://scan-testnet.layerzero-api.com";
@@ -68,6 +83,17 @@ const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, {
 });
 const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
 const adapter = new ethers.Contract(EVM_ADAPTER_ADDRESS, ADAPTER_ABI, wallet);
+
+// SDK client: reuses the exact encode -> quote -> upload seam integrators use.
+const bosphor = createBosphorClient({
+  // The ethers contract satisfies the SDK's structural AdapterContract surface.
+  adapter: adapter as unknown as Parameters<typeof createBosphorClient>[0]["adapter"],
+  relayerUrl: RELAYER_URL,
+  dstEid: DST_EID,
+  options: LZ_OPTIONS as `0x${string}`,
+  defaultEpochs: STORAGE_EPOCHS,
+  computeBlob: defaultComputeBlob,
+});
 
 // --- Helpers ---
 
@@ -146,12 +172,9 @@ async function querySuiEvents(intentId: string): Promise<SuiEventResult> {
     ? `${SUI_LZ_PACKAGE_ID}::lz_receiver::ProofSent`
     : null;
 
-  // Look up events by scanning recent checkpoints
-  // Since queryEvents has no gRPC equivalent, we check the IntentExecuted
-  // EVM event's proof for blob data, and scan Sui transaction events by digest
-  // when available from the relayer's execution.
-  // For now, use the EVM proof data as the primary source and note that
-  // full Sui event verification requires transaction digests.
+  // Look up events by scanning recent checkpoints. There is no gRPC queryEvents
+  // equivalent, so we walk recent checkpoints for the StorageExecuted (Walrus
+  // store) and ProofSent (LZ return) events matching the intent id.
   try {
     const { response } = await suiClient.ledgerService.getServiceInfo({});
     const currentCheckpoint = response.checkpointHeight ?? 0n;
@@ -240,41 +263,56 @@ async function querySuiEvents(intentId: string): Promise<SuiEventResult> {
 async function main() {
   const sender = wallet.address;
   console.log("=".repeat(56));
-  console.log("  Bosphor E2E: Two-Step Verification");
+  console.log("  Bosphor E2E: Two-Step Verification (M3 reference flow)");
   console.log("=".repeat(56));
   console.log(`  Sender:  ${sender}`);
   console.log(`  Adapter: ${EVM_ADAPTER_ADDRESS}`);
+  console.log(`  Relayer: ${RELAYER_URL}`);
   const suiGrpcUrl = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
   const networkLabel = suiGrpcUrl.includes('mainnet') ? 'Sui mainnet' : 'Sui testnet';
   console.log(`  DST EID: ${DST_EID} (${networkLabel})`);
 
-  // ── Build and submit intent ──
+  // ── Encode the commitment (blob id computed client-side, no upload) ──
 
-  const payload = ethers.toUtf8Bytes(`bosphor-e2e-${Date.now()}`);
-  const deadline = Math.floor(Date.now() / 1000) + 14400; // 4 hours (testnet LZ can be slow)
+  const data = new TextEncoder().encode(`bosphor-e2e-${Date.now()}`);
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 14400); // 4 hours (testnet LZ can be slow)
+
+  console.log("\n  Encoding commitment (client-side blob id)...");
+  const encoded = await bosphor.encode(data, { epochs: STORAGE_EPOCHS, deadline });
+  console.log(`  Blob ID:   ${encoded.blobId}`);
+  console.log(`  Size:      ${encoded.size} bytes`);
+  console.log(`  Epochs:    ${encoded.storageEpochs}`);
 
   const nonce = await adapter.nonces(sender);
-  const intentId = ethers.keccak256(
-    ethers.solidityPacked(
-      ["address", "uint64", "bytes", "uint256", "uint256"],
-      [sender, DST_EID, payload, nonce, deadline],
-    ),
+  // getIntentId is the on-chain, authoritative derivation; it matches the id the
+  // contract emits in IntentSubmitted for this (commitment, sender, nonce).
+  const intentId: string = await adapter.getIntentId(
+    sender,
+    encoded.blobId,
+    encoded.size,
+    encoded.encodingType,
+    encoded.storageEpochs,
+    encoded.deadline,
+    nonce,
   );
   console.log(`\n  Intent ID: ${intentId}`);
   console.log(`  Nonce:     ${nonce}`);
   console.log(
-    `  Deadline:  ${deadline} (${new Date(deadline * 1000).toISOString()})`,
+    `  Deadline:  ${deadline} (${new Date(Number(deadline) * 1000).toISOString()})`,
   );
 
   console.log("\n  Quoting LZ fee...");
-  const fee = await adapter.quote(DST_EID, payload, deadline, LZ_OPTIONS);
+  const fee = await bosphor.quote(encoded);
   console.log(`  Native fee: ${ethers.formatEther(fee.nativeFee)} ETH`);
 
   console.log("\n  Submitting intent...");
   const tx = await adapter.submitIntent(
     DST_EID,
-    payload,
-    deadline,
+    encoded.blobId,
+    encoded.size,
+    encoded.encodingType,
+    encoded.storageEpochs,
+    encoded.deadline,
     LZ_OPTIONS,
     { value: fee.nativeFee },
   );
@@ -293,6 +331,18 @@ async function main() {
 
   if (!isRegistered) {
     console.error("\n  [FAIL] Intent not registered on-chain.");
+    process.exit(1);
+  }
+
+  // ── Hand the raw bytes to the relayer out-of-band ──
+
+  console.log(`\n  Uploading blob bytes to relayer (${RELAYER_URL}/blob/${intentId.slice(0, 10)}...)`);
+  try {
+    await bosphor.upload(intentId as `0x${string}`, data);
+    console.log("  Relayer accepted the blob bytes.");
+  } catch (err) {
+    console.error(`\n  [FAIL] Relayer rejected the blob upload: ${(err as Error).message}`);
+    console.error("  Ensure the relayer is running and reachable at RELAYER_URL.");
     process.exit(1);
   }
 
@@ -377,7 +427,7 @@ async function main() {
       `\n-- Phase 2: Return Path (Sui -> EVM) --`,
     );
     console.log(
-      "  Waiting for relayer to process and send proof back...",
+      "  Waiting for relayer to store on Walrus and send proof back...",
     );
 
     const phase2Start = Date.now();
@@ -505,6 +555,14 @@ async function main() {
   if (blobId === "(unknown)" || endEpoch === "(unknown)") {
     console.error("\n  [FAIL] Could not decode proof data (blobId, endEpoch).");
     console.error("  Intent is marked executed but proof contents are unverified.");
+    process.exit(1);
+  }
+
+  // The proof's blob id must equal the commitment computed at submit time.
+  if (blobId.toLowerCase() !== encoded.blobId.toLowerCase()) {
+    console.error("\n  [FAIL] Returned blob id does not match the committed blob id.");
+    console.error(`  committed: ${encoded.blobId}`);
+    console.error(`  returned:  ${blobId}`);
     process.exit(1);
   }
 
