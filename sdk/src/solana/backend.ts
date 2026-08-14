@@ -1,20 +1,26 @@
 /**
- * Default `@solana/web3.js`/Anchor-backed `SolanaChain` implementation.
+ * Default `@solana/web3.js`-backed `SolanaChain` implementation.
  *
- * This is the real backend for the Solana adapter: it builds the `submit_intent`
- * instruction, derives the PDAs from the on-chain seeds, sends the transaction,
- * parses the `IntentSubmitted` event to obtain the canonical intent id, and reads
- * + deserializes the `IntentState` PDA for `awaitProof`.
+ * This is the real backend for the Solana adapter. It is IDL-free and Anchor-free:
+ * it builds the `submit_intent` instruction with the explicit codec in
+ * `./program.ts` (Anchor-style discriminator + borsh args), derives the PDAs from
+ * the on-chain seeds, sends the transaction, and reads + decodes the `IntentState`
+ * PDA. The canonical intent id is derived from the on-chain nonce with the shared
+ * `deriveIntentId` (so the intent PDA can be addressed) and then cross-checked
+ * against the `IntentSubmitted` event in the confirmed transaction.
  *
- * `@solana/web3.js` and `@coral-xyz/anchor` are heavy, optional peer dependencies.
- * They are loaded through a lazy dynamic import (import specifiers held in
- * variables so TypeScript never resolves them at compile time), exactly like the
- * `@mysten/walrus` seam in `../blob.ts`. Unit tests inject a fake `SolanaChain` and
- * never reach this file, so the Solana stack stays out of `npm test` and `tsc`.
+ * Only `@solana/web3.js` is needed, as an optional peer dependency loaded through a
+ * lazy dynamic import (the specifier is held in a variable so TypeScript never
+ * resolves it at compile time), exactly like the `@mysten/walrus` seam in
+ * `../blob.ts`. Unit tests inject a fake `SolanaChain` and never reach this file, so
+ * the Solana stack stays out of `npm test` and `tsc`.
  */
 
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import type { Hex } from "../types.ts";
+import { deriveIntentId } from "../commitment-codec.ts";
 import { decodeIntentState } from "./proof.ts";
+import { encodeSubmitIntentData, findIntentSubmittedIntentId } from "./program.ts";
 import type { SolanaChain, SolanaIntentState, SolanaSubmitFields, SolanaSubmitResult } from "./client.ts";
 
 /** The Bosphor Solana adapter program id (see `solana/programs/bosphor-adapter`). */
@@ -24,144 +30,166 @@ export const BOSPHOR_PROGRAM_ID = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
 const STORE_SEED = "store";
 const PEER_SEED = "peer";
 const INTENT_SEED = "intent";
+const NONCE_SEED = "nonce";
+
+/** A LayerZero endpoint account appended to `submit_intent` as a remaining account. */
+export interface SolanaAccountMetaInput {
+  /** A `@solana/web3.js` `PublicKey` or a base58 address string. */
+  pubkey: unknown;
+  isSigner: boolean;
+  isWritable: boolean;
+}
 
 export interface DefaultSolanaChainOptions {
   /** A `@solana/web3.js` `Connection` (any commitment). */
   connection: unknown;
-  /** A funded `@solana/web3.js` `Keypair` / wallet-adapter signer (the payer). */
+  /** A funded `@solana/web3.js` `Keypair` (the payer and submitter). */
   wallet: unknown;
-  /**
-   * The Anchor `Program<BosphorAdapter>` bound to the deployed program and an
-   * `AnchorProvider` wrapping `connection` + `wallet`. The IDL must expose
-   * `submitIntent`, the `IntentSubmitted` event, and the `intentState` account.
-   */
-  program: unknown;
   /** Program id override; defaults to {@link BOSPHOR_PROGRAM_ID}. */
   programId?: string;
+  /**
+   * The LayerZero endpoint `send` accounts appended to `submit_intent` as
+   * remaining accounts, already assembled per the deployed LZ Solana config (the
+   * Store PDA must appear at remaining-account index 1). These are deployment
+   * specific and are validated on devnet; the SDK does not synthesize them.
+   */
+  endpointAccounts?: SolanaAccountMetaInput[];
 }
 
-function hexToBytes(hex: Hex): Uint8Array {
-  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
-  const out = new Uint8Array(h.length / 2);
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
-  return out;
+function toHex(bytes: Uint8Array): Hex {
+  return ("0x" + bytesToHex(bytes)) as Hex;
 }
 
-function bytesToHex(bytes: Uint8Array): Hex {
-  let s = "0x";
-  for (const b of bytes) s += b.toString(16).padStart(2, "0");
-  return s as Hex;
+function bytes32(hex: Hex): Uint8Array {
+  const b = hexToBytes(hex.startsWith("0x") ? hex.slice(2) : hex);
+  if (b.length !== 32) throw new Error(`expected 32 bytes, got ${b.length}`);
+  return b;
 }
 
 /**
- * Construct the default Solana backend. The `@solana/web3.js` + Anchor stack is
- * pulled in via a lazy dynamic import on first use; if it is not installed this
- * throws loudly with guidance rather than silently fabricating a result.
- *
- * The caller supplies a fully-constructed Anchor `Program` (with its IDL and an
- * `AnchorProvider`), so the SDK does not need to embed the IDL and stays lean. The
- * backend derives PDAs and parses events against that program.
+ * Construct the default Solana backend. `@solana/web3.js` is pulled in via a lazy
+ * dynamic import on first use; if it is not installed this throws loudly with
+ * guidance rather than silently fabricating a result. No IDL and no Anchor runtime
+ * are required: the program's binary interface lives in `./program.ts`.
  */
 export async function createDefaultSolanaChain(
   opts: DefaultSolanaChainOptions,
 ): Promise<SolanaChain> {
   const web3Spec = "@solana/web3.js";
-  const anchorSpec = "@coral-xyz/anchor";
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   let web3: any;
-  let anchor: any;
   try {
-    [web3, anchor] = await Promise.all([import(web3Spec), import(anchorSpec)]);
+    web3 = await import(web3Spec);
   } catch (err) {
     throw new Error(
-      "the default Solana backend requires the optional peer dependencies " +
-        "'@solana/web3.js' and '@coral-xyz/anchor'. Install them " +
-        "(npm install @solana/web3.js @coral-xyz/anchor) or implement the SolanaChain " +
-        `interface yourself. Underlying error: ${String(err)}`,
+      "the default Solana backend requires the optional peer dependency " +
+        "'@solana/web3.js'. Install it (npm install @solana/web3.js) or implement the " +
+        `SolanaChain interface yourself. Underlying error: ${String(err)}`,
     );
   }
 
-  const { PublicKey } = web3;
-  const program: any = opts.program;
+  const { PublicKey, Transaction, TransactionInstruction, SystemProgram, sendAndConfirmTransaction } =
+    web3;
   const programId = new PublicKey(opts.programId ?? BOSPHOR_PROGRAM_ID);
+  const connection: any = opts.connection;
+  const payer: any = opts.wallet;
+  const payerKey: any = payer.publicKey ?? payer;
   const enc = new TextEncoder();
 
-  const [storePda] = PublicKey.findProgramAddressSync([enc.encode(STORE_SEED)], programId);
+  const pda = (seeds: Array<Uint8Array>): any =>
+    PublicKey.findProgramAddressSync(seeds, programId)[0];
 
+  const [storePda] = PublicKey.findProgramAddressSync([enc.encode(STORE_SEED)], programId);
+  const noncePda = (owner: any): any => pda([enc.encode(NONCE_SEED), owner.toBytes()]);
+  const intentPda = (intentId: Hex): any => pda([enc.encode(INTENT_SEED), bytes32(intentId)]);
   const peerPda = (dstEid: number): any => {
     const eidBe = new Uint8Array(4);
     new DataView(eidBe.buffer).setUint32(0, dstEid, false); // big-endian, matches to_be_bytes
-    return PublicKey.findProgramAddressSync(
-      [enc.encode(PEER_SEED), storePda.toBytes(), eidBe],
-      programId,
-    )[0];
+    return pda([enc.encode(PEER_SEED), storePda.toBytes(), eidBe]);
   };
 
-  const intentPda = (intentId: Hex): any =>
-    PublicKey.findProgramAddressSync(
-      [enc.encode(INTENT_SEED), hexToBytes(intentId)],
-      programId,
-    )[0];
-
-  const noncePda = (payer: any): any =>
-    PublicKey.findProgramAddressSync(
-      [enc.encode("nonce"), payer.toBytes()],
-      programId,
-    )[0];
-
-  const payer: any = opts.wallet;
-  const payerKey: any = payer.publicKey ?? payer;
+  // The current per-sender nonce (0 if the SenderNonce PDA does not exist yet).
+  // SenderNonce layout: 8-byte discriminator + nonce (u64 LE) + bump.
+  async function currentNonce(owner: any): Promise<bigint> {
+    const info = await connection.getAccountInfo(noncePda(owner));
+    if (!info) return 0n;
+    const d = new Uint8Array(info.data);
+    return new DataView(d.buffer, d.byteOffset, d.byteLength).getBigUint64(8, true);
+  }
 
   const chain: SolanaChain = {
     async submitIntent(fields: SolanaSubmitFields): Promise<SolanaSubmitResult> {
-      const senderNonce = noncePda(payerKey);
+      const nonce = await currentNonce(payerKey);
 
-      // Build + send submit_intent. Anchor maps camelCase args to the on-chain
-      // snake_case ones. The endpoint `send` accounts are appended by the caller's
-      // program config as remaining accounts; here we assume the Anchor method
-      // builder resolves the required accounts and the caller wired remaining
-      // accounts via `.remainingAccounts(...)` on the returned builder if needed.
-      const signature: string = await program.methods
-        .submitIntent(
-          Array.from(hexToBytes(fields.blobId)),
-          fields.size,
-          fields.encodingType,
-          fields.storageEpochs,
-          new anchor.BN(fields.deadline.toString()),
-          fields.dstEid,
-          Buffer.from(hexToBytes(fields.options)),
-          new anchor.BN(fields.nativeFee.toString()),
-        )
-        .accounts({
-          payer: payerKey,
-          senderNonce,
-          store: storePda,
-          peer: peerPda(fields.dstEid),
-        })
-        .rpc();
-
-      // Parse the IntentSubmitted event from the confirmed transaction logs. The
-      // canonical intent id is the event's `intent_id`; we never assume the nonce.
-      const intentId = await parseIntentSubmitted(
-        web3,
-        anchor,
-        program,
-        opts.connection,
-        signature,
+      // Derive the canonical intent id from the on-chain nonce so the intent PDA
+      // can be addressed. This uses the same shared codec as EVM/Sui, so the id
+      // matches; it is cross-checked against the emitted event below.
+      const intentIdBytes = deriveIntentId(
+        {
+          blobId: bytes32(fields.blobId),
+          size: fields.size,
+          encodingType: fields.encodingType,
+          storageEpochs: fields.storageEpochs,
+          deadline: fields.deadline,
+        },
+        payerKey.toBytes(),
+        nonce,
       );
-      if (!intentId) {
+      const intentId = toHex(intentIdBytes);
+
+      const data = Buffer.from(
+        encodeSubmitIntentData({
+          blobId: fields.blobId,
+          size: fields.size,
+          encodingType: fields.encodingType,
+          storageEpochs: fields.storageEpochs,
+          deadline: fields.deadline,
+          dstEid: fields.dstEid,
+          options: hexToBytes(fields.options.startsWith("0x") ? fields.options.slice(2) : fields.options),
+          nativeFee: fields.nativeFee,
+        }),
+      );
+
+      const keys = [
+        { pubkey: payerKey, isSigner: true, isWritable: true },
+        { pubkey: noncePda(payerKey), isSigner: false, isWritable: true },
+        { pubkey: intentPda(intentId), isSigner: false, isWritable: true },
+        { pubkey: storePda, isSigner: false, isWritable: false },
+        { pubkey: peerPda(fields.dstEid), isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        ...(opts.endpointAccounts ?? []).map((m) => ({
+          pubkey: typeof m.pubkey === "string" ? new PublicKey(m.pubkey) : m.pubkey,
+          isSigner: m.isSigner,
+          isWritable: m.isWritable,
+        })),
+      ];
+
+      const ix = new TransactionInstruction({ programId, keys, data });
+      const signature: string = await sendAndConfirmTransaction(
+        connection,
+        new Transaction().add(ix),
+        [payer],
+      );
+
+      // Cross-check the predicted id against the IntentSubmitted event.
+      const txInfo = await connection.getTransaction(signature, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      const logs: string[] | undefined = txInfo?.meta?.logMessages;
+      const fromEvent = logs ? findIntentSubmittedIntentId(logs) : null;
+      if (fromEvent && fromEvent !== intentId) {
         throw new Error(
-          `submit_intent tx ${signature} emitted no IntentSubmitted event; ` +
-            "cannot determine intent id",
+          `intent id mismatch: derived ${intentId} but the IntentSubmitted event emitted ${fromEvent}`,
         );
       }
+
       return { intentId, signature };
     },
 
     async readIntent(intentId: Hex): Promise<SolanaIntentState | null> {
-      const pda = intentPda(intentId);
-      const info = await (opts.connection as any).getAccountInfo(pda);
+      const info = await connection.getAccountInfo(intentPda(intentId));
       if (!info) return null;
       const decoded = decodeIntentState(new Uint8Array(info.data));
       return {
@@ -173,41 +201,5 @@ export async function createDefaultSolanaChain(
   };
   /* eslint-enable @typescript-eslint/no-explicit-any */
 
-  void bytesToHex;
   return chain;
 }
-
-/**
- * Parse the `IntentSubmitted` event from a confirmed transaction's logs and return
- * the canonical intent id. Uses Anchor's `EventParser` over the program logs.
- */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function parseIntentSubmitted(
-  _web3: any,
-  anchor: any,
-  program: any,
-  connection: any,
-  signature: string,
-): Promise<Hex | null> {
-  const tx = await connection.getTransaction(signature, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  const logs: string[] | undefined = tx?.meta?.logMessages;
-  if (!logs) return null;
-
-  const parser = new anchor.EventParser(program.programId, program.coder);
-  for (const event of parser.parseLogs(logs)) {
-    if (event.name === "IntentSubmitted" || event.name === "intentSubmitted") {
-      const id = event.data.intentId ?? event.data.intent_id;
-      if (id) {
-        const bytes = id instanceof Uint8Array ? id : Uint8Array.from(id as number[]);
-        let s = "0x";
-        for (const b of bytes) s += b.toString(16).padStart(2, "0");
-        return s as Hex;
-      }
-    }
-  }
-  return null;
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
