@@ -12,18 +12,25 @@ subpath per chain, and a high-level one-call flow for storing data.
 | `@bosphor/sdk` | Core: the commitment codec (frozen wire format + intentId derivation) and shared types. No chain SDK. |
 | `@bosphor/sdk/commitment` | The commitment codec on its own (kept for existing consumers). |
 | `@bosphor/sdk/evm` | The EVM origin client and the one-call `store()`. |
-| `@bosphor/sdk/solana` | Reserved for a later milestone. |
+| `@bosphor/sdk/solana` | The Solana origin client and the one-call `store()`. |
 
-The chain SDKs are **optional peer dependencies**, so a codec-only or non-EVM
+The chain SDKs are **optional peer dependencies**, so a codec-only or single-chain
 consumer never pulls them:
 
 - `ethers` (EVM client)
+- `@solana/web3.js` and `@coral-xyz/anchor` (Solana client, default backend)
 - `@mysten/walrus` and `@mysten/sui` (client-side blob-id computation)
 
 Install only what your path needs. For the full EVM `store()` flow:
 
 ```bash
 npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+
+For the full Solana `store()` flow:
+
+```bash
+npm install @bosphor/sdk @solana/web3.js @coral-xyz/anchor @mysten/walrus @mysten/sui
 ```
 
 ## EVM: store a file in one call
@@ -77,6 +84,68 @@ computation is injectable via `computeBlob` in the client options; the default
 lazily loads `@mysten/walrus`. Tests pass a stub and never load the Walrus SDK.
 
 See `examples/store-file.evm.ts` for a runnable end-to-end script.
+
+## Solana: store a file in one call
+
+The Solana path has the SAME one-line API. `store(data, { epochs })` runs the whole
+flow and returns the verified result:
+
+```
+encode -> submit -> upload -> awaitProof
+```
+
+Solana has no separate `quote` step: the LayerZero messaging fee is passed as
+`nativeFee` (lamports) on the `submit_intent` instruction.
+
+```ts
+import { Connection, Keypair } from "@solana/web3.js";
+import { AnchorProvider, Program, Wallet } from "@coral-xyz/anchor";
+import { BosphorSolanaClient, createDefaultSolanaChain } from "@bosphor/sdk/solana";
+
+const connection = new Connection(RPC_URL, "confirmed");
+const provider = new AnchorProvider(connection, new Wallet(payer), {});
+const program = new Program(adapterIdl, provider);
+
+const chain = await createDefaultSolanaChain({ connection, wallet: payer, program });
+
+const client = new BosphorSolanaClient({
+  chain,
+  relayerUrl: "https://relayer.bosphor.xyz",
+  dstEid: 40378, // Sui testnet
+  nativeFee: quotedLamports,
+});
+
+const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
+```
+
+The canonical intent id is the SAME keccak digest as the EVM and Sui paths (shared
+`bosphor_commitment_codec`). After `submit_intent`, the backend obtains it by
+parsing the `IntentSubmitted` event from the transaction logs, never by assuming a
+nonce.
+
+Verification reads the on-chain `IntentState` PDA (`[b"intent", intentId]`), which
+`lz_receive` marks `executed` and stamps with the returned blob id and end epoch.
+Nothing is fabricated: a relayer rejection throws `RelayerUploadError`, and an
+intent that never executes throws `ProofTimeoutError`.
+
+### Chain seam and testing
+
+`BosphorSolanaClient` talks to the chain through a minimal structural interface,
+`SolanaChain` (`submitIntent(fields)` and `readIntent(intentId)`), so unit tests
+inject a fake and never load `@solana/web3.js` or Anchor. The real backend
+(`createDefaultSolanaChain`) loads the Solana stack via a lazy dynamic import, the
+same seam used for `@mysten/walrus`, so a codec-only or EVM-only consumer never
+pulls it.
+
+### Proof reader (for on-chain / CPI consumers)
+
+The on-chain proof of record is the `IntentState` PDA. `decodeIntentState(bytes)`
+deserializes raw account bytes (e.g. from `connection.getAccountInfo`) into the
+Anchor struct fields, and `readSolanaProof(...)` reduces raw bytes or a decoded
+state to `{ executed, blobId, endEpoch }`. Both come from `@bosphor/sdk/solana`.
+For CPI consumers, on-chain verification reads the same `IntentState` PDA.
+
+See `examples/store-file.solana.ts` for a runnable end-to-end script.
 
 ## For Solidity integrators
 
