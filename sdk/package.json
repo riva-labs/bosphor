@@ -1,6 +1,6 @@
 {
   "name": "@bosphor/sdk",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Bosphor SDK: cross-chain storage intents for Walrus",
   "license": "MIT",
   "type": "module",
