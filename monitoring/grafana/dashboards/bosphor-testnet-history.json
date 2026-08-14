@@ -1,0 +1,96 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["bosphor", "testnet", "on-chain"],
+  "time": { "from": "2026-06-08T00:00:00.000Z", "to": "2026-07-31T00:00:00.000Z" },
+  "timezone": "utc",
+  "title": "Bosphor Testnet History (On-Chain)",
+  "uid": "bosphor-testnet-history",
+  "version": 1,
+  "description": "Real on-chain LayerZero Scan forward-leg history (Sepolia EID 40161 -> Sui testnet EID 40378, adapter 0x3c8B7A1c...). Source: scan-testnet.layerzero-api.com. Real transactions, real timestamps. Demonstrates ~4 weeks of continuous pipeline throughput and the external DVN outage on 2026-07-08.",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Forward messages (total, on-chain)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"messages\" FROM lz_testnet_history;" } ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Delivered to Sui",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"delivered\" FROM lz_testnet_history WHERE status = 'DELIVERED';" } ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active delivery days",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT count(DISTINCT date_trunc('day', block_ts)) AS \"days\" FROM lz_testnet_history WHERE status = 'DELIVERED';" } ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Peak day (delivered / 24h)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT max(c) AS \"peak\" FROM (SELECT count(*) c FROM lz_testnet_history WHERE status = 'DELIVERED' GROUP BY date_trunc('day', block_ts)) t;" } ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Messages delivered to Sui per day (real on-chain, EVM -> Sui testnet)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 1, "gradientMode": "none", "axisPlacement": "auto", "barAlignment": 0, "stacking": { "mode": "none" } },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "time_series", "rawQuery": true, "rawSql": "SELECT date_trunc('day', block_ts) AS time, count(*) AS \"Delivered\" FROM lz_testnet_history WHERE status = 'DELIVERED' AND $__timeFilter(block_ts) GROUP BY 1 ORDER BY 1;" } ]
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "LayerZero delivery status breakdown",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 13 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value"] }, "pieType": "donut", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true }, "tooltip": { "mode": "single", "sort": "none" } },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT status, count(*) AS value FROM lz_testnet_history GROUP BY status ORDER BY value DESC;" } ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Daily throughput (all statuses)",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 13 },
+      "datasource": { "type": "postgres", "uid": "bosphor-postgres" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto", "filterable": true } }, "overrides": [] },
+      "options": { "showHeader": true, "cellHeight": "sm", "footer": { "show": true, "reducer": ["sum"], "fields": ["Delivered", "Skipped (no-op)", "Blocked/Inflight"] } },
+      "targets": [ { "refId": "A", "datasource": { "type": "postgres", "uid": "bosphor-postgres" }, "format": "table", "rawQuery": true, "rawSql": "SELECT date_trunc('day', block_ts)::date AS \"Day\", count(*) FILTER (WHERE status = 'DELIVERED') AS \"Delivered\", count(*) FILTER (WHERE status = 'APPLICATION_SKIPPED') AS \"Skipped (no-op)\", count(*) FILTER (WHERE status IN ('BLOCKED', 'INFLIGHT')) AS \"Blocked/Inflight\" FROM lz_testnet_history GROUP BY 1 ORDER BY 1;" } ]
+    }
+  ]
+}
