@@ -13,3 +13,9 @@ path = "src/lib.rs"
 # builds offline and the Solana program can later swap in solana_program::keccak
 # (identical output) without changing the codec logic.
 [dependencies]
+
+# Own workspace root so `cargo test` here resolves only this crate, independent
+# of the anchor program (which path-deps this crate) and the LayerZero submodule.
+# Without this, the codec CI job would try to load the whole solana workspace and
+# fail when the submodule is not checked out.
+[workspace]

@@ -1,7 +1,7 @@
 [package]
 name = "bosphor-adapter"
 version = "0.1.0"
-description = "Bosphor Solana adapter: on-chain intent submission and receive-proof state machine"
+description = "Bosphor Solana adapter: LayerZero v2 OApp for cross-chain storage intents"
 edition.workspace = true
 rust-version.workspace = true
 
@@ -13,25 +13,33 @@ name = "bosphor_adapter"
 default = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
+no-idl = []
 no-log-ix-name = []
+# NOTE: we intentionally do NOT enable `oapp/idl-build` here. That would
+# transitively enable `endpoint-interface/idl-build`, whose account macros do not
+# expand under Anchor 0.32.1 IDL generation (a defect in the vendored LZ crate).
+# Our program's own IDL builds fine without it; the LZ endpoint types are only
+# used for CPI, not exposed in our interface.
 idl-build = ["anchor-lang/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang = { version = "1.1.2", features = ["init-if-needed"] }
-# Reuse the canonical Bosphor commitment codec (encode + derive_intent_id + keccak).
-# Path dependency to the sibling workspace crate; kept byte-for-byte identical to the
-# TypeScript, Solidity, and Move implementations via the shared parity vectors.
-bosphor-commitment-codec = { path = "../../commitment-codec" }
+# Anchor pinned to the LayerZero v2 Solana OApp toolchain (0.32.1). The LZ crates
+# below resolve their `workspace = true` deps against the vendored LayerZero-v2
+# anchor-latest workspace, so anchor-lang must match (0.32.1) for a single graph.
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 
-[dev-dependencies]
-litesvm = "0.10.0"
-solana-message = "3.0.1"
-solana-transaction = "3.0.2"
-solana-signer = "3.0.0"
-solana-keypair = "3.0.1"
+# LayerZero v2 Solana OApp crates, path-depended from the vendored LayerZero-v2
+# tree. These carry `anchor-lang = { workspace = true }` deps that Cargo resolves
+# against the LZ anchor-latest workspace root (proven to build to SBF).
+oapp = { path = "../../../contracts/evm/lib/LayerZero-v2/packages/layerzero-v2/solana/anchor-latest/libs/oapp", package = "oapp-latest" }
+
+# Reuse the canonical Bosphor commitment codec (encode + derive_intent_id + keccak).
+# Kept byte-for-byte identical to the TypeScript, Solidity, and Move implementations
+# via the shared parity vectors.
+bosphor-commitment-codec = { path = "../../commitment-codec" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

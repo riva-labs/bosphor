@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 #[error_code]
 pub enum BosphorError {
-    #[msg("Signer is not the configured receive authority")]
+    #[msg("Signer is not the store admin")]
     Unauthorized,
     #[msg("Intent has already been executed")]
     AlreadyExecuted,
@@ -12,4 +12,8 @@ pub enum BosphorError {
     IntentIdMismatch,
     #[msg("Per-sender nonce overflowed")]
     NonceOverflow,
+    #[msg("Return proof sender is not the configured peer for this endpoint")]
+    InvalidPeer,
+    #[msg("Return proof has an invalid length or type byte")]
+    InvalidProof,
 }

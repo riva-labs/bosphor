@@ -1,14 +1,19 @@
-//! Bosphor Solana adapter.
+//! Bosphor Solana adapter, a LayerZero v2 OApp.
 //!
-//! On-chain reference logic for the Solana leg of the Bosphor cross-chain storage
-//! intent router. This program owns the origin-side intent submission and the
-//! receive-proof state machine (`mark_executed`, the `_lzReceive` equivalent).
+//! On-chain logic for the Solana leg of the Bosphor cross-chain storage intent
+//! router. This program is a LayerZero v2 OApp: it registers with the endpoint,
+//! dispatches storage intents to a destination chain (Sui/Walrus) over LayerZero,
+//! and receives the execution proof back through the endpoint.
 //!
-//! The LayerZero v2 Solana OApp wiring (endpoint CPI for send/receive, DVN, and
-//! cross-chain message delivery) is intentionally OUT OF SCOPE here. The receive
-//! path is gated behind a configurable `Config.authority` today; the comments in
-//! `submit_intent` and `mark_executed` mark the exact seams where the LZ endpoint
-//! CPI will slot in as a clean follow-on.
+//! Forward leg (Solana -> Sui): `submit_intent` records `IntentState` and CPIs the
+//! endpoint `send` with the 81-byte message `intentId(32) ++ commitment(49)`,
+//! exactly what the Sui `lz_receive` parses.
+//!
+//! Return leg (Sui -> Solana): the endpoint invokes `lz_receive` with the 97-byte
+//! type-1 proof `[0x01] ++ intentId(32) ++ blobId(32) ++ endEpoch(u256)`. The
+//! program checks the proof sender against the configured peer, `clear`s the
+//! message for replay protection, verifies the returned blob id matches the
+//! commitment, and marks the intent executed.
 //!
 //! Intent ids are derived with `bosphor_commitment_codec::derive_intent_id`, the
 //! shared canonical codec, so a Solana-submitted intent gets the SAME id as the
@@ -18,14 +23,17 @@ pub mod constants;
 pub mod error;
 pub mod events;
 pub mod instructions;
+pub mod message;
 pub mod state;
 
 use anchor_lang::prelude::*;
+use oapp::{endpoint_cpi::LzAccount, LzReceiveParams};
 
 pub use constants::*;
 pub use error::*;
 pub use events::*;
 pub use instructions::*;
+pub use message::*;
 pub use state::*;
 
 declare_id!("7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF");
@@ -34,12 +42,24 @@ declare_id!("7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF");
 pub mod bosphor_adapter {
     use super::*;
 
-    /// Creates the singleton `Config` PDA storing the receive authority.
-    pub fn initialize(ctx: Context<Initialize>, authority: Pubkey) -> Result<()> {
-        instructions::initialize::handle_initialize(ctx, authority)
+    /// Creates the `Store` (OApp) PDA and registers it with the LayerZero v2
+    /// endpoint. The endpoint accounts for `register_oapp` are passed as
+    /// `remaining_accounts`.
+    pub fn init_store(ctx: Context<InitStore>, params: InitStoreParams) -> Result<()> {
+        instructions::init_store::handle_init_store(ctx, params)
     }
 
-    /// Submits a storage intent from Solana and records its `IntentState`.
+    /// Admin-only. Records the 32-byte remote OApp address for an endpoint id
+    /// (e.g. the Sui receiver for EID 40378).
+    pub fn set_peer(ctx: Context<SetPeer>, params: SetPeerParams) -> Result<()> {
+        instructions::set_peer::handle_set_peer(ctx, params)
+    }
+
+    /// Submits a storage intent from Solana, records its `IntentState`, and
+    /// dispatches the forward leg over LayerZero. The endpoint accounts for `send`
+    /// are passed as `remaining_accounts` (the Store PDA must be
+    /// `remaining_accounts[1]`).
+    #[allow(clippy::too_many_arguments)]
     pub fn submit_intent(
         ctx: Context<SubmitIntent>,
         blob_id: [u8; 32],
@@ -47,6 +67,9 @@ pub mod bosphor_adapter {
         encoding_type: u8,
         storage_epochs: u32,
         deadline: u64,
+        dst_eid: u32,
+        options: Vec<u8>,
+        native_fee: u64,
     ) -> Result<()> {
         instructions::submit_intent::handle_submit_intent(
             ctx,
@@ -55,22 +78,25 @@ pub mod bosphor_adapter {
             encoding_type,
             storage_epochs,
             deadline,
+            dst_eid,
+            options,
+            native_fee,
         )
     }
 
-    /// Records the receive proof for an intent (the `_lzReceive` equivalent).
-    pub fn mark_executed(
-        ctx: Context<MarkExecuted>,
-        intent_id: [u8; 32],
-        returned_blob_id: [u8; 32],
-        end_epoch: u64,
-    ) -> Result<()> {
-        instructions::mark_executed::handle_mark_executed(
-            ctx,
-            intent_id,
-            returned_blob_id,
-            end_epoch,
-        )
+    /// The `_lzReceive` equivalent: endpoint-delivered receive of the return proof
+    /// from Sui. Verifies the peer, clears the message, and marks the intent
+    /// executed.
+    pub fn lz_receive(ctx: Context<LzReceive>, params: LzReceiveParams) -> Result<()> {
+        instructions::lz_receive::handle_lz_receive(ctx, params)
+    }
+
+    /// Returns the account metas the endpoint Executor must pass to `lz_receive`.
+    pub fn lz_receive_types(
+        ctx: Context<LzReceiveTypes>,
+        params: LzReceiveParams,
+    ) -> Result<Vec<LzAccount>> {
+        instructions::lz_receive_types::handle_lz_receive_types(ctx, params)
     }
 }
 
@@ -129,15 +155,8 @@ mod tests {
     /// anchor point to guard against accidental encoding drift.
     #[test]
     fn intent_id_matches_zero_vector() {
-        let intent_id = compute_intent_id(
-            [0u8; 32],
-            0,
-            0,
-            0,
-            0,
-            &Pubkey::new_from_array([0u8; 32]),
-            0,
-        );
+        let intent_id =
+            compute_intent_id([0u8; 32], 0, 0, 0, 0, &Pubkey::new_from_array([0u8; 32]), 0);
         assert_eq!(
             hex(&intent_id),
             "496e418294117864002a95f894a01c9cc414c86e17325489a5ea2f0eef181967",
