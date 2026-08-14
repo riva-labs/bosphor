@@ -8,7 +8,7 @@
  * Chain SDKs live behind subpaths so a consumer only pulls what they use:
  *   - `@bosphor/sdk`        core codec + shared types (no chain SDK)
  *   - `@bosphor/sdk/evm`    the EVM client and one-call `store()` (opt-in ethers)
- *   - `@bosphor/sdk/solana` reserved for a later milestone
+ *   - `@bosphor/sdk/solana` the Solana client and one-call `store()` (opt-in web3.js)
  */
 
 export {
