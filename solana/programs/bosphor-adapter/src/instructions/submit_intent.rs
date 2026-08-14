@@ -1,11 +1,13 @@
 use anchor_lang::prelude::*;
 use bosphor_commitment_codec::{derive_intent_id, Commitment};
+use oapp::endpoint::{instructions::SendParams as EndpointSendParams, MessagingReceipt};
 
 use crate::{
-    constants::{INTENT_SEED, NONCE_SEED},
+    constants::{INTENT_SEED, NONCE_SEED, PEER_SEED, STORE_SEED},
     error::BosphorError,
     events::IntentSubmitted,
-    state::{IntentState, SenderNonce},
+    message::encode_forward,
+    state::{IntentState, Peer, SenderNonce, Store},
 };
 
 /// Builds the canonical commitment from raw instruction args.
@@ -16,13 +18,7 @@ fn build_commitment(
     storage_epochs: u32,
     deadline: u64,
 ) -> Commitment {
-    Commitment {
-        blob_id,
-        size,
-        encoding_type,
-        storage_epochs,
-        deadline,
-    }
+    Commitment { blob_id, size, encoding_type, storage_epochs, deadline }
 }
 
 /// Derives the canonical intent id for a Solana sender at a given nonce.
@@ -50,7 +46,8 @@ pub fn compute_intent_id(
     size: u32,
     encoding_type: u8,
     storage_epochs: u32,
-    deadline: u64
+    deadline: u64,
+    dst_eid: u32
 )]
 pub struct SubmitIntent<'info> {
     #[account(mut)]
@@ -69,8 +66,6 @@ pub struct SubmitIntent<'info> {
 
     /// Per-intent state PDA. Its address is derived from the canonical keccak
     /// intent id, but the id itself (not this address) is the canonical id.
-    /// The seed recomputes the intent id from the args and the current nonce, so
-    /// resubmitting the same commitment with a fresh nonce yields a fresh PDA.
     #[account(
         init,
         payer = payer,
@@ -91,19 +86,33 @@ pub struct SubmitIntent<'info> {
     )]
     pub intent: Account<'info, IntentState>,
 
+    /// The OApp store; it is the LayerZero "sender" and PDA-signs the endpoint
+    /// `send` CPI.
+    #[account(
+        seeds = [STORE_SEED],
+        bump = store.bump
+    )]
+    pub store: Account<'info, Store>,
+
+    /// The destination peer (remote OApp address) for `dst_eid`.
+    #[account(
+        seeds = [PEER_SEED, store.key().as_ref(), &dst_eid.to_be_bytes()],
+        bump = peer.bump
+    )]
+    pub peer: Account<'info, Peer>,
+
     pub system_program: Program<'info, System>,
+    // remaining_accounts: the endpoint accounts required by `send`. The Store PDA
+    // must appear as remaining_accounts[1] (the sender).
 }
 
-/// Submits a storage intent from Solana.
+/// Submits a storage intent from Solana and dispatches it to the destination
+/// chain via the LayerZero v2 endpoint.
 ///
 /// Derives the canonical intent id over the commitment, the 32-byte sender, and
-/// the per-sender nonce, records `IntentState`, increments the nonce, and emits
-/// `IntentSubmitted`.
-///
-/// OUT OF SCOPE (LayerZero wiring seam): after recording state, the origin path
-/// will CPI into the LayerZero v2 endpoint `send` here to dispatch the intent to
-/// Sui/Walrus. That endpoint CPI, its fee accounts, and options are added when the
-/// LZ Solana OApp wiring lands.
+/// the per-sender nonce; records `IntentState`; increments the nonce; builds the
+/// 81-byte forward message `intentId ++ commitment`; CPIs the endpoint `send`;
+/// and emits `IntentSubmitted` with the resulting GUID/nonce.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_submit_intent(
     ctx: Context<SubmitIntent>,
@@ -112,20 +121,17 @@ pub fn handle_submit_intent(
     encoding_type: u8,
     storage_epochs: u32,
     deadline: u64,
+    dst_eid: u32,
+    options: Vec<u8>,
+    native_fee: u64,
 ) -> Result<()> {
     let sender = ctx.accounts.payer.key();
     let nonce = ctx.accounts.sender_nonce.nonce;
 
-    let intent_id = compute_intent_id(
-        blob_id,
-        size,
-        encoding_type,
-        storage_epochs,
-        deadline,
-        &sender,
-        nonce,
-    );
+    let commitment = build_commitment(blob_id, size, encoding_type, storage_epochs, deadline);
+    let intent_id = derive_intent_id(&commitment, sender.as_ref(), nonce);
 
+    // Record intent state.
     let intent = &mut ctx.accounts.intent;
     intent.committed_blob_id = blob_id;
     intent.size = size;
@@ -142,6 +148,25 @@ pub fn handle_submit_intent(
     sender_nonce.nonce = nonce.checked_add(1).ok_or(BosphorError::NonceOverflow)?;
     sender_nonce.bump = ctx.bumps.sender_nonce;
 
+    // Dispatch the forward leg via the LayerZero v2 endpoint. The Store PDA is the
+    // sender and PDA-signs the CPI.
+    let store = &ctx.accounts.store;
+    let message = encode_forward(&intent_id, &commitment);
+    let receipt: MessagingReceipt = oapp::endpoint_cpi::send(
+        store.endpoint_program,
+        store.key(),
+        ctx.remaining_accounts,
+        &[STORE_SEED, &[store.bump]],
+        EndpointSendParams {
+            dst_eid,
+            receiver: ctx.accounts.peer.address,
+            message,
+            options,
+            native_fee,
+            lz_token_fee: 0,
+        },
+    )?;
+
     emit!(IntentSubmitted {
         intent_id,
         sender,
@@ -151,6 +176,9 @@ pub fn handle_submit_intent(
         encoding_type,
         storage_epochs,
         deadline,
+        dst_eid,
+        guid: receipt.guid,
+        lz_nonce: receipt.nonce,
     });
 
     msg!("Intent submitted: {}", hex32(&intent_id));

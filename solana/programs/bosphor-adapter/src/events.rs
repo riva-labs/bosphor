@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
-/// Emitted when an intent is submitted on the origin (Solana) side.
+/// Emitted when an intent is submitted on the origin (Solana) side and dispatched
+/// to the destination chain via the LayerZero v2 endpoint.
 #[event]
 pub struct IntentSubmitted {
     /// Canonical, chain-agnostic intent id (keccak digest).
@@ -19,10 +20,16 @@ pub struct IntentSubmitted {
     pub storage_epochs: u32,
     /// Intent deadline as unix seconds.
     pub deadline: u64,
+    /// Destination LayerZero endpoint id (e.g. Sui testnet 40378).
+    pub dst_eid: u32,
+    /// LayerZero message GUID of the forward leg (from the messaging receipt).
+    pub guid: [u8; 32],
+    /// LayerZero nonce of the forward leg (from the messaging receipt).
+    pub lz_nonce: u64,
 }
 
-/// Emitted when a receive proof marks an intent executed (the `_lzReceive`
-/// equivalent).
+/// Emitted when a return proof, delivered by the LayerZero v2 endpoint, marks an
+/// intent executed (the `_lzReceive` equivalent).
 #[event]
 pub struct IntentExecuted {
     /// Canonical intent id that was executed.
@@ -31,4 +38,6 @@ pub struct IntentExecuted {
     pub returned_blob_id: [u8; 32],
     /// Walrus end epoch recorded from the proof.
     pub end_epoch: u64,
+    /// Source LayerZero endpoint id the proof arrived from.
+    pub src_eid: u32,
 }

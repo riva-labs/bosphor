@@ -1,6 +1,7 @@
 skip_local_validator = true
 
 [toolchain]
+anchor_version = "0.32.1"
 
 [features]
 resolution = true

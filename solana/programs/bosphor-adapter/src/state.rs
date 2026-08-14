@@ -1,19 +1,50 @@
 use anchor_lang::prelude::*;
 
-/// Singleton config PDA (`[b"config"]`) holding the authority allowed to submit
-/// receive proofs via `mark_executed`.
+/// Singleton OApp config PDA (`[b"store"]`).
 ///
-/// For now the authority is a plain pubkey set at `initialize`. This is the seam
-/// where the LayerZero v2 endpoint delivery will later be authorized: once the LZ
-/// Solana OApp wiring lands, `mark_executed` will be gated on an endpoint CPI /
-/// PDA signer instead of (or in addition to) this authority.
+/// This is the Bosphor OApp identity registered with the LayerZero v2 endpoint.
+/// It is the "sender" on the forward leg (Solana -> Sui) and the "receiver" on the
+/// return leg (Sui -> Solana), and it PDA-signs every endpoint CPI.
+///
+/// Peers (remote OApp addresses per endpoint id) are stored in separate `Peer`
+/// PDAs (`[b"peer", store, eid]`), not inline, so any number of destinations can
+/// be wired without a fixed-size map.
 #[account]
 #[derive(InitSpace)]
-pub struct Config {
-    /// Authority permitted to mark intents executed (the receive-proof path).
-    pub authority: Pubkey,
-    /// Bump for the config PDA.
+pub struct Store {
+    /// Admin allowed to set peers and manage the OApp. Also registered as the
+    /// LayerZero delegate at `init_store`.
+    pub admin: Pubkey,
+    /// The LayerZero v2 endpoint program this OApp is registered with.
+    pub endpoint_program: Pubkey,
+    /// Bump for the store PDA. Used for the endpoint-CPI signer seeds.
     pub bump: u8,
+}
+
+/// Per-destination peer PDA (`[b"peer", store, eid]`).
+///
+/// Records the 32-byte address of the remote Bosphor OApp for a given endpoint
+/// id. On the forward leg this is the `receiver` passed to `send`; on the return
+/// leg it is checked against `params.sender` in `lz_receive` for peer trust.
+#[account]
+#[derive(InitSpace)]
+pub struct Peer {
+    /// The 32-byte remote OApp address (e.g. the Sui receiver for EID 40378).
+    pub address: [u8; 32],
+    /// Bump for the peer PDA.
+    pub bump: u8,
+}
+
+/// Account list PDA (`[b"LzReceiveTypes", store]`) read by `lz_receive_types`.
+///
+/// The Executor discovers this PDA via the standard LayerZero derivation and the
+/// program uses it to compute the account metas the endpoint must pass to
+/// `lz_receive`.
+#[account]
+#[derive(InitSpace)]
+pub struct LzReceiveTypesAccounts {
+    /// The Store (OApp) this account list belongs to.
+    pub store: Pubkey,
 }
 
 /// Per-sender monotonic nonce PDA (`[b"nonce", sender]`).
