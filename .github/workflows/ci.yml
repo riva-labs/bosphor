@@ -144,14 +144,16 @@ jobs:
         with:
           submodules: recursive
 
-      # Nightly pinned by solana/rust-toolchain.toml. The vendored LayerZero v2
-      # Solana crates only expand under this nightly; the SBF build reuses it for
-      # host-side proc-macro expansion.
-      - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2025-06-30
-          components: rustfmt, clippy
+      # avm and the SBF build need different Rust toolchains. avm compiles from
+      # source and needs a recent stable (its deps require rustc >= 1.91), so keep
+      # stable as the default. The SBF build uses the nightly pinned by
+      # solana/rust-toolchain.toml for host-side macro expansion; install it too so
+      # anchor build does not have to fetch it on demand.
+      - name: Install Rust toolchains
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup toolchain install nightly-2025-06-30 --profile minimal --component rustfmt --component clippy
+          rustup default stable
 
       # agave 3.1.10 + anchor 0.32.1 + the SBF platform-tools are all heavy to
       # install (avm compiles anchor from source), so cache them across runs.
@@ -165,7 +167,7 @@ jobs:
             ~/.avm
             ~/.cargo/bin/avm
             ~/.cargo/bin/anchor
-          key: solana-toolchain-${{ runner.os }}-agave3.1.10-anchor0.32.1-v1
+          key: solana-toolchain-${{ runner.os }}-agave3.1.10-anchor0.32.1-v2
 
       - name: Install Solana CLI (agave 3.1.10)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
