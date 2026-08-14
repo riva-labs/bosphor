@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-08-14)
+
+### Bug Fixes
+
+- fix(sdk): repair defaultComputeBlob against @mysten/sui v2.24
+
 ## 0.5.0 (2026-08-14)
 
 ### Features
