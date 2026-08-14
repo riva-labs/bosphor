@@ -1,3 +1,14 @@
+// NOTE: `sui move test` cannot run in this package. Its dependency graph mixes
+// two Sui framework revisions, one pulled in through the LayerZero packages
+// (via `bosphor_lz`) and one through Walrus (via `walrus`/`wal`). The compiler
+// tolerates that, but the Move test VM links the whole graph before running any
+// test and fails with `MISSING_DEPENDENCY` (code 1021) for every test, including
+// pure ones. Constructing a certified Walrus `Blob` in a unit test is separately
+// infeasible. The security-critical reference-verification logic that
+// `execute_store` applies is therefore unit-tested where it can run in CI, as
+// pure predicates in `bosphor_lz::reference` (see `sui/lz-receiver`). The tests
+// below document the executor's own behaviour and pass in isolation, but are not
+// exercised by CI for the reasons above.
 #[test_only]
 module bosphor::walrus_executor_tests {
     use sui::test_scenario;
