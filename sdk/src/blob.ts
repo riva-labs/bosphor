@@ -40,13 +40,13 @@ export const defaultComputeBlob: ComputeBlob = async (
   // (and typecheck) the optional peers at compile time. They are only pulled in at
   // runtime, when a consumer actually opts into the real Walrus-backed impl.
   const walrusSpec = "@mysten/walrus";
-  const suiSpec = "@mysten/sui/client";
+  const grpcSpec = "@mysten/sui/grpc";
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   let walrusMod: any;
-  let suiMod: any;
+  let grpcMod: any;
   try {
-    [walrusMod, suiMod] = await Promise.all([import(walrusSpec), import(suiSpec)]);
+    [walrusMod, grpcMod] = await Promise.all([import(walrusSpec), import(grpcSpec)]);
   } catch (err) {
     throw new Error(
       "computeBlob requires the optional peer dependencies '@mysten/walrus' and " +
@@ -56,10 +56,15 @@ export const defaultComputeBlob: ComputeBlob = async (
   }
 
   // The relayer computes the same id via `client.walrus.encodeBlob`. Mirror that
-  // exact seam so the client-computed id matches the relayer's recomputation byte
-  // for byte. encodeBlob derives the id locally from the bytes; no RPC is made.
-  const suiClient = new suiMod.SuiClient({
-    url: suiMod.getFullnodeUrl("testnet"),
+  // exact seam, a `SuiGrpcClient` extended with `walrus()` exactly as the relayer
+  // builds it, so the client-computed id matches the relayer's recomputation byte
+  // for byte. `encodeBlob` derives the id locally from the bytes; no RPC is made,
+  // so the base URL is never contacted here. The network is fixed to testnet
+  // because the RedStuff encoding depends on the network's shard count; a mainnet
+  // consumer should pass a custom computeBlob built for mainnet.
+  const suiClient = new grpcMod.SuiGrpcClient({
+    network: "testnet",
+    baseUrl: "https://fullnode.testnet.sui.io",
   }).$extend(walrusMod.walrus());
   const { blobId } = await suiClient.walrus.encodeBlob(new Uint8Array(data));
   /* eslint-enable @typescript-eslint/no-explicit-any */
