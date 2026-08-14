@@ -18,8 +18,11 @@ The chain SDKs are **optional peer dependencies**, so a codec-only or single-cha
 consumer never pulls them:
 
 - `ethers` (EVM client)
-- `@solana/web3.js` and `@coral-xyz/anchor` (Solana client, default backend)
+- `@solana/web3.js` (Solana client, default backend)
 - `@mysten/walrus` and `@mysten/sui` (client-side blob-id computation)
+
+The Solana path is Anchor-free: the SDK owns the program's binary interface (see
+`src/solana/program.ts`), so no generated IDL is required.
 
 Install only what your path needs. For the full EVM `store()` flow:
 
@@ -30,7 +33,7 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 For the full Solana `store()` flow:
 
 ```bash
-npm install @bosphor/sdk @solana/web3.js @coral-xyz/anchor @mysten/walrus @mysten/sui
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
 ```
 
 ## EVM: store a file in one call
@@ -99,14 +102,13 @@ Solana has no separate `quote` step: the LayerZero messaging fee is passed as
 
 ```ts
 import { Connection, Keypair } from "@solana/web3.js";
-import { AnchorProvider, Program, Wallet } from "@coral-xyz/anchor";
 import { BosphorSolanaClient, createDefaultSolanaChain } from "@bosphor/sdk/solana";
 
 const connection = new Connection(RPC_URL, "confirmed");
-const provider = new AnchorProvider(connection, new Wallet(payer), {});
-const program = new Program(adapterIdl, provider);
 
-const chain = await createDefaultSolanaChain({ connection, wallet: payer, program });
+// Anchor-free: no IDL, no Program. `endpointAccounts` are the LayerZero send
+// accounts assembled per the deployed LZ config.
+const chain = await createDefaultSolanaChain({ connection, wallet: payer /*, endpointAccounts */ });
 
 const client = new BosphorSolanaClient({
   chain,
@@ -119,9 +121,9 @@ const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5
 ```
 
 The canonical intent id is the SAME keccak digest as the EVM and Sui paths (shared
-`bosphor_commitment_codec`). After `submit_intent`, the backend obtains it by
-parsing the `IntentSubmitted` event from the transaction logs, never by assuming a
-nonce.
+`bosphor_commitment_codec`). The backend derives it from the on-chain nonce with
+the shared codec and cross-checks it against the `IntentSubmitted` event in the
+confirmed transaction.
 
 Verification reads the on-chain `IntentState` PDA (`[b"intent", intentId]`), which
 `lz_receive` marks `executed` and stamps with the returned blob id and end epoch.
@@ -132,7 +134,7 @@ intent that never executes throws `ProofTimeoutError`.
 
 `BosphorSolanaClient` talks to the chain through a minimal structural interface,
 `SolanaChain` (`submitIntent(fields)` and `readIntent(intentId)`), so unit tests
-inject a fake and never load `@solana/web3.js` or Anchor. The real backend
+inject a fake and never load `@solana/web3.js`. The real backend
 (`createDefaultSolanaChain`) loads the Solana stack via a lazy dynamic import, the
 same seam used for `@mysten/walrus`, so a codec-only or EVM-only consumer never
 pulls it.

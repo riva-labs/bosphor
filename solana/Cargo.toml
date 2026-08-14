@@ -1,6 +1,11 @@
 [workspace]
 members = [
     "programs/*",
+]
+# commitment-codec is a chain-agnostic crate with its own workspace root (so its
+# CI job resolves standalone without the LayerZero submodule). Exclude it here so
+# `cargo metadata` / `anchor build` on this workspace does not see a nested root.
+exclude = [
     "commitment-codec",
 ]
 resolver = "2"

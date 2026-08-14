@@ -257,7 +257,8 @@ test("encode rejects empty data and derives a deadline", async () => {
 function buildIntentStateBytes(executed: boolean, endEpoch: bigint): Uint8Array {
   const data = new Uint8Array(INTENT_STATE_LEN);
   const view = new DataView(data.buffer);
-  // discriminator (0..8) left zero.
+  // Anchor IntentState discriminator (sha256("account:IntentState")[..8]).
+  data.set(Uint8Array.of(0x5f, 0x7b, 0x9d, 0x72, 0x4a, 0x1d, 0xdd, 0x73), 0);
   data.set(Uint8Array.from({ length: 32 }, () => 0xaa), 8); // committed_blob_id
   view.setUint32(40, 3, true); // size
   view.setUint32(44, 5, true); // storage_epochs

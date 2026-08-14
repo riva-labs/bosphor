@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-08-14)
+
+### Features
+
+- feat(sdk): make the Solana path IDL-free (own the program binary interface)
+
 ## 0.4.0 (2026-08-14)
 
 ### Features

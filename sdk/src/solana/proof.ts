@@ -34,20 +34,10 @@
 
 import type { Hex } from "../types.ts";
 import type { SolanaIntentState } from "./client.ts";
+import { decodeIntentState as decodeIntentStateAccount } from "./program.ts";
 
 /** Byte length of the `IntentState` account data, including the 8-byte discriminator. */
 export const INTENT_STATE_LEN = 106;
-
-const OFF_DISCRIMINATOR = 0;
-const OFF_COMMITTED_BLOB_ID = 8;
-const OFF_SIZE = 40;
-const OFF_STORAGE_EPOCHS = 44;
-const OFF_DEADLINE = 48;
-const OFF_SENDER = 56;
-const OFF_NONCE = 88;
-const OFF_EXECUTED = 96;
-const OFF_END_EPOCH = 97;
-const OFF_BUMP = 105;
 
 /** Fully decoded `IntentState` account, mirroring the on-chain struct fields. */
 export interface DecodedIntentState {
@@ -77,19 +67,12 @@ function toHex(bytes: Uint8Array): Hex {
   return s as Hex;
 }
 
-function readU32LE(view: DataView, offset: number): number {
-  return view.getUint32(offset, true);
-}
-
-function readU64LE(view: DataView, offset: number): bigint {
-  return view.getBigUint64(offset, true);
-}
-
 /**
- * Decode the raw `IntentState` PDA account data into its fields. Reads directly
- * from the Anchor byte layout so a caller holding raw account bytes never needs
- * Anchor. Throws loudly on a malformed (wrong-length) account rather than
- * fabricating values.
+ * Decode the raw `IntentState` PDA account data into its fields. Delegates to the
+ * single source of the program's binary layout in `./program.ts` (which verifies
+ * the Anchor discriminator), so a caller holding raw account bytes never needs
+ * Anchor. Throws loudly on a malformed (wrong-length or foreign) account rather
+ * than fabricating values.
  */
 export function decodeIntentState(data: Uint8Array): DecodedIntentState {
   if (data.length !== INTENT_STATE_LEN) {
@@ -97,20 +80,17 @@ export function decodeIntentState(data: Uint8Array): DecodedIntentState {
       `IntentState account must be ${INTENT_STATE_LEN} bytes, got ${data.length}`,
     );
   }
-  void OFF_DISCRIMINATOR;
-
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
+  const a = decodeIntentStateAccount(data);
   return {
-    committedBlobId: toHex(data.subarray(OFF_COMMITTED_BLOB_ID, OFF_COMMITTED_BLOB_ID + 32)),
-    size: readU32LE(view, OFF_SIZE),
-    storageEpochs: readU32LE(view, OFF_STORAGE_EPOCHS),
-    deadline: readU64LE(view, OFF_DEADLINE),
-    sender: toHex(data.subarray(OFF_SENDER, OFF_SENDER + 32)),
-    nonce: readU64LE(view, OFF_NONCE),
-    executed: view.getUint8(OFF_EXECUTED) !== 0,
-    endEpoch: readU64LE(view, OFF_END_EPOCH),
-    bump: view.getUint8(OFF_BUMP),
+    committedBlobId: a.committedBlobId,
+    size: a.size,
+    storageEpochs: a.storageEpochs,
+    deadline: a.deadline,
+    sender: toHex(a.sender),
+    nonce: a.nonce,
+    executed: a.executed,
+    endEpoch: a.endEpoch,
+    bump: a.bump,
   };
 }
 
