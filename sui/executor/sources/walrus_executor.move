@@ -10,6 +10,7 @@
 module bosphor::walrus_executor;
 
 use bosphor_lz::lz_receiver::LzReceiverConfig;
+use bosphor_lz::reference;
 use sui::clock::Clock;
 use sui::event;
 use sui::table::{Self, Table};
@@ -190,15 +191,22 @@ public fun is_executed(config: &ExecutorConfig, intent_id: vector<u8>): bool {
     config.executed_intents.contains(intent_id)
 }
 
-/// Pure reference-verification logic shared by `execute_store`.
+/// Reference-verification orchestrator shared by `execute_store`.
 ///
 /// Asserts that a certified Walrus blob matches the committed reference:
-///   1. the actual blob id equals the committed blob id;
-///   2. the actual end epoch covers `current_epoch + committed_storage_epochs`.
-/// The epoch sum is widened to `u64` to avoid `u32` overflow.
+///   1. the actual blob id equals the committed blob id (`EBlobIdMismatch`);
+///   2. the actual end epoch covers `current_epoch + committed_storage_epochs`
+///      (`EInsufficientStorageEpochs`).
 ///
-/// This helper takes plain scalars so it can be unit-tested directly without
-/// constructing a certified Walrus Blob or System object.
+/// The two pure predicates live in `bosphor_lz::reference`, alongside the module
+/// that records the committed reference, and are unit-tested there. They are kept
+/// out of this package because the executor's dependency graph mixes the
+/// LayerZero and Walrus Sui framework revisions, which the Move test VM refuses
+/// to link (`MISSING_DEPENDENCY`), so nothing in this package can `sui move test`.
+///
+/// This wrapper maps each predicate to the executor's own abort code so the
+/// on-chain failure semantics are unchanged. It takes plain scalars so callers
+/// need not construct a certified Walrus Blob or System object.
 ///
 /// * `committed_blob_id` - Blob id fixed at intent time by `lz_receive`.
 /// * `committed_storage_epochs` - Storage epochs the blob must remain available for.
@@ -215,9 +223,9 @@ public fun assert_reference(
     actual_end_epoch: u32,
     current_epoch: u32,
 ) {
-    assert!(actual_blob_id == committed_blob_id, EBlobIdMismatch);
+    assert!(reference::blob_id_matches(committed_blob_id, actual_blob_id), EBlobIdMismatch);
     assert!(
-        (actual_end_epoch as u64) >= (current_epoch as u64) + (committed_storage_epochs as u64),
+        reference::covers_storage_epochs(committed_storage_epochs, actual_end_epoch, current_epoch),
         EInsufficientStorageEpochs,
     );
 }
