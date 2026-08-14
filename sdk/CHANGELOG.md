@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 (2026-08-14)
+
+### Features
+
+- feat(sdk): add @bosphor/sdk/solana subpath with one-call store()
+
 ## 0.3.0 (2026-08-11)
 
 ### Features
