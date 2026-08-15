@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { SuiService } from '../chain/sui/sui.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { IngestRejected, IngestResult } from './intent-ingest.types';
+import { blobIdMatches } from '../common/walrus-blob-id';
 
 /** A buffered blob awaiting storage after the Sui IntentReceived event. */
 export interface BufferedBlob {
@@ -139,17 +140,7 @@ export class IntentIngest {
   }
 }
 
-/**
- * Compare a recomputed Walrus blob id (base64url) against an on-chain commitment
- * (0x hex bytes32). Both decode to the same 32 raw bytes; comparing the decoded
- * bytes avoids brittle string-format assumptions between the two encodings.
- */
-export function blobIdMatches(recomputedBase64Url: string, committedHex: string): boolean {
-  try {
-    const recomputed = Buffer.from(recomputedBase64Url, 'base64url');
-    const committed = Buffer.from(committedHex.replace(/^0x/i, ''), 'hex');
-    return recomputed.length > 0 && recomputed.equals(committed);
-  } catch {
-    return false;
-  }
-}
+// Re-exported for existing importers. The implementation lives in
+// common/walrus-blob-id so the ingest re-check, the return proof, and the client
+// commitment all agree with on-chain `blob.blob_id()`.
+export { blobIdMatches };

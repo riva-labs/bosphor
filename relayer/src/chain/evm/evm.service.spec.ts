@@ -148,7 +148,7 @@ describe('EvmService', () => {
       };
       mockAdapter.confirmExecution.mockResolvedValue(mockTx);
 
-      const hash = await service.confirmExecution('0xintentid', 'proof-data');
+      const hash = await service.confirmExecution('0xintentid', '0x' + '00'.repeat(64));
 
       expect(hash).toBe('0xtxhash');
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(1);
@@ -162,7 +162,7 @@ describe('EvmService', () => {
         .mockRejectedValueOnce(new Error('nonce too low'))
         .mockResolvedValueOnce(mockTx);
 
-      const hash = await service.confirmExecution('0xintentid', 'proof-data');
+      const hash = await service.confirmExecution('0xintentid', '0x' + '00'.repeat(64));
 
       expect(hash).toBe('0xtxhash');
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(2);
@@ -171,7 +171,7 @@ describe('EvmService', () => {
     it('should throw after max retries', async () => {
       mockAdapter.confirmExecution.mockRejectedValue(new Error('persistent error'));
 
-      await expect(service.confirmExecution('0xintentid', 'proof-data')).rejects.toThrow(
+      await expect(service.confirmExecution('0xintentid', '0x' + '00'.repeat(64))).rejects.toThrow(
         'persistent error',
       );
 

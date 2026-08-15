@@ -200,13 +200,19 @@ export class EvmService implements OnModuleInit {
     return { submitted, executed, newFromBlock: latestBlock + 1 };
   }
 
+  /**
+   * Owner-gated hybrid return path: mark the intent executed on EVM directly.
+   * `proof` is the 0x-hex ABI encoding `abi.encode(bytes32 blobId, uint256 endEpoch)`,
+   * i.e. the exact bytes the LZ return path would have delivered, so the emitted
+   * `IntentExecuted` proof decodes identically for consumers.
+   */
   async confirmExecution(intentId: string, proof: string): Promise<string> {
     const maxAttempts = 3;
     const delayMs = 2000;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const tx = await this.adapter.confirmExecution(intentId, ethers.toUtf8Bytes(proof));
+        const tx = await this.adapter.confirmExecution(intentId, ethers.getBytes(proof));
         const receipt = await tx.wait();
         this.logger.log(`[${intentId}] EVM confirm tx: ${receipt.hash} (attempt ${attempt})`);
         return receipt.hash;

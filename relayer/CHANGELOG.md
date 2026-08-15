@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (2026-08-15)
+
+### Bug Fixes
+
+- fix(relayer): honor BOSPHOR_ENV_FILE for env isolation
+- fix(relayer): use canonical big-endian blob id for ingest and return proof
+
 ## 0.2.0 (2026-08-11)
 
 ### Features

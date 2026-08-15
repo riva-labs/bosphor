@@ -75,6 +75,7 @@ describe('IntentProcessor.processIntent', () => {
   let mockWalrus: Partial<WalrusService>;
   let mockMetrics: ReturnType<typeof makeMetricsMock>;
   let mockLifecycle: ReturnType<typeof makeLifecycleMock>;
+  let mockEvm: { getBlockNumber: jest.Mock; confirmExecution: jest.Mock };
 
   beforeEach(async () => {
     mockSui = {
@@ -98,11 +99,15 @@ describe('IntentProcessor.processIntent', () => {
     };
     mockMetrics = makeMetricsMock();
     mockLifecycle = makeLifecycleMock({ committedBlobId: COMMITTED_HEX, sender: SENDER });
+    mockEvm = {
+      getBlockNumber: jest.fn().mockResolvedValue(100),
+      confirmExecution: jest.fn().mockResolvedValue('0xevmconfirm'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IntentProcessor,
-        { provide: EvmService, useValue: { getBlockNumber: jest.fn().mockResolvedValue(100) } },
+        { provide: EvmService, useValue: mockEvm },
         { provide: SuiService, useValue: mockSui },
         {
           provide: SuiCheckpointService,
@@ -216,22 +221,33 @@ describe('IntentProcessor.processIntent', () => {
     expect(mockMetrics.recordWalStorageCost).not.toHaveBeenCalled();
   });
 
-  it('fails loudly and does not send a proof when quoteLzFee fails', async () => {
+  it('falls back to confirmExecution when the LZ send path fails', async () => {
+    // A valid 32-byte Walrus blob id so the fallback can build the canonical proof.
+    (mockWalrus.upload as jest.Mock).mockResolvedValue({
+      blobId: COMMITTED_B64URL,
+      suiObjectId: '0xblobobj',
+      endEpoch: 50,
+      walCostMist: undefined,
+    });
     (mockSuiLz.quoteLzFee as jest.Mock).mockRejectedValue(new Error('devInspect failed'));
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await expect(
-      (processor as any).processIntent(
-        INTENT_ID,
-        SENDER,
-        bufferedBlob(),
-        deadlineMs,
-        COMMITTED_U256,
-      ),
-    ).rejects.toThrow(/devInspect failed/);
+    await (processor as any).processIntent(
+      INTENT_ID,
+      SENDER,
+      bufferedBlob(),
+      deadlineMs,
+      COMMITTED_U256,
+    );
 
+    // LZ send did not go out; the owner confirmExecution hybrid path completed it.
     expect(mockSuiLz.lzSendProof).not.toHaveBeenCalled();
     expect(mockMetrics.recordLzSend).toHaveBeenCalledWith('failure');
+    expect(mockEvm.confirmExecution).toHaveBeenCalledTimes(1);
+    const [intentIdArg, proofArg] = mockEvm.confirmExecution.mock.calls[0];
+    expect(intentIdArg).toBe(INTENT_ID);
+    // proof = abi.encode(bytes32 blobId, uint256 endEpoch): 2 words = 64 bytes.
+    expect(proofArg).toMatch(/^0x[0-9a-f]{128}$/i);
   });
 });
 

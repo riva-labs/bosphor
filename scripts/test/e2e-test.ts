@@ -337,13 +337,31 @@ async function main() {
   // ── Hand the raw bytes to the relayer out-of-band ──
 
   console.log(`\n  Uploading blob bytes to relayer (${RELAYER_URL}/blob/${intentId.slice(0, 10)}...)`);
-  try {
-    await bosphor.upload(intentId as `0x${string}`, data);
-    console.log("  Relayer accepted the blob bytes.");
-  } catch (err) {
-    console.error(`\n  [FAIL] Relayer rejected the blob upload: ${(err as Error).message}`);
-    console.error("  Ensure the relayer is running and reachable at RELAYER_URL.");
-    process.exit(1);
+  {
+    // The relayer only accepts bytes for an intent it already knows is pending,
+    // which it learns from the EVM IntentSubmitted event it polls for. Right after
+    // submit that poll may not have landed yet, so retry on the "no pending intent"
+    // 404 for a bounded window rather than failing the race.
+    const uploadDeadline = Date.now() + 120_000;
+    for (;;) {
+      try {
+        await bosphor.upload(intentId as `0x${string}`, data);
+        console.log("\n  Relayer accepted the blob bytes.");
+        break;
+      } catch (err) {
+        const e = err as { status?: number; message?: string };
+        const notYetKnown =
+          e?.status === 404 || /no pending intent/i.test(e?.message ?? "");
+        if (notYetKnown && Date.now() < uploadDeadline) {
+          process.stdout.write("u");
+          await new Promise((r) => setTimeout(r, 8000));
+          continue;
+        }
+        console.error(`\n  [FAIL] Relayer rejected the blob upload: ${(err as Error).message}`);
+        console.error("  Ensure the relayer is running and reachable at RELAYER_URL.");
+        process.exit(1);
+      }
+    }
   }
 
   console.log(`\n  [1/6] EVM intent TX`);
