@@ -520,3 +520,11 @@ public fun record_intent_for_testing(
         nonce,
     });
 }
+
+/// Test-only exposure of the wire blob-id parse, so a test can lock the byte order
+/// the commitment relies on: the 32-byte blob-id slot is decoded big-endian, which
+/// must equal the Walrus `blob.blob_id()` u256 that `execute_store` compares against.
+#[test_only]
+public fun parse_blob_id_for_testing(bytes: vector<u8>): u256 {
+    bytes32_to_u256(&bytes)
+}

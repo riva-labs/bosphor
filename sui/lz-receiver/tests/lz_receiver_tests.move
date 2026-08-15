@@ -275,3 +275,18 @@ fun test_decode_rejects_long_message() {
     while (i < 100) { msg.push_back(0); i = i + 1; }; // 101 bytes total
     codec::decode(&msg);
 }
+
+// === blob-id wire byte order (ground truth) ===
+
+#[test]
+fun test_blob_id_slot_is_big_endian_matching_walrus_u256() {
+    // The commitment's 32-byte blob-id slot is the BIG-endian encoding of the Walrus
+    // blob-id u256, so `committed_blob_id` equals the `blob.blob_id()` u256 that
+    // `execute_store` asserts against. Ground truth for the Walrus blob id
+    // "qineIE9eC8z5CTaTsILV-LL_8VwRVCK-lKZftG7B4ik" is
+    //   blobIdToInt(id) == 0x29e2c16e..29aa   (captured from @mysten/walrus).
+    // The canonical wire bytes are that integer big-endian:
+    let wire = x"29e2c16eb45fa694be2254115cf1ffb2f8d582b0933609f9cc0b5e4f20de29aa";
+    let expected: u256 = 0x29e2c16eb45fa694be2254115cf1ffb2f8d582b0933609f9cc0b5e4f20de29aa;
+    assert!(lz_receiver::parse_blob_id_for_testing(wire) == expected, 0);
+}
