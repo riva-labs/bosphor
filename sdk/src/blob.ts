@@ -13,7 +13,21 @@
 
 import type { BlobEncoding, ComputeBlob, Hex } from "./types.ts";
 
-/** Walrus `encodeBlob` returns the blob id as a base64url string. */
+/**
+ * Convert a Walrus base64url blob id into the canonical 32-byte Bosphor commitment
+ * field.
+ *
+ * A Walrus blob id is a `u256`. Its base64url string form encodes that integer in
+ * LITTLE-endian byte order (this is exactly what `@mysten/walrus`'s `blobIdToInt`
+ * decodes). The Bosphor commitment stores the blob id like every other field: as a
+ * big-endian integer. So the canonical field is the big-endian encoding of the
+ * Walrus `u256`, i.e. the base64url bytes reversed.
+ *
+ * Getting this right is what makes the on-chain reference check pass: Sui reads the
+ * committed field big-endian (`bytes32_to_u256`), and `walrus::blob::blob_id()`
+ * returns the same `u256`, so `committed_blob_id == blob.blob_id()`. Pinned to the
+ * `@mysten/walrus` ground truth by `blob.test.ts`.
+ */
 function base64UrlToBytes32Hex(base64url: string): Hex {
   const bytes = Buffer.from(base64url, "base64url");
   if (bytes.length !== 32) {
@@ -21,7 +35,9 @@ function base64UrlToBytes32Hex(base64url: string): Hex {
       `expected a 32-byte Walrus blob id, decoded ${bytes.length} bytes from "${base64url}"`,
     );
   }
-  return `0x${bytes.toString("hex")}`;
+  // Little-endian base64url bytes -> big-endian commitment field.
+  const be = Buffer.from(bytes).reverse();
+  return `0x${be.toString("hex")}`;
 }
 
 /**
