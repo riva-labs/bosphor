@@ -3,6 +3,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { ethers } from 'ethers';
 import { SuiService } from './sui.service';
 import { DEFAULT_LZ_OPTIONS } from '../../common/constants';
+import { walrusBlobIdToField } from '../../common/walrus-blob-id';
 
 @Injectable()
 export class SuiLzService {
@@ -41,7 +42,9 @@ export class SuiLzService {
     const tx = new Transaction();
 
     const intentIdBytes = Array.from(ethers.getBytes(intentId));
-    const blobIdBytes = Array.from(Buffer.from(blobId, 'base64url'));
+    // Canonical big-endian blob-id field, so the returned proof matches the EVM
+    // adapter's committedBlobId (see common/walrus-blob-id).
+    const blobIdBytes = Array.from(walrusBlobIdToField(blobId));
     const optionsBytes = Array.from(ethers.getBytes(DEFAULT_LZ_OPTIONS));
 
     // [0] APP::quote_proof (no fee coin needed)
@@ -211,7 +214,9 @@ export class SuiLzService {
     const tx = new Transaction();
 
     const intentIdBytes = Array.from(ethers.getBytes(intentId));
-    const blobIdBytes = Array.from(Buffer.from(blobId, 'base64url'));
+    // Canonical big-endian blob-id field, so the returned proof matches the EVM
+    // adapter's committedBlobId (see common/walrus-blob-id).
+    const blobIdBytes = Array.from(walrusBlobIdToField(blobId));
     const optionsBytes = Array.from(ethers.getBytes(DEFAULT_LZ_OPTIONS));
 
     // [0] SplitCoins
