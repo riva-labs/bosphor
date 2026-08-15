@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 (2026-08-15)
+
+### Bug Fixes
+
+- fix(sdk): encode the Walrus blob id big-endian in the commitment
+
 ## 0.5.1 (2026-08-14)
 
 ### Bug Fixes
