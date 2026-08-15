@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ethers } from 'ethers';
 import { Interval } from '@nestjs/schedule';
 import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiLzEvent } from '../chain/sui/sui.service';
@@ -13,6 +14,7 @@ import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
 import { IntentIngest, BufferedBlob } from '../ingest/intent-ingest.service';
 import { blobIdMatches } from '../ingest/intent-ingest.service';
+import { walrusBlobIdToField } from '../common/walrus-blob-id';
 import { POLL_INTERVAL_MS } from '../common/constants';
 
 @Injectable()
@@ -214,47 +216,51 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
     await this.trackHop(intentId, 'recorded_sui', { txHash: storeDigest });
 
-    // 4. Quote the real LZ fee on-chain, then send the proof back to EVM.
-    // The quoted fee is authoritative. We never substitute a fabricated
-    // fallback: a bad fee either overpays (drains the relayer) or underpays
-    // (the send reverts). If the quote fails, fail loudly so it gets fixed.
-    let quotedFee: bigint;
+    // 4. Return path: send the execution proof back to EVM via LayerZero. The
+    // quoted fee is authoritative (never a fabricated fallback). If the LZ send
+    // path is unavailable, fall back to the owner-gated confirmExecution hybrid
+    // path so the EVM intent still gets marked executed with the identical proof
+    // bytes (abi.encode(blobId, endEpoch)).
     try {
-      quotedFee = await this.suiLz.quoteLzFee(
+      const quotedFee = await this.suiLz.quoteLzFee(
         intentId,
         walrusInfo.blobId,
         walrusInfo.endEpoch,
         this.evmDstEid,
       );
-    } catch (err) {
-      // A failed quote means the return path did not go out. Record it on the
-      // LZ-send metric so the canary dashboards alert on it, then rethrow.
-      this.metrics.recordLzSend('failure');
-      throw err;
-    }
-    // Add 10% buffer to the quoted fee for price drift between quote and send.
-    const feeAmount = (quotedFee * 11n) / 10n;
-    this.logger.log(
-      `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
-    );
-
-    this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
-    let lzDigest: string;
-    try {
-      lzDigest = await this.suiLz.lzSendProof(
+      // Add 10% buffer to the quoted fee for price drift between quote and send.
+      const feeAmount = (quotedFee * 11n) / 10n;
+      this.logger.log(
+        `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
+      );
+      this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
+      const lzDigest = await this.suiLz.lzSendProof(
         intentId,
         walrusInfo.blobId,
         walrusInfo.endEpoch,
         this.evmDstEid,
         feeAmount,
       );
-    } catch (err) {
+      this.metrics.recordLzSend('success');
+      this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
+      await this.trackHop(intentId, 'proof_sent', { txHash: lzDigest });
+    } catch (lzErr) {
       this.metrics.recordLzSend('failure');
-      throw err;
+      this.logger.warn(
+        `[${intentId}] LZ send-proof unavailable (${(lzErr as Error).message}); ` +
+          `falling back to owner confirmExecution`,
+      );
+      // Build the same proof the LZ return would deliver: abi.encode(blobId, endEpoch)
+      // with the canonical big-endian blob id, so IntentExecuted decodes identically.
+      const blobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
+      const proof = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['bytes32', 'uint256'],
+        [blobIdHex, BigInt(walrusInfo.endEpoch)],
+      );
+      const evmDigest = await this.evm.confirmExecution(intentId, proof);
+      this.logger.log(`[${intentId}] Return confirmed via confirmExecution: ${evmDigest}`);
+      await this.trackHop(intentId, 'proof_sent', { txHash: evmDigest });
     }
-    this.metrics.recordLzSend('success');
-    this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
-    await this.trackHop(intentId, 'proof_sent', { txHash: lzDigest });
   }
 
   /**
