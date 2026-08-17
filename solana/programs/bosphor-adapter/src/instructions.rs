@@ -1,9 +1,11 @@
+pub mod confirm_execution;
 pub mod init_store;
 pub mod lz_receive;
 pub mod lz_receive_types;
 pub mod set_peer;
 pub mod submit_intent;
 
+pub use confirm_execution::*;
 pub use init_store::*;
 pub use lz_receive::*;
 pub use lz_receive_types::*;
