@@ -9,7 +9,7 @@
     "set-libraries": "tsx src/set-libraries.ts",
     "set-config": "tsx src/set-config.ts",
     "set-peer": "tsx src/set-peer.ts",
-    "quote-send": "tsx src/quote-send.ts",
+    "submit-intent": "tsx src/submit-intent.ts",
     "roundtrip": "tsx src/roundtrip.ts"
   },
   "dependencies": {
