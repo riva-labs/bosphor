@@ -8,6 +8,7 @@ import {
   KNOWN_DISCRIMINATORS,
   encodeSubmitIntentData,
   encodeSetPeerData,
+  encodeConfirmExecutionData,
   decodeIntentState,
   decodeIntentSubmittedIntentId,
   findIntentSubmittedIntentId,
@@ -100,5 +101,20 @@ test("encodeSetPeerData lays out discriminator ++ eid ++ peer", () => {
   assert.equal(
     bytesToHex(data),
     KNOWN_DISCRIMINATORS.instruction.set_peer + "ba9d0000" + "55".repeat(32),
+  );
+});
+
+test("encodeConfirmExecutionData lays out discriminator ++ intentId ++ blobId ++ endEpoch", () => {
+  const data = encodeConfirmExecutionData(
+    ("0x" + "66".repeat(32)) as `0x${string}`,
+    ("0x" + "77".repeat(32)) as `0x${string}`,
+    9n,
+  );
+  assert.equal(
+    bytesToHex(data),
+    KNOWN_DISCRIMINATORS.instruction.confirm_execution +
+      "66".repeat(32) +
+      "77".repeat(32) +
+      "0900000000000000",
   );
 });
