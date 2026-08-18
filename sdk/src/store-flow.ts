@@ -35,8 +35,10 @@ export interface AwaitProofOptions {
   /**
    * Cancel the wait (and the whole `store` flow) when this signal aborts. On abort
    * the pending promise rejects with the signal's reason, the standard cancellation
-   * contract used by `fetch`. The on-chain intent is unaffected; it may still
-   * execute and can be re-polled with `awaitProof(intentId)`.
+   * contract used by `fetch`. The on-chain intent is not rolled back: if it aborted
+   * while awaiting the proof, re-poll with `awaitProof(intentId)`; if it aborted
+   * during or before the upload, re-run `upload(intentId, data)` first (the relayer
+   * needs the bytes to execute), then re-poll.
    */
   signal?: AbortSignal;
 }

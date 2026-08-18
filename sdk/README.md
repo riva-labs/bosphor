@@ -216,9 +216,12 @@ adapter.
 
 Every long-running flow accepts an `AbortSignal`. Pass `signal` to `store` or
 `awaitProof` to cancel the wait (and the in-flight relayer upload); on abort the
-promise rejects with the signal's reason, the same contract as `fetch`. The
-on-chain intent is unaffected: it may still execute, and you can re-poll later with
-`awaitProof(intentId)`.
+promise rejects with the signal's reason, the same contract as `fetch`.
+
+The on-chain intent is not rolled back. To resume after a cancellation: if it
+aborted while waiting for the proof, re-poll with `awaitProof(intentId)`; if it
+aborted during or before the blob upload, re-run `upload(intentId, data)` first
+(the relayer cannot execute the intent until it has the bytes), then re-poll.
 
 ```ts
 const ac = new AbortController();
