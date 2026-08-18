@@ -1,5 +1,11 @@
 # @bosphor/sdk
 
+![npm](https://img.shields.io/badge/npm-%40bosphor%2Fsdk-cb3837)
+![license](https://img.shields.io/badge/license-MIT-blue)
+![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)
+![module](https://img.shields.io/badge/module-ESM-f7df1e)
+![types](https://img.shields.io/badge/types-included-3178c6)
+
 Store a file on [Walrus](https://walrus.xyz) from an EVM or Solana wallet, over
 [LayerZero](https://layerzero.network), and get a verifiable proof back on the
 origin chain. One package, one lean subpath per chain, and a one-call `store()`.
@@ -205,6 +211,60 @@ Contracts consuming Bosphor execution proofs can import `BosphorProof`
 (`contracts/evm/src/BosphorProof.sol`) to decode the `IntentExecuted` proof
 (`abi.encode(bytes32 blobId, uint256 endEpoch)`) and read execution state from the
 adapter.
+
+## Cancellation
+
+Every long-running flow accepts an `AbortSignal`. Pass `signal` to `store` or
+`awaitProof` to cancel the wait (and the in-flight relayer upload); on abort the
+promise rejects with the signal's reason, the same contract as `fetch`. The
+on-chain intent is unaffected: it may still execute, and you can re-poll later with
+`awaitProof(intentId)`.
+
+```ts
+const ac = new AbortController();
+const timeout = setTimeout(() => ac.abort(new Error("took too long")), 30_000);
+try {
+  const result = await client.store(fileBytes, { epochs: 5, signal: ac.signal });
+} finally {
+  clearTimeout(timeout);
+}
+```
+
+## Compatibility
+
+- **Runtime:** Node.js >= 22 (see `engines`). Works in modern browsers and bundlers
+  (Vite, webpack, esbuild) that support ESM.
+- **Module format:** ESM only (`"type": "module"`). There is no CommonJS build; use
+  `import`, not `require`.
+- **Types:** ship with the package (`.d.ts` for every entry point), no `@types`
+  package needed.
+- **Tree-shaking:** `"sideEffects": false`, so bundlers drop the subpaths you do not
+  import. A codec-only consumer never pulls a chain SDK.
+
+## Versioning & stability
+
+The SDK follows [semantic versioning](https://semver.org). It is pre-1.0, so while
+minor versions may still change the API, breaking changes are called out in
+[`CHANGELOG.md`](./CHANGELOG.md). The commitment wire format and `intentId`
+derivation are frozen and covered by cross-chain parity vectors, so those do not
+change under you. Pin a caret range (`^0.x`) and read the changelog before bumping.
+
+## Security
+
+See the repository [`SECURITY.md`](../SECURITY.md) for how to report a
+vulnerability. The SDK computes the blob id locally and every result is verified
+against on-chain state before `store()` resolves; nothing is trusted blindly and
+nothing is fabricated on failure.
+
+## API reference
+
+Full type signatures ship with the package as `.d.ts`, so your editor shows every
+parameter, return type, and doc comment inline. To generate browsable HTML API docs
+from the TSDoc:
+
+```bash
+npx typedoc   # config in typedoc.json, output to docs/api
+```
 
 ## Building from source
 

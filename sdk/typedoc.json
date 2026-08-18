@@ -1,0 +1,15 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/commitment-codec.ts",
+    "src/evm/index.ts",
+    "src/solana/index.ts"
+  ],
+  "out": "docs/api",
+  "readme": "none",
+  "includeVersion": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "githubPages": false
+}

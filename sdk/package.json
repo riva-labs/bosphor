@@ -66,8 +66,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist docs/api",
     "typecheck": "tsc --noEmit",
+    "docs": "typedoc",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "gen:vectors": "node --import tsx scripts/gen-parity-vectors.ts",
     "prepublishOnly": "npm run clean && npm run build && npm test"
