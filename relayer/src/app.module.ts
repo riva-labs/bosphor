@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppConfigModule } from './config/config.module';
 import { EvmModule } from './chain/evm/evm.module';
 import { SuiModule } from './chain/sui/sui.module';
+import { SolanaModule } from './chain/solana/solana.module';
 import { WalrusModule } from './walrus/walrus.module';
 import { IntentModule } from './intent/intent.module';
 import { IngestModule } from './ingest/ingest.module';
@@ -20,6 +21,7 @@ import { ObservabilityModule } from './observability/observability.module';
     LifecycleModule,
     EvmModule,
     SuiModule,
+    SolanaModule,
     WalrusModule,
     IngestModule,
     IntentModule,

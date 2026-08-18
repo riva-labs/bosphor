@@ -42,6 +42,18 @@ export const configValidationSchema = Joi.object({
   SUI_LZ_TREASURY: Joi.string().optional().allow(''),
   SUI_LZ_TREASURY_OBJ: Joi.string().optional().allow(''),
 
+  // Solana-origin support (M3 #242). When both SOLANA_RPC_URL and
+  // SOLANA_PROGRAM_ID are set, the relayer watches the Solana adapter's
+  // IntentSubmitted events and records their commitment, so ingest and
+  // execute_store work for Solana-origin intents. Unset on the EVM-only
+  // deployment, where the Solana watcher stays inert.
+  SOLANA_RPC_URL: Joi.string().uri().optional().allow(''),
+  SOLANA_PROGRAM_ID: Joi.string().optional().allow(''),
+  // Sui address that receives the stored blob for a Solana-origin intent. A
+  // Solana pubkey cannot own a Sui object, so the M3 single-relayer model routes
+  // the blob to this address, defaulting to the relayer's own Sui address.
+  SOLANA_SUI_RECIPIENT: Joi.string().optional().allow(''),
+
   // Walrus
   WALRUS_RELAY_URL: Joi.string().uri().required(),
   WALRUS_STORE_EPOCHS: Joi.number().default(5),
