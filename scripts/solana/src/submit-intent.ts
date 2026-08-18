@@ -26,7 +26,9 @@ import {
   findIntentSubmittedIntentId,
 } from "../../../sdk/src/solana/program.ts";
 import { deriveIntentId, type Commitment } from "../../../sdk/src/commitment-codec.ts";
+import { defaultComputeBlob } from "../../../sdk/src/blob.ts";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { writeFileSync } from "node:fs";
 import {
   BOSPHOR_PROGRAM_ID,
   ENDPOINT_ID,
@@ -67,8 +69,13 @@ async function main(): Promise<void> {
 
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const uln = new UlnProgram.Uln(ULN_ID);
-  // sender/receiver as raw bytes: the SDK's arrayify() rejects PublicKey objects.
-  const path = { sender: store.toBytes(), dstEid: SUI_TESTNET_EID, receiver: SUI_RECEIVER };
+  // sender/receiver as hex strings: the SDK's arrayify() accepts hex (and bytes)
+  // but rejects PublicKey objects.
+  const path = {
+    sender: "0x" + Buffer.from(store.toBytes()).toString("hex"),
+    dstEid: SUI_TESTNET_EID,
+    receiver: SUI_RECEIVER,
+  };
 
   // Read the current per-sender nonce (0 if the PDA does not exist yet). Layout:
   // 8-byte discriminator ++ nonce(u64 LE) ++ bump(u8).
@@ -77,10 +84,26 @@ async function main(): Promise<void> {
     ? new DataView(nonceAcct.data.buffer, nonceAcct.data.byteOffset).getBigUint64(8, true)
     : 0n;
 
+  // Real-blob mode: when DATA is set, compute the true Walrus blob id + size so
+  // the relayer's execute_store reference verification passes. Otherwise use a
+  // fake BLOB_ID (forward-leg / IntentReceived testing only).
+  let blobIdHex = BLOB_ID;
+  let size = SIZE;
+  let encodingType = ENCODING_TYPE;
+  let ingestData: Uint8Array | null = null;
+  if (process.env.DATA) {
+    ingestData = new TextEncoder().encode(process.env.DATA);
+    const enc = await defaultComputeBlob(ingestData);
+    blobIdHex = enc.blobId;
+    size = enc.size;
+    encodingType = enc.encodingType;
+    console.log("real blob:", blobIdHex, "size", size, "encoding", encodingType);
+  }
+
   const commitment: Commitment = {
-    blobId: toBytes32(BLOB_ID),
-    size: SIZE,
-    encodingType: ENCODING_TYPE,
+    blobId: toBytes32(blobIdHex),
+    size,
+    encodingType,
     storageEpochs: STORAGE_EPOCHS,
     deadline,
   };
@@ -126,9 +149,9 @@ async function main(): Promise<void> {
 
   const data = Buffer.from(
     encodeSubmitIntentData({
-      blobId: BLOB_ID as `0x${string}`,
-      size: SIZE,
-      encodingType: ENCODING_TYPE,
+      blobId: blobIdHex as `0x${string}`,
+      size,
+      encodingType,
       storageEpochs: STORAGE_EPOCHS,
       deadline,
       dstEid: SUI_TESTNET_EID,
@@ -164,6 +187,19 @@ async function main(): Promise<void> {
   });
   const emitted = findIntentSubmittedIntentId(parsed?.meta?.logMessages ?? []);
   console.log("emitted intentId:", emitted);
+
+  // Real-blob mode: persist the intent id + bytes so the ingest step can POST the
+  // exact bytes to the relayer after the forward leg delivers (IntentReceived).
+  if (ingestData) {
+    const out = {
+      intentId: "0x" + bytesToHex(intentId),
+      blobId: blobIdHex,
+      size,
+      dataB64: Buffer.from(ingestData).toString("base64"),
+    };
+    writeFileSync("/tmp/solana-rt.json", JSON.stringify(out));
+    console.log("wrote /tmp/solana-rt.json (run the DVN, then npm run roundtrip-upload)");
+  }
 }
 
 main().catch((e) => {
