@@ -1,0 +1,63 @@
+# Publishes @bosphor/sdk to npm.
+#
+# One-time setup: add a repository secret `NPM_TOKEN` (Settings -> Secrets and
+# variables -> Actions) containing a granular npm access token with read+write
+# access scoped to the `@bosphor/sdk` package (or the `@bosphor` scope). Scope
+# it to just this package, not "all packages".
+#
+# Trigger it two ways:
+#   - Manually: Actions -> "Publish SDK" -> Run workflow (pick the version to release).
+#   - Automatically: when a GitHub Release is published.
+#
+# The job is idempotent: if the version in sdk/package.json is already on the
+# registry it exits cleanly instead of failing, so re-runs are safe.
+#
+# Note: `--provenance` is intentionally omitted because it requires a public
+# repository. If this repo is made public, add `--provenance` to the publish
+# step and switch to npm Trusted Publishing (OIDC) with `id-token: write`
+# instead of the NPM_TOKEN secret (the more secure, tokenless path npm recommends).
+name: Publish SDK
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish @bosphor/sdk to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: sdk
+
+      - name: Typecheck, build, and test
+        run: |
+          npm run typecheck
+          npm run build
+          npm test
+        working-directory: sdk
+
+      - name: Publish if the version is new
+        working-directory: sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@bosphor/sdk@${VERSION}" version >/dev/null 2>&1; then
+            echo "@bosphor/sdk@${VERSION} is already published; nothing to do."
+            exit 0
+          fi
+          echo "Publishing @bosphor/sdk@${VERSION}..."
+          npm publish --access public

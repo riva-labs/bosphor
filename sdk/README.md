@@ -1,8 +1,9 @@
 # @bosphor/sdk
 
-![npm](https://img.shields.io/badge/npm-%40bosphor%2Fsdk-cb3837)
-![license](https://img.shields.io/badge/license-MIT-blue)
-![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)
+[![npm version](https://img.shields.io/npm/v/@bosphor/sdk)](https://www.npmjs.com/package/@bosphor/sdk)
+[![npm downloads](https://img.shields.io/npm/dm/@bosphor/sdk)](https://www.npmjs.com/package/@bosphor/sdk)
+[![license](https://img.shields.io/npm/l/@bosphor/sdk)](./LICENSE)
+![node](https://img.shields.io/node/v/@bosphor/sdk)
 ![module](https://img.shields.io/badge/module-ESM-f7df1e)
 ![types](https://img.shields.io/badge/types-included-3178c6)
 
@@ -287,5 +288,15 @@ npm run build
 node --import tsx examples/store-file.evm.ts
 ```
 
-Publishing is gated by `prepublishOnly` (clean, build, test). The package is
-`publishConfig.access: public`; run `npm publish` from `sdk/` to release.
+## Releasing
+
+Publishing is gated by `prepublishOnly` (clean, build, test), and the package is
+`publishConfig.access: public`.
+
+- **Preferred:** the `Publish SDK` GitHub Actions workflow
+  (`.github/workflows/publish-sdk.yml`). Bump the version, merge to `main`, then run
+  the workflow (Actions -> Publish SDK -> Run workflow) or publish a GitHub Release.
+  It typechecks, builds, tests, and publishes only if the version is new (idempotent).
+  Requires a one-time `NPM_TOKEN` repository secret scoped to `@bosphor/sdk`.
+- **Manual:** `npm publish` from `sdk/` with an authenticated npm session that has
+  write access to the `@bosphor` scope.
