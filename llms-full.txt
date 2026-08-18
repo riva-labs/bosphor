@@ -373,8 +373,8 @@ reference codec and consumed by every implementation:
 
 - **TypeScript** (`@bosphor/sdk`, `sdk/src/commitment-codec.ts`) reads the JSON directly.
 - **Solidity** (`contracts/evm/src/CommitmentCodec.sol`) reads the same JSON in its Forge test.
-- **Move** (`sui/lz-receiver/sources/commitment_codec.move`) is tested against a Move fixture generated from the same JSON.
-- **Rust** (`solana/commitment-codec`, the reference for the Solana adapter) is tested against a Rust fixture generated from the same JSON.
+- **Move** (`contracts/sui/lz-receiver/sources/commitment_codec.move`) is tested against a Move fixture generated from the same JSON.
+- **Rust** (`contracts/solana/commitment-codec`, the reference for the Solana adapter) is tested against a Rust fixture generated from the same JSON.
 
 CI regenerates the vectors on every run and fails if they drift from the reference
 codec, so the four implementations can never silently diverge. Any change to the
@@ -2093,7 +2093,7 @@ Running our own DVN removes the dependency on a single external verifier. Multi-
 ## Sui Walrus Executor
 
 
-The walrus executor module (`sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
+The walrus executor module (`contracts/sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
 
 ## Overview
 
@@ -2102,7 +2102,7 @@ After the relayer uploads a user's payload to Walrus and receives a certified bl
 ## Module structure
 
 ```
-sui/executor/
+contracts/sui/executor/
   Move.toml          # Package manifest (depends on Walrus)
   sources/
     walrus_executor.move   # Core executor logic
@@ -2193,7 +2193,7 @@ Bosphor has four test layers: Solidity unit tests, Move unit tests, relayer unit
 ```bash
 # Run everything (except e2e, which needs live testnet)
 (cd contracts/evm && forge test -vvv)
-(cd sui/lz-receiver && sui move test --build-env testnet)
+(cd contracts/sui/lz-receiver && sui move test --build-env testnet)
 (cd relayer && npm test)
 
 # Full round-trip (requires deployed contracts + running relayer)
@@ -2228,11 +2228,11 @@ Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `Endp
 ## Move tests (Sui)
 
 ```bash
-cd sui/lz-receiver
+cd contracts/sui/lz-receiver
 sui move test --build-env testnet
 ```
 
-Tests are in `sui/lz-receiver/tests/lz_receiver_tests.move`.
+Tests are in `contracts/sui/lz-receiver/tests/lz_receiver_tests.move`.
 
 ### What is covered
 
@@ -2328,7 +2328,7 @@ The CI runs on every push to `main` and every pull request. See `.github/workflo
 | Job | What it does |
 |-----|-------------|
 | `forge-tests` | Checks out with submodules, installs Foundry, runs `forge test -vvv` in `contracts/evm/` |
-| `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `sui/lz-receiver/` |
+| `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `contracts/sui/lz-receiver/` |
 | `relayer-build-and-test` | Sets up Node.js 22, installs, builds, and tests the relayer |
 
 All three jobs run in parallel. The E2E test is not included in CI because it requires live testnet deployments and a running relayer.
@@ -2379,7 +2379,7 @@ Your wallet does not have enough testnet tokens. Request more from:
 Remove the existing `Published.toml` before redeploying:
 
 ```bash
-rm sui/lz-receiver/Published.toml
+rm contracts/sui/lz-receiver/Published.toml
 ```
 
 This file is generated during deployment and must be removed for a fresh deploy.
