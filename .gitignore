@@ -11,13 +11,13 @@ contracts/evm/cache/
 contracts/evm/broadcast/
 contracts/evm/foundry.lock
 
-# sui
-sui/executor/build/
-sui/executor/deps/
-sui/executor/Published.toml
-sui/lz-receiver/build/
-sui/lz-receiver/Published.toml
-sui/lz-receiver/traces/
+# sui (under contracts/)
+contracts/sui/executor/build/
+contracts/sui/executor/deps/
+contracts/sui/executor/Published.toml
+contracts/sui/lz-receiver/build/
+contracts/sui/lz-receiver/Published.toml
+contracts/sui/lz-receiver/traces/
 
 # dependencies
 node_modules/

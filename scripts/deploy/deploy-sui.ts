@@ -229,7 +229,7 @@ async function publish(): Promise<PublishResult> {
     try { execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" }); } catch {}
     console.log("  Switched sui client to mainnet");
   }
-  const suiLzPath = resolve(import.meta.dirname, "../../sui/lz-receiver");
+  const suiLzPath = resolve(import.meta.dirname, "../../contracts/sui/lz-receiver");
 
   // Remove Published.toml if exists (allows fresh publish)
   const publishedToml = resolve(suiLzPath, "Published.toml");

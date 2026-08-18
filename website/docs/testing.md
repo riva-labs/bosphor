@@ -12,7 +12,7 @@ Bosphor has four test layers: Solidity unit tests, Move unit tests, relayer unit
 ```bash
 # Run everything (except e2e, which needs live testnet)
 (cd contracts/evm && forge test -vvv)
-(cd sui/lz-receiver && sui move test --build-env testnet)
+(cd contracts/sui/lz-receiver && sui move test --build-env testnet)
 (cd relayer && npm test)
 
 # Full round-trip (requires deployed contracts + running relayer)
@@ -47,11 +47,11 @@ Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `Endp
 ## Move tests (Sui)
 
 ```bash
-cd sui/lz-receiver
+cd contracts/sui/lz-receiver
 sui move test --build-env testnet
 ```
 
-Tests are in `sui/lz-receiver/tests/lz_receiver_tests.move`.
+Tests are in `contracts/sui/lz-receiver/tests/lz_receiver_tests.move`.
 
 ### What is covered
 
@@ -147,7 +147,7 @@ The CI runs on every push to `main` and every pull request. See `.github/workflo
 | Job | What it does |
 |-----|-------------|
 | `forge-tests` | Checks out with submodules, installs Foundry, runs `forge test -vvv` in `contracts/evm/` |
-| `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `sui/lz-receiver/` |
+| `move-tests` | Caches Sui CLI (v1.72.2), runs `sui move test --build-env testnet` in `contracts/sui/lz-receiver/` |
 | `relayer-build-and-test` | Sets up Node.js 22, installs, builds, and tests the relayer |
 
 All three jobs run in parallel. The E2E test is not included in CI because it requires live testnet deployments and a running relayer.

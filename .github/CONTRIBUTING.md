@@ -25,7 +25,7 @@ cp .env.example .env
 cd contracts/evm && forge test -vvv
 
 # Sui Move
-cd sui/lz-receiver && sui move test --build-env testnet
+cd contracts/sui/lz-receiver && sui move test --build-env testnet
 
 # Relayer
 cd relayer && npm test

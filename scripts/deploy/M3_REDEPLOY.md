@@ -7,8 +7,8 @@
 
 M3 makes three deploy-time changes versus M2:
 
-1. **Two coordinated Sui packages.** `executor` (`sui/executor`, the
-   `walrus_executor` module) now **depends on** `bosphor_lz` (`sui/lz-receiver`).
+1. **Two coordinated Sui packages.** `executor` (`contracts/sui/executor`, the
+   `walrus_executor` module) now **depends on** `bosphor_lz` (`contracts/sui/lz-receiver`).
    They must be published in order, executor pinned to the freshly published
    `bosphor_lz`, because `execute_store` reads `LzReceiverConfig` across the
    package boundary and the type is keyed by the `bosphor_lz` package id.
@@ -31,14 +31,14 @@ M3 makes three deploy-time changes versus M2:
 scripts/util/deploy-testnet.sh deploy:sui
 ```
 
-`deploy-sui.ts` removes `sui/lz-receiver/Published.toml`, publishes fresh, runs
+`deploy-sui.ts` removes `contracts/sui/lz-receiver/Published.toml`, publishes fresh, runs
 `register_oapp`, sets the LZ libraries + DVN/executor config, sets the Sui->EVM
 peer if `EVM_ADAPTER_ADDRESS` is already set (it is not on a fresh redeploy; the
 peer is set later in Step 6), and writes these to `relayer/.env.testnet`:
 `SUI_LZ_PACKAGE_ID`, `SUI_LZ_CONFIG_ID`, `SUI_LZ_OAPP_ID`, `SUI_LZ_ADMIN_CAP_ID`,
 `SUI_LZ_MESSAGING_CHANNEL`, `SUI_LZ_UPGRADE_CAP`.
 
-Publishing writes the new package id into `sui/lz-receiver/Move.lock` under the
+Publishing writes the new package id into `contracts/sui/lz-receiver/Move.lock` under the
 `testnet` env. Step 2 relies on this so the executor links against the package
 you just published.
 
@@ -51,8 +51,8 @@ you just published.
 
 ```bash
 # Fresh publish of the executor package.
-rm -f sui/executor/Published.toml
-sui client publish sui/executor --gas-budget 500000000 \
+rm -f contracts/sui/executor/Published.toml
+sui client publish contracts/sui/executor --gas-budget 500000000 \
   --skip-dependency-verification --json | tee /tmp/exec-publish.json
 ```
 

@@ -62,8 +62,8 @@ reference codec and consumed by every implementation:
 
 - **TypeScript** (`@bosphor/sdk`, `sdk/src/commitment-codec.ts`) reads the JSON directly.
 - **Solidity** (`contracts/evm/src/CommitmentCodec.sol`) reads the same JSON in its Forge test.
-- **Move** (`sui/lz-receiver/sources/commitment_codec.move`) is tested against a Move fixture generated from the same JSON.
-- **Rust** (`solana/commitment-codec`, the reference for the Solana adapter) is tested against a Rust fixture generated from the same JSON.
+- **Move** (`contracts/sui/lz-receiver/sources/commitment_codec.move`) is tested against a Move fixture generated from the same JSON.
+- **Rust** (`contracts/solana/commitment-codec`, the reference for the Solana adapter) is tested against a Rust fixture generated from the same JSON.
 
 CI regenerates the vectors on every run and fails if they drift from the reference
 codec, so the four implementations can never silently diverge. Any change to the

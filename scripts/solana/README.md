@@ -54,9 +54,9 @@ All four LZ programs are verified executable on devnet.
 ## Deploy + wire sequence
 
 ```bash
-# 0. Deploy (or upgrade) the program (.so at solana/target/deploy/)
-solana program deploy ../../solana/target/deploy/bosphor_adapter.so \
-  --program-id ../../solana/target/deploy/bosphor_adapter-keypair.json \
+# 0. Deploy (or upgrade) the program (.so at contracts/solana/target/deploy/)
+solana program deploy ../../contracts/solana/target/deploy/bosphor_adapter.so \
+  --program-id ../../contracts/solana/target/deploy/bosphor_adapter-keypair.json \
   --keypair ~/.config/solana/bosphor-devnet.json --url devnet
 
 # 1. Create the Store (OApp) PDA + register with the endpoint

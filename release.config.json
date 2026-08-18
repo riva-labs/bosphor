@@ -12,10 +12,10 @@
     },
     {
       "name": "sui",
-      "dir": "sui",
+      "dir": "contracts/sui",
       "type": "plain",
-      "versionFile": "sui/VERSION",
-      "changelog": "sui/CHANGELOG.md",
+      "versionFile": "contracts/sui/VERSION",
+      "changelog": "contracts/sui/CHANGELOG.md",
       "tagPrefix": "sui-v",
       "scopes": ["sui"]
     },
