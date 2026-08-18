@@ -53,6 +53,12 @@ export const configValidationSchema = Joi.object({
   // Solana pubkey cannot own a Sui object, so the M3 single-relayer model routes
   // the blob to this address, defaulting to the relayer's own Sui address.
   SOLANA_SUI_RECIPIENT: Joi.string().optional().allow(''),
+  // Origin endpoint id that identifies a Solana-origin intent, so its return
+  // proof is confirmed on Solana rather than EVM. Solana devnet EID by default.
+  SOLANA_SRC_EID: Joi.number().integer().default(40168),
+  // Store-admin keypair (inline JSON secret-key array or a path to one) used to
+  // sign the Solana return leg confirm_execution. Unset disables the return leg.
+  SOLANA_RELAYER_KEYPAIR: Joi.string().optional().allow(''),
 
   // Walrus
   WALRUS_RELAY_URL: Joi.string().uri().required(),

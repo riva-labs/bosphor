@@ -4,9 +4,24 @@ const mockConn = {
   getSignaturesForAddress: jest.fn(),
   getTransaction: jest.fn(),
 };
+const mockSendAndConfirm = jest.fn();
 jest.mock('@solana/web3.js', () => ({
   Connection: jest.fn(() => mockConn),
-  PublicKey: jest.fn((v: string) => ({ toString: () => v })),
+  PublicKey: Object.assign(
+    jest.fn((v: string) => ({ toString: () => v, toBase58: () => v })),
+    {
+      findProgramAddressSync: jest.fn(() => [
+        { toString: () => 'PDA', toBase58: () => 'PDA' },
+        255,
+      ]),
+    },
+  ),
+  Keypair: {
+    fromSecretKey: jest.fn(() => ({ publicKey: { toBase58: () => 'AdminPubkey' } })),
+  },
+  Transaction: jest.fn(() => ({ add: jest.fn().mockReturnThis() })),
+  TransactionInstruction: jest.fn((cfg: unknown) => cfg),
+  sendAndConfirmTransaction: mockSendAndConfirm,
 }));
 
 import { ConfigService } from '@nestjs/config';
@@ -134,5 +149,45 @@ describe('SolanaService', () => {
     const res = await s.pollIntentSubmitted('sig0');
     expect(res).toEqual({ events: [], newestSignature: 'sig0' });
     expect(mockConn.getSignaturesForAddress).not.toHaveBeenCalled();
+  });
+
+  describe('return leg (confirm_execution)', () => {
+    const INTENT_ID = '0x' + 'ab'.repeat(32);
+    const BLOB_ID = '0x' + 'cd'.repeat(32);
+
+    function serviceWithSigner(): SolanaService {
+      const s = new SolanaService(
+        makeConfig({
+          SOLANA_RPC_URL: 'http://rpc',
+          SOLANA_PROGRAM_ID: 'ProgramId',
+          SOLANA_RELAYER_KEYPAIR: '[1,2,3]',
+        }),
+      );
+      s.onModuleInit();
+      return s;
+    }
+
+    beforeEach(() => mockSendAndConfirm.mockReset());
+
+    it('canConfirm is false without a signer, true with one', () => {
+      expect(enabledService().canConfirm()).toBe(false);
+      expect(serviceWithSigner().canConfirm()).toBe(true);
+    });
+
+    it('sends confirm_execution and returns the signature', async () => {
+      mockSendAndConfirm.mockResolvedValue('confirmSig');
+      const s = serviceWithSigner();
+
+      const sig = await s.confirmExecution(INTENT_ID, BLOB_ID, 498n);
+
+      expect(sig).toBe('confirmSig');
+      expect(mockSendAndConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws when no signer is configured', async () => {
+      await expect(enabledService().confirmExecution(INTENT_ID, BLOB_ID, 1n)).rejects.toThrow(
+        /not configured/,
+      );
+    });
   });
 });

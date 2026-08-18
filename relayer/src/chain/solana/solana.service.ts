@@ -1,7 +1,25 @@
+import { readFileSync } from 'fs';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Connection, PublicKey } from '@solana/web3.js';
-import { SolanaIntentSubmitted, parseIntentSubmittedEvents } from './solana-intent.codec';
+import { getBytes } from 'ethers';
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import {
+  SolanaIntentSubmitted,
+  encodeConfirmExecutionData,
+  parseIntentSubmittedEvents,
+} from './solana-intent.codec';
+
+/** PDA seed for the singleton Store (OApp) account: `[b"store"]`. */
+const STORE_SEED = Buffer.from('store');
+/** PDA seed prefix for a per-intent IntentState account: `[b"intent", intentId]`. */
+const INTENT_SEED = Buffer.from('intent');
 
 /** An `IntentSubmitted` event with the Solana transaction signature it came from. */
 export interface SolanaSubmittedEvent extends SolanaIntentSubmitted {
@@ -24,6 +42,17 @@ function short(err: unknown): string {
 }
 
 /**
+ * Load a Solana keypair from either an inline JSON secret-key array (the standard
+ * `solana-keygen` file format, `[n,n,...]`) or a path to such a file. Accepting a
+ * path keeps the 64-byte secret out of the process environment when preferred.
+ */
+function loadKeypair(value: string): Keypair {
+  const raw = value.trim().startsWith('[') ? value : readFileSync(value.trim(), 'utf-8');
+  const secret = Uint8Array.from(JSON.parse(raw) as number[]);
+  return Keypair.fromSecretKey(secret);
+}
+
+/**
  * Reads the Bosphor Solana adapter's `IntentSubmitted` events off devnet.
  *
  * Enabled only when both SOLANA_RPC_URL and SOLANA_PROGRAM_ID are set, so the
@@ -36,6 +65,8 @@ export class SolanaService implements OnModuleInit {
   private readonly logger = new Logger(SolanaService.name);
   private connection?: Connection;
   private program?: PublicKey;
+  /** Store-admin keypair used to sign the return-leg confirm_execution. */
+  private admin?: Keypair;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -49,11 +80,66 @@ export class SolanaService implements OnModuleInit {
     this.connection = new Connection(rpcUrl, 'confirmed');
     this.program = new PublicKey(programId);
     this.logger.log(`Solana adapter: ${programId}`);
+
+    // Optional store-admin signer for the return leg. Without it the relayer can
+    // still ingest and run execute_store; it just cannot close the round trip on
+    // Solana (confirm_execution), which is logged loudly rather than skipped.
+    const keypair = this.config.get<string>('SOLANA_RELAYER_KEYPAIR');
+    if (keypair) {
+      this.admin = loadKeypair(keypair);
+      this.logger.log(`Solana return signer: ${this.admin.publicKey.toBase58()}`);
+    } else {
+      this.logger.warn('SOLANA_RELAYER_KEYPAIR unset - Solana return leg (confirm_execution) disabled');
+    }
   }
 
   /** Whether Solana-origin support is configured on this deployment. */
   isEnabled(): boolean {
     return this.connection !== undefined && this.program !== undefined;
+  }
+
+  /** Whether the relayer can sign the Solana return leg (confirm_execution). */
+  canConfirm(): boolean {
+    return this.isEnabled() && this.admin !== undefined;
+  }
+
+  /**
+   * Close the round trip on Solana: record the execution result on the origin
+   * IntentState via the owner-gated `confirm_execution` (the Solana mirror of the
+   * EVM `confirmExecution` fallback). Asserts on-chain that `returnedBlobId` equals
+   * the commitment, so the reference guarantee holds. Returns the tx signature.
+   *
+   * `returnedBlobId` is the canonical big-endian 0x-hex blob id (the same bytes the
+   * EVM proof carries), matching the commitment recorded at submit.
+   */
+  async confirmExecution(
+    intentId: string,
+    returnedBlobId: string,
+    endEpoch: bigint,
+  ): Promise<string> {
+    if (!this.connection || !this.program || !this.admin) {
+      throw new Error('Solana return leg not configured (SOLANA_RELAYER_KEYPAIR unset)');
+    }
+
+    const [storePda] = PublicKey.findProgramAddressSync([STORE_SEED], this.program);
+    const [intentPda] = PublicKey.findProgramAddressSync(
+      [INTENT_SEED, Buffer.from(getBytes(intentId))],
+      this.program,
+    );
+
+    const ix = new TransactionInstruction({
+      programId: this.program,
+      keys: [
+        { pubkey: this.admin.publicKey, isSigner: true, isWritable: true },
+        { pubkey: storePda, isSigner: false, isWritable: false },
+        { pubkey: intentPda, isSigner: false, isWritable: true },
+      ],
+      data: encodeConfirmExecutionData(intentId, returnedBlobId, endEpoch),
+    });
+
+    return sendAndConfirmTransaction(this.connection, new Transaction().add(ix), [this.admin], {
+      commitment: 'confirmed',
+    });
   }
 
   /**
