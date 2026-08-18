@@ -257,3 +257,44 @@ test("decodeProofEndEpoch extracts the uint256 end epoch from abi.encode(bytes32
   assert.equal(decodeProofEndEpoch(proof), 424242n);
   assert.throws(() => decodeProofEndEpoch("0x1234" as Hex), /must be 64 bytes/);
 });
+
+test("store() rejects immediately when the signal is already aborted (no on-chain calls)", async () => {
+  const { adapter, calls } = makeFakeAdapter({ neverExecutes: true });
+  const { fetch } = makeFetch(200);
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  const ac = new AbortController();
+  ac.abort(new Error("cancelled by caller"));
+
+  await assert.rejects(
+    () => client.store(new Uint8Array([1, 2, 3]), { pollMs: 1, signal: ac.signal }),
+    /cancelled by caller/,
+  );
+  assert.equal(calls.submit, 0, "no intent should be submitted after an abort");
+});
+
+test("awaitProof() rejects with the abort reason when the signal fires mid-poll", async () => {
+  const { adapter } = makeFakeAdapter({ neverExecutes: true });
+  const { fetch } = makeFetch(200);
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(new Error("stop waiting")), 5);
+
+  await assert.rejects(
+    () => client.awaitProof(INTENT_ID, { pollMs: 2, timeoutMs: 60_000, signal: ac.signal }),
+    /stop waiting/,
+  );
+});

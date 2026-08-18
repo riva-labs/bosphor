@@ -32,6 +32,13 @@ export interface AwaitProofOptions {
   timeoutMs?: number;
   /** Poll interval in milliseconds. Defaults to 3 seconds. */
   pollMs?: number;
+  /**
+   * Cancel the wait (and the whole `store` flow) when this signal aborts. On abort
+   * the pending promise rejects with the signal's reason, the standard cancellation
+   * contract used by `fetch`. The on-chain intent is unaffected; it may still
+   * execute and can be re-polled with `awaitProof(intentId)`.
+   */
+  signal?: AbortSignal;
 }
 
 /** Fields derived from the raw bytes plus the chosen storage terms. */
@@ -52,11 +59,30 @@ export type FetchLike = (
     method: string;
     body: Uint8Array;
     headers: Record<string, string>;
+    /** Optional cancellation signal, forwarded to the underlying `fetch`. */
+    signal?: AbortSignal;
   },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
-/** Sleep helper for the poll loops. */
-export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/**
+ * Sleep for `ms`, rejecting early with the signal's reason if it aborts mid-wait.
+ * Used by the poll loops so a cancellation is honored without waiting out the
+ * current interval.
+ */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /**
  * Resolve the fetch implementation: the injected one if given, else the global
@@ -66,7 +92,12 @@ export function resolveFetch(injected?: FetchLike): FetchLike {
   if (injected) return injected;
   if (typeof globalThis.fetch === "function") {
     return (url, init) =>
-      globalThis.fetch(url, { method: init.method, body: init.body, headers: init.headers });
+      globalThis.fetch(url, {
+        method: init.method,
+        body: init.body,
+        headers: init.headers,
+        signal: init.signal,
+      });
   }
   throw new Error("no fetch available; pass a fetch implementation in options");
 }
@@ -114,11 +145,13 @@ export async function uploadBlob(
   relayerUrl: string,
   intentId: Hex,
   data: Uint8Array,
+  signal?: AbortSignal,
 ): Promise<void> {
   const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
     method: "POST",
     body: data,
     headers: { "content-type": "application/octet-stream" },
+    signal,
   });
 
   if (!res.ok) {

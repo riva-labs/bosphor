@@ -228,8 +228,12 @@ export class BosphorEvmClient {
    * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body. Throws a
    * `RelayerUploadError` carrying the relayer's reason on any non-2xx.
    */
-  async upload(intentId: Hex, data: Uint8Array): Promise<void> {
-    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data);
+  async upload(
+    intentId: Hex,
+    data: Uint8Array,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal);
   }
 
   /**
@@ -254,6 +258,7 @@ export class BosphorEvmClient {
     const deadline = Date.now() + timeoutMs;
 
     for (;;) {
+      opts.signal?.throwIfAborted();
       const done = await this.adapter.executed(intentId);
       if (done) {
         const blobId = await this.adapter.committedBlobId(intentId);
@@ -263,7 +268,7 @@ export class BosphorEvmClient {
       if (Date.now() >= deadline) {
         throw new ProofTimeoutError(intentId, timeoutMs);
       }
-      await sleep(pollMs);
+      await sleep(pollMs, opts.signal);
     }
   }
 
@@ -271,15 +276,31 @@ export class BosphorEvmClient {
    * One-call flow: encode -> quote -> submit -> upload -> awaitProof. Returns the
    * verified `{ intentId, blobId, endEpoch }`. Every step fails loudly; no value is
    * fabricated on error.
+   *
+   * @param data - The raw bytes to store on Walrus.
+   * @param opts - Storage terms (`epochs`, `deadline`), proof-poll tuning
+   *   (`timeoutMs`, `pollMs`), and an optional `signal` to cancel the flow.
+   * @returns The verified `{ intentId, blobId, endEpoch }`.
+   * @throws {@link RelayerUploadError} if the relayer rejects the blob upload.
+   * @throws {@link ProofTimeoutError} if the intent does not execute in time.
+   * @example
+   * ```ts
+   * const ac = new AbortController();
+   * const { intentId, blobId, endEpoch } = await client.store(fileBytes, {
+   *   epochs: 5,
+   *   signal: ac.signal,
+   * });
+   * ```
    */
   async store(
     data: Uint8Array,
     opts: EncodeOptions & AwaitProofOptions = {},
   ): Promise<StoreResult> {
+    opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
     const fee = await this.quote(encoded);
     const { intentId } = await this.submit(encoded, fee);
-    await this.upload(intentId, data);
+    await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
     return { intentId, blobId, endEpoch };
   }
