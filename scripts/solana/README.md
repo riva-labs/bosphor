@@ -102,8 +102,10 @@ config, wired in `bosphor-dvn`.
 - [x] `roundtrip-upload` execute_store: relayer Solana-origin watcher records the
       commitment so ingest + `execute_store` work (proven live: intent
       `0xa81e037f...` stored on Walrus, reference-verify passed on Sui)
-- [ ] Return leg: program upgrade adds `confirm_execution` (needs devnet SOL for
-      the upgrade buffer), then relayer/owner confirms the proof on Solana
+- [x] Return leg: program upgraded on devnet with `confirm_execution`; the relayer
+      confirms the proof on Solana after `execute_store`, setting
+      `IntentState.executed=true` (proven live: intent `0x7b744248...`, confirm tx
+      `2pa7faKP...`). Full Solana round-trip complete.
 
 Instruction encoders for our program (`encodeInitStoreData`, `encodeSetPeerData`,
 `encodeSubmitIntentData`, `encodeConfirmExecutionData`) are reused from
