@@ -1,3 +1,15 @@
+// IntentProcessor transitively imports SolanaService, which imports
+// @solana/web3.js (heavy transitive ESM). SolanaService is provided as a mock
+// here, so stub the module to keep the spec pure.
+jest.mock('@solana/web3.js', () => ({
+  Connection: class {},
+  PublicKey: class {},
+  Keypair: class {},
+  Transaction: class {},
+  TransactionInstruction: class {},
+  sendAndConfirmTransaction: jest.fn(),
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { IntentProcessor } from './intent.processor';
@@ -5,6 +17,7 @@ import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiLzEvent } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
+import { SolanaService } from '../chain/solana/solana.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
@@ -76,6 +89,7 @@ describe('IntentProcessor.processIntent', () => {
   let mockMetrics: ReturnType<typeof makeMetricsMock>;
   let mockLifecycle: ReturnType<typeof makeLifecycleMock>;
   let mockEvm: { getBlockNumber: jest.Mock; confirmExecution: jest.Mock };
+  let mockSolana: { canConfirm: jest.Mock; confirmExecution: jest.Mock };
 
   beforeEach(async () => {
     mockSui = {
@@ -103,6 +117,10 @@ describe('IntentProcessor.processIntent', () => {
       getBlockNumber: jest.fn().mockResolvedValue(100),
       confirmExecution: jest.fn().mockResolvedValue('0xevmconfirm'),
     };
+    mockSolana = {
+      canConfirm: jest.fn().mockReturnValue(false),
+      confirmExecution: jest.fn().mockResolvedValue('solsig123'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -114,12 +132,15 @@ describe('IntentProcessor.processIntent', () => {
           useValue: { setOnEventCallback: jest.fn(), startStreaming: jest.fn(), stop: jest.fn() },
         },
         { provide: SuiLzService, useValue: mockSuiLz },
+        { provide: SolanaService, useValue: mockSolana },
         { provide: WalrusService, useValue: mockWalrus },
         walTopUpProvider,
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((key: string) => (key === 'EVM_DST_EID' ? 40161 : undefined)),
+            get: jest.fn((key: string) =>
+              key === 'EVM_DST_EID' ? 40161 : key === 'SOLANA_SRC_EID' ? 40168 : undefined,
+            ),
             getOrThrow: jest.fn(() => 40161),
           },
         },
@@ -137,7 +158,7 @@ describe('IntentProcessor.processIntent', () => {
     const buffered = bufferedBlob();
     const deadlineMs = BigInt(Date.now() + 60_000);
 
-    await (processor as any).processIntent(INTENT_ID, SENDER, buffered, deadlineMs, COMMITTED_U256);
+    await (processor as any).processIntent(INTENT_ID, SENDER, buffered, deadlineMs, COMMITTED_U256, 40161);
 
     expect(mockWalrus.upload).toHaveBeenCalledWith(buffered.bytes);
     expect(mockSui.executeStore).toHaveBeenCalledWith(INTENT_ID, SENDER, '0xblobobj', deadlineMs);
@@ -150,6 +171,41 @@ describe('IntentProcessor.processIntent', () => {
     );
   });
 
+  it('routes a Solana-origin return to confirm_execution, not the EVM path', async () => {
+    // A blob id whose canonical big-endian field equals the committed reference.
+    (mockWalrus.upload as jest.Mock).mockResolvedValue({
+      blobId: COMMITTED_B64URL,
+      suiObjectId: '0xblobobj',
+      endEpoch: 50,
+      walCostMist: undefined,
+    });
+    mockSolana.canConfirm.mockReturnValue(true);
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    // srcEid 40168 = Solana origin.
+    await (processor as any).processIntent(INTENT_ID, SENDER, bufferedBlob(), deadlineMs, COMMITTED_U256, 40168);
+
+    expect(mockSolana.confirmExecution).toHaveBeenCalledWith(INTENT_ID, COMMITTED_HEX, 50n);
+    expect(mockSuiLz.lzSendProof).not.toHaveBeenCalled();
+    expect(mockEvm.confirmExecution).not.toHaveBeenCalled();
+  });
+
+  it('throws for a Solana-origin intent when no Solana return signer is configured', async () => {
+    (mockWalrus.upload as jest.Mock).mockResolvedValue({
+      blobId: COMMITTED_B64URL,
+      suiObjectId: '0xblobobj',
+      endEpoch: 50,
+      walCostMist: undefined,
+    });
+    mockSolana.canConfirm.mockReturnValue(false);
+    const deadlineMs = BigInt(Date.now() + 60_000);
+
+    await expect(
+      (processor as any).processIntent(INTENT_ID, SENDER, bufferedBlob(), deadlineMs, COMMITTED_U256, 40168),
+    ).rejects.toThrow(/requires a Solana signer/);
+    expect(mockSolana.confirmExecution).not.toHaveBeenCalled();
+  });
+
   it('re-verifies the committed blob id before spending WAL and refuses a mismatch', async () => {
     // A buffer whose blob id no longer matches the committed reference.
     const tampered: BufferedBlob = {
@@ -160,7 +216,7 @@ describe('IntentProcessor.processIntent', () => {
     const deadlineMs = BigInt(Date.now() + 60_000);
 
     await expect(
-      (processor as any).processIntent(INTENT_ID, SENDER, tampered, deadlineMs, COMMITTED_U256),
+      (processor as any).processIntent(INTENT_ID, SENDER, tampered, deadlineMs, COMMITTED_U256, 40161),
     ).rejects.toThrow(/Refusing to store/);
 
     expect(mockWalrus.upload).not.toHaveBeenCalled();
@@ -297,6 +353,13 @@ describe('IntentProcessor.handleSuiLzEvent', () => {
             quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
           },
         },
+        {
+          provide: SolanaService,
+          useValue: {
+            canConfirm: jest.fn().mockReturnValue(false),
+            confirmExecution: jest.fn().mockResolvedValue('solsig'),
+          },
+        },
         { provide: WalrusService, useValue: mockWalrus },
         walTopUpProvider,
         {
@@ -414,6 +477,13 @@ describe('IntentProcessor.poll', () => {
           useValue: {
             lzSendProof: jest.fn().mockResolvedValue('lzproofdigest'),
             quoteLzFee: jest.fn().mockResolvedValue(100_000_000n),
+          },
+        },
+        {
+          provide: SolanaService,
+          useValue: {
+            canConfirm: jest.fn().mockReturnValue(false),
+            confirmExecution: jest.fn().mockResolvedValue('solsig'),
           },
         },
         {

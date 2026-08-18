@@ -6,6 +6,7 @@ import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiLzEvent } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
+import { SolanaService } from '../chain/solana/solana.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
@@ -23,6 +24,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly processedIntents = new Map<string, number>();
   private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
+  private readonly solanaSrcEid: number;
   private processing = false;
   private stopped = false;
 
@@ -31,6 +33,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly sui: SuiService,
     private readonly suiCheckpoint: SuiCheckpointService,
     private readonly suiLz: SuiLzService,
+    private readonly solana: SolanaService,
     private readonly walrus: WalrusService,
     private readonly walTopUp: WalTopUpService,
     private readonly config: ConfigService,
@@ -40,6 +43,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly ingest: IntentIngest,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
+    this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
     this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
   }
 
@@ -124,7 +128,14 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     await this.trackHop(event.intentId, 'received', { sender });
 
     try {
-      await this.processIntent(event.intentId, sender, buffered, deadlineMs, event.committedBlobId);
+      await this.processIntent(
+        event.intentId,
+        sender,
+        buffered,
+        deadlineMs,
+        event.committedBlobId,
+        event.srcEid,
+      );
       this.processedIntents.set(event.intentId, Date.now());
       this.ingest.drop(event.intentId);
       this.metrics.recordIntentProcessed('sui_lz', 'success');
@@ -151,6 +162,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     buffered: BufferedBlob,
     deadlineMs: bigint,
     committedBlobIdFromEvent: string,
+    srcEid: number,
   ): Promise<void> {
     // 0. Ensure the relayer holds enough WAL to pay for storage. Refills from
     // SUI via the Walrus exchange when low, so an exhausted WAL balance never
@@ -216,11 +228,21 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
     await this.trackHop(intentId, 'recorded_sui', { txHash: storeDigest });
 
-    // 4. Return path: send the execution proof back to EVM via LayerZero. The
-    // quoted fee is authoritative (never a fabricated fallback). If the LZ send
-    // path is unavailable, fall back to the owner-gated confirmExecution hybrid
-    // path so the EVM intent still gets marked executed with the identical proof
-    // bytes (abi.encode(blobId, endEpoch)).
+    // 4. Return path: deliver the execution proof back to the ORIGIN chain. A
+    // Solana-origin intent (src_eid = solanaSrcEid) must be confirmed on Solana,
+    // not EVM: the EVM adapter has no record of it and confirmExecution would
+    // revert. Route by origin.
+    if (srcEid === this.solanaSrcEid) {
+      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
+      await this.returnToSolana(intentId, canonicalBlobIdHex, walrusInfo.endEpoch);
+      return;
+    }
+
+    // EVM origin: send the proof back over LayerZero. The quoted fee is
+    // authoritative (never a fabricated fallback). If the LZ send path is
+    // unavailable, fall back to the owner-gated confirmExecution hybrid path so
+    // the EVM intent still gets marked executed with the identical proof bytes
+    // (abi.encode(blobId, endEpoch)).
     try {
       const quotedFee = await this.suiLz.quoteLzFee(
         intentId,
@@ -252,15 +274,41 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       );
       // Build the same proof the LZ return would deliver: abi.encode(blobId, endEpoch)
       // with the canonical big-endian blob id, so IntentExecuted decodes identically.
-      const blobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
+      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
       const proof = ethers.AbiCoder.defaultAbiCoder().encode(
         ['bytes32', 'uint256'],
-        [blobIdHex, BigInt(walrusInfo.endEpoch)],
+        [canonicalBlobIdHex, BigInt(walrusInfo.endEpoch)],
       );
       const evmDigest = await this.evm.confirmExecution(intentId, proof);
       this.logger.log(`[${intentId}] Return confirmed via confirmExecution: ${evmDigest}`);
       await this.trackHop(intentId, 'proof_sent', { txHash: evmDigest });
     }
+  }
+
+  /**
+   * Solana-origin return leg: record the execution result on the origin
+   * IntentState via the adapter's owner-gated confirm_execution. The canonical LZ
+   * proof path (Sui -> Solana lz_receive) is blocked by the same LZ testnet infra
+   * fault as the EVM leg (#272), so the trusted relayer confirms directly, still
+   * asserting on-chain that the returned blob id matches the commitment.
+   */
+  private async returnToSolana(
+    intentId: string,
+    canonicalBlobIdHex: string,
+    endEpoch: number,
+  ): Promise<void> {
+    if (!this.solana.canConfirm()) {
+      this.metrics.recordLzSend('failure');
+      throw new Error(
+        `[${intentId}] Solana-origin return leg requires a Solana signer ` +
+          `(set SOLANA_RELAYER_KEYPAIR); cannot confirm_execution`,
+      );
+    }
+    this.logger.log(`[${intentId}] Confirming execution on Solana (src_eid: ${this.solanaSrcEid})...`);
+    const sig = await this.solana.confirmExecution(intentId, canonicalBlobIdHex, BigInt(endEpoch));
+    this.metrics.recordLzSend('success');
+    this.logger.log(`[${intentId}] Solana return confirmed: ${sig}`);
+    await this.trackHop(intentId, 'proof_sent', { txHash: sig });
   }
 
   /**

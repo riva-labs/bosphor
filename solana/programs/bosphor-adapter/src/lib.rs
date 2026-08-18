@@ -91,6 +91,25 @@ pub mod bosphor_adapter {
         instructions::lz_receive::handle_lz_receive(ctx, params)
     }
 
+    /// Owner-gated return-proof fallback (the Solana mirror of EVM
+    /// `confirmExecution`). Records the execution result directly from the trusted
+    /// relayer when the LayerZero return path is unavailable, still asserting the
+    /// returned blob id matches the commitment. See `confirm_execution` for the
+    /// rationale.
+    pub fn confirm_execution(
+        ctx: Context<ConfirmExecution>,
+        intent_id: [u8; 32],
+        returned_blob_id: [u8; 32],
+        end_epoch: u64,
+    ) -> Result<()> {
+        instructions::confirm_execution::handle_confirm_execution(
+            ctx,
+            intent_id,
+            returned_blob_id,
+            end_epoch,
+        )
+    }
+
     /// Returns the account metas the endpoint Executor must pass to `lz_receive`.
     pub fn lz_receive_types(
         ctx: Context<LzReceiveTypes>,

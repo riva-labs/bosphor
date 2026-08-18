@@ -46,6 +46,11 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
 | `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |
+| `SOLANA_RPC_URL` | - | Solana RPC endpoint. Set with `SOLANA_PROGRAM_ID` to accept Solana-origin intents; unset keeps the relayer EVM-only |
+| `SOLANA_PROGRAM_ID` | - | Bosphor Solana adapter program id, watched for `IntentSubmitted` so ingest and `execute_store` work for Solana origins |
+| `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
+| `SOLANA_SRC_EID` | `40168` | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
+| `SOLANA_RELAYER_KEYPAIR` | - | Store-admin keypair (inline JSON secret-key array or a path) that signs the Solana return leg `confirm_execution`. Unset disables the return leg |
 | `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
 | `WAL_MIN_BALANCE_MIST` | `500000000` | WAL floor (0.5 WAL); below this the relayer auto-swaps SUI for WAL |
 | `WAL_TOPUP_SUI_MIST` | `1000000000` | SUI to swap per top-up (1 SUI) |
@@ -95,6 +100,7 @@ The relayer uses two different mechanisms for event detection:
 
 - **EVM**: Polls every 5 seconds via `@Interval`
 - **Sui**: Receives events in near-real-time via gRPC checkpoint streaming with automatic backfill on startup and exponential backoff reconnection
+- **Solana** (optional): When `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID` are set, polls the adapter program's `IntentSubmitted` events every 5 seconds and records the commitment, so a Solana-origin intent's out-of-band bytes bind and `execute_store` runs exactly like an EVM origin. Origin detection is uniform: fulfillment is always driven by the Sui `IntentReceived` delivery, regardless of source chain. The return proof is routed back to the origin chain: a Solana-origin intent is confirmed on Solana via the adapter's `confirm_execution` (signed with `SOLANA_RELAYER_KEYPAIR`), the mirror of the EVM `confirmExecution` fallback.
 
 Processed intents are tracked in an in-memory `Map<intentId, timestamp>` to prevent duplicate processing.
 

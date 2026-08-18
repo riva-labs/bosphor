@@ -39,6 +39,7 @@ export const KNOWN_DISCRIMINATORS = {
     submit_intent: "9fff9909958b4970",
     lz_receive: "08b3786d2176bd50",
     lz_receive_types: "dd11f69ff8801f60",
+    confirm_execution: "224bf749597f657b",
   },
   account: {
     IntentState: "5f7b9d724a1ddd73",
@@ -158,6 +159,28 @@ export function encodeInitStoreData(admin: Uint8Array, endpointProgram?: Uint8Ar
 export function encodeSetPeerData(eid: number, peer: Uint8Array): Uint8Array {
   if (peer.length !== 32) throw new Error("peer must be 32 bytes");
   return new ByteWriter().bytes(instructionDiscriminator("set_peer")).u32(eid).bytes(peer).finish();
+}
+
+/**
+ * Encodes `confirm_execution` (args: intentId [u8;32], returnedBlobId [u8;32],
+ * endEpoch u64). The owner-gated return-proof fallback; mirrors the EVM adapter's
+ * `confirmExecution`.
+ */
+export function encodeConfirmExecutionData(
+  intentId: Hex,
+  returnedBlobId: Hex,
+  endEpoch: bigint,
+): Uint8Array {
+  const id = fromHex(intentId.startsWith("0x") ? intentId.slice(2) : intentId);
+  const blob = fromHex(returnedBlobId.startsWith("0x") ? returnedBlobId.slice(2) : returnedBlobId);
+  if (id.length !== 32) throw new Error(`intentId must be 32 bytes, got ${id.length}`);
+  if (blob.length !== 32) throw new Error(`returnedBlobId must be 32 bytes, got ${blob.length}`);
+  return new ByteWriter()
+    .bytes(instructionDiscriminator("confirm_execution"))
+    .bytes(id)
+    .bytes(blob)
+    .u64(endEpoch)
+    .finish();
 }
 
 // --- account decoder ---

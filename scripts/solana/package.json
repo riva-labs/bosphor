@@ -1,0 +1,26 @@
+{
+  "name": "@bosphor/solana-wiring",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Devnet deploy + LayerZero v2 wiring toolchain for the Bosphor Solana adapter (M3 #242). Operational tooling, not published.",
+  "type": "module",
+  "scripts": {
+    "init-store": "tsx src/init-store.ts",
+    "set-libraries": "tsx src/set-libraries.ts",
+    "set-peer": "tsx src/set-peer.ts",
+    "submit-intent": "tsx src/submit-intent.ts",
+    "roundtrip-upload": "tsx src/roundtrip-upload.ts"
+  },
+  "dependencies": {
+    "@layerzerolabs/lz-solana-sdk-v2": "^3.0.168",
+    "@layerzerolabs/lz-v2-utilities": "^3.0.168",
+    "@solana/web3.js": "^1.95.0",
+    "@coral-xyz/anchor": "^0.29.0",
+    "bs58": "^6.0.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

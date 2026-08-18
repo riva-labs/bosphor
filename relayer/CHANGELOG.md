@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 (2026-08-18)
+
+### Features
+
+- feat(relayer): confirm Solana-origin intents on their origin chain
+- feat(relayer): encode confirm_execution for the Solana adapter
+- feat(relayer): record submitted hop for Solana-origin intents
+- feat(relayer): decode Solana adapter IntentSubmitted events
+
+### Bug Fixes
+
+- fix(relayer): tolerate transient Solana RPC errors in the watcher
+
 ## 0.2.1 (2026-08-15)
 
 ### Bug Fixes

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 (2026-08-18)
+
+### Features
+
+- feat(sdk): encode confirm_execution for the Solana adapter (#242)
+
 ## 0.5.2 (2026-08-15)
 
 ### Bug Fixes
