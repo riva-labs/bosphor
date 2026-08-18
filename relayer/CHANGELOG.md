@@ -4,6 +4,8 @@
 
 ### Features
 
+- feat(relayer): confirm Solana-origin intents on their origin chain
+- feat(relayer): encode confirm_execution for the Solana adapter
 - feat(relayer): record submitted hop for Solana-origin intents
 - feat(relayer): decode Solana adapter IntentSubmitted events
 
