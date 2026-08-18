@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0 (2026-08-18)
+
+### Features
+
+- feat(sdk): AbortSignal cancellation for store/awaitProof/upload
+- feat(sdk): typed BosphorError hierarchy + shared store-flow helpers
+
+DX pass: publishable ESM build (dist), the error hierarchy exported from the core,
+a DRY store-flow shared across chains, TypeDoc config + docs script, and standard
+README sections (errors, API surface, cancellation, compatibility, versioning,
+security, build).
+
 ## 0.6.0 (2026-08-18)
 
 ### Features

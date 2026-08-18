@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { base64UrlToBytes32Hex } from "./blob.ts";
+import { base64UrlToBytes32Hex } from "./blob.js";
 
 // Ground truth: a Walrus blob id is a u256 whose base64url string encodes it
 // LITTLE-endian. The canonical Bosphor commitment field is the BIG-endian encoding

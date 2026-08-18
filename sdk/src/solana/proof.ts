@@ -32,9 +32,9 @@
  * Total account data length: 106 bytes.
  */
 
-import type { Hex } from "../types.ts";
-import type { SolanaIntentState } from "./client.ts";
-import { decodeIntentState as decodeIntentStateAccount } from "./program.ts";
+import type { Hex } from "../types.js";
+import type { SolanaIntentState } from "./client.js";
+import { decodeIntentState as decodeIntentStateAccount } from "./program.js";
 
 /** Byte length of the `IntentState` account data, including the 8-byte discriminator. */
 export const INTENT_STATE_LEN = 106;

@@ -2,14 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BosphorSolanaClient,
-  ProofTimeoutError,
-  RelayerUploadError,
   type SolanaChain,
   type SolanaIntentState,
-  type FetchLike,
-} from "./client.ts";
-import { decodeIntentState, readSolanaProof, INTENT_STATE_LEN } from "./proof.ts";
-import type { BlobEncoding, ComputeBlob, Hex } from "../types.ts";
+} from "./client.js";
+import { ProofTimeoutError, RelayerUploadError } from "../errors.js";
+import type { FetchLike } from "../store-flow.js";
+import { decodeIntentState, readSolanaProof, INTENT_STATE_LEN } from "./proof.js";
+import type { BlobEncoding, ComputeBlob, Hex } from "../types.js";
 
 // --- Test doubles -----------------------------------------------------------
 
@@ -305,4 +304,45 @@ test("readSolanaProof reduces raw bytes and decoded state to the proof triple", 
   assert.equal(fromState.executed, false);
   assert.equal(fromState.blobId, BLOB_ID);
   assert.equal(fromState.endEpoch, 0n);
+});
+
+test("store() rejects immediately when the signal is already aborted (no submit)", async () => {
+  const { chain, calls } = makeFakeChain({ neverExecutes: true });
+  const { fetch } = makeFetch(200, '{"ok":true}');
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  const ac = new AbortController();
+  ac.abort(new Error("cancelled by caller"));
+
+  await assert.rejects(
+    () => client.store(new Uint8Array([1, 2, 3]), { pollMs: 1, signal: ac.signal }),
+    /cancelled by caller/,
+  );
+  assert.equal(calls.submit, 0, "no intent should be submitted after an abort");
+});
+
+test("awaitProof() rejects with the abort reason when the signal fires mid-poll", async () => {
+  const { chain } = makeFakeChain({ neverExecutes: true });
+  const { fetch } = makeFetch(200);
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(new Error("stop waiting")), 5);
+
+  await assert.rejects(
+    () => client.awaitProof(INTENT_ID, { pollMs: 2, timeoutMs: 60_000, signal: ac.signal }),
+    /stop waiting/,
+  );
 });

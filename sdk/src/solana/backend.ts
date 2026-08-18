@@ -17,11 +17,11 @@
  */
 
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import type { Hex } from "../types.ts";
-import { deriveIntentId } from "../commitment-codec.ts";
-import { decodeIntentState } from "./proof.ts";
-import { encodeSubmitIntentData, findIntentSubmittedIntentId } from "./program.ts";
-import type { SolanaChain, SolanaIntentState, SolanaSubmitFields, SolanaSubmitResult } from "./client.ts";
+import type { Hex } from "../types.js";
+import { deriveIntentId } from "../commitment-codec.js";
+import { decodeIntentState } from "./proof.js";
+import { encodeSubmitIntentData, findIntentSubmittedIntentId } from "./program.js";
+import type { SolanaChain, SolanaIntentState, SolanaSubmitFields, SolanaSubmitResult } from "./client.js";
 
 /** The Bosphor Solana adapter program id (see `solana/programs/bosphor-adapter`). */
 export const BOSPHOR_PROGRAM_ID = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF";

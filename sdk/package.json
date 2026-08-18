@@ -1,23 +1,77 @@
 {
   "name": "@bosphor/sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Bosphor SDK: cross-chain storage intents for Walrus",
   "license": "MIT",
+  "author": "Riva Labs",
+  "homepage": "https://github.com/riva-labs/bosphor/tree/main/sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riva-labs/bosphor.git",
+    "directory": "sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/riva-labs/bosphor/issues"
+  },
+  "keywords": [
+    "bosphor",
+    "walrus",
+    "layerzero",
+    "cross-chain",
+    "storage",
+    "blob",
+    "sui",
+    "evm",
+    "solana"
+  ],
   "type": "module",
-  "private": true,
+  "sideEffects": false,
   "engines": {
     "node": ">=22.0.0"
   },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./commitment": "./src/commitment-codec.ts",
-    "./evm": "./src/evm/index.ts",
-    "./solana": "./src/solana/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./commitment": {
+      "types": "./dist/commitment-codec.d.ts",
+      "import": "./dist/commitment-codec.js",
+      "default": "./dist/commitment-codec.js"
+    },
+    "./evm": {
+      "types": "./dist/evm/index.d.ts",
+      "import": "./dist/evm/index.js",
+      "default": "./dist/evm/index.js"
+    },
+    "./solana": {
+      "types": "./dist/solana/index.d.ts",
+      "import": "./dist/solana/index.js",
+      "default": "./dist/solana/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist docs/api",
     "typecheck": "tsc --noEmit",
-    "gen:vectors": "node --import tsx scripts/gen-parity-vectors.ts"
+    "docs": "typedoc",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "gen:vectors": "node --import tsx scripts/gen-parity-vectors.ts",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0"

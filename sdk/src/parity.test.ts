@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { encodeCommitment, deriveIntentId } from "./commitment-codec.ts";
+import { encodeCommitment, deriveIntentId } from "./commitment-codec.js";
 
 const vectorsPath = resolve(
   dirname(fileURLToPath(import.meta.url)),

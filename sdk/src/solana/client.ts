@@ -18,9 +18,23 @@
  * nonce.
  */
 
-import type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.ts";
-import { defaultComputeBlob } from "../blob.ts";
-import { ProofTimeoutError, RelayerUploadError } from "../evm/client.ts";
+import type { ComputeBlob, Hex, StoreResult } from "../types.js";
+import { defaultComputeBlob } from "../blob.js";
+import { ProofTimeoutError } from "../errors.js";
+import {
+  DEFAULT_EPOCHS,
+  DEFAULT_DEADLINE_SECONDS,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_POLL_MS,
+  encodeIntent,
+  resolveFetch,
+  sleep,
+  uploadBlob,
+  type AwaitProofOptions,
+  type EncodeOptions,
+  type EncodedIntent,
+  type FetchLike,
+} from "../store-flow.js";
 
 /** Commitment fields plus the chosen storage terms, ready to submit on Solana. */
 export interface SolanaSubmitFields {
@@ -81,24 +95,6 @@ export interface SolanaChain {
   readIntent(intentId: Hex): Promise<SolanaIntentState | null>;
 }
 
-/** A `fetch`-shaped function, injectable so tests never hit the network. */
-export type FetchLike = (
-  url: string,
-  init: {
-    method: string;
-    body: Uint8Array;
-    headers: Record<string, string>;
-  },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
-
-/** Fields derived from the raw bytes plus the chosen storage terms. */
-export interface EncodedIntent extends BlobEncoding {
-  /** Committed storage duration in Walrus epochs. */
-  storageEpochs: number;
-  /** Intent deadline as unix seconds (u64). */
-  deadline: bigint;
-}
-
 export interface BosphorSolanaClientOptions {
   /** A `SolanaChain` backend bound to the deployed adapter and a funded wallet. */
   chain: SolanaChain;
@@ -120,13 +116,6 @@ export interface BosphorSolanaClientOptions {
   fetch?: FetchLike;
 }
 
-export interface EncodeOptions {
-  /** Storage duration in Walrus epochs. Defaults to the client default (5). */
-  epochs?: number;
-  /** Absolute deadline as unix seconds. Overrides the derived default when set. */
-  deadline?: bigint;
-}
-
 export interface SubmitOptions {
   /** Override the client's destination endpoint id. */
   dstEid?: number;
@@ -135,20 +124,6 @@ export interface SubmitOptions {
   /** Override the client's native fee (lamports). */
   nativeFee?: bigint;
 }
-
-export interface AwaitProofOptions {
-  /** Give up after this many milliseconds. Defaults to 5 minutes. */
-  timeoutMs?: number;
-  /** Poll interval in milliseconds. Defaults to 3 seconds. */
-  pollMs?: number;
-}
-
-const DEFAULT_EPOCHS = 5;
-const DEFAULT_DEADLINE_SECONDS = 3600; // 1 hour
-const DEFAULT_TIMEOUT_MS = 5 * 60_000;
-const DEFAULT_POLL_MS = 3_000;
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * High-level Bosphor client for the Solana origin path. Construct one per adapter
@@ -179,20 +154,7 @@ export class BosphorSolanaClient {
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
     this.computeBlobFn = opts.computeBlob ?? defaultComputeBlob;
-
-    const injected = opts.fetch;
-    if (injected) {
-      this.fetchFn = injected;
-    } else if (typeof globalThis.fetch === "function") {
-      this.fetchFn = (url, init) =>
-        globalThis.fetch(url, {
-          method: init.method,
-          body: init.body,
-          headers: init.headers,
-        });
-    } else {
-      throw new Error("no fetch available; pass a fetch implementation in options");
-    }
+    this.fetchFn = resolveFetch(opts.fetch);
   }
 
   /**
@@ -201,18 +163,10 @@ export class BosphorSolanaClient {
    * here. Fails loudly if the blob id cannot be derived. Identical to the EVM path.
    */
   async encode(data: Uint8Array, opts: EncodeOptions = {}): Promise<EncodedIntent> {
-    if (data.length === 0) throw new Error("cannot store empty data");
-
-    const { blobId, size, encodingType } = await this.computeBlobFn(data);
-    if (size !== data.length) {
-      throw new Error(`computeBlob reported size ${size} but data is ${data.length} bytes`);
-    }
-
-    const storageEpochs = opts.epochs ?? this.defaultEpochs;
-    const deadline =
-      opts.deadline ?? BigInt(Math.floor(Date.now() / 1000) + this.deadlineSeconds);
-
-    return { blobId, size, encodingType, storageEpochs, deadline };
+    return encodeIntent(this.computeBlobFn, data, opts, {
+      defaultEpochs: this.defaultEpochs,
+      deadlineSeconds: this.deadlineSeconds,
+    });
   }
 
   /**
@@ -245,23 +199,12 @@ export class BosphorSolanaClient {
    * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body. Throws a
    * `RelayerUploadError` carrying the relayer's reason on any non-2xx.
    */
-  async upload(intentId: Hex, data: Uint8Array): Promise<void> {
-    const url = `${this.relayerUrl}/blob/${intentId}`;
-    const res = await this.fetchFn(url, {
-      method: "POST",
-      body: data,
-      headers: { "content-type": "application/octet-stream" },
-    });
-
-    if (!res.ok) {
-      let reason = "";
-      try {
-        reason = await res.text();
-      } catch {
-        reason = "(no response body)";
-      }
-      throw new RelayerUploadError(intentId, res.status, reason);
-    }
+  async upload(
+    intentId: Hex,
+    data: Uint8Array,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<void> {
+    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal);
   }
 
   /**
@@ -279,6 +222,7 @@ export class BosphorSolanaClient {
     const deadline = Date.now() + timeoutMs;
 
     for (;;) {
+      opts.signal?.throwIfAborted();
       const state = await this.chain.readIntent(intentId);
       if (state && state.executed) {
         return { blobId: state.committedBlobId, endEpoch: state.endEpoch };
@@ -286,7 +230,7 @@ export class BosphorSolanaClient {
       if (Date.now() >= deadline) {
         throw new ProofTimeoutError(intentId, timeoutMs);
       }
-      await sleep(pollMs);
+      await sleep(pollMs, opts.signal);
     }
   }
 
@@ -295,14 +239,27 @@ export class BosphorSolanaClient {
    * `{ intentId, blobId, endEpoch }`. Every step fails loudly; no value is
    * fabricated on error. (Solana has no separate quote step: the LayerZero fee is
    * passed as `nativeFee` on the `submit_intent` instruction.)
+   *
+   * @param data - The raw bytes to store on Walrus.
+   * @param opts - Storage terms (`epochs`, `deadline`), submit overrides
+   *   (`dstEid`, `options`, `nativeFee`), proof-poll tuning (`timeoutMs`,
+   *   `pollMs`), and an optional `signal` to cancel the flow.
+   * @returns The verified `{ intentId, blobId, endEpoch }`.
+   * @throws {@link RelayerUploadError} if the relayer rejects the blob upload.
+   * @throws {@link ProofTimeoutError} if the intent does not execute in time.
+   * @example
+   * ```ts
+   * const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
+   * ```
    */
   async store(
     data: Uint8Array,
     opts: EncodeOptions & SubmitOptions & AwaitProofOptions = {},
   ): Promise<StoreResult> {
+    opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
     const { intentId } = await this.submit(encoded, opts);
-    await this.upload(intentId, data);
+    await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
     return { intentId, blobId, endEpoch };
   }
@@ -314,5 +271,3 @@ export function createBosphorSolanaClient(
 ): BosphorSolanaClient {
   return new BosphorSolanaClient(opts);
 }
-
-export { ProofTimeoutError, RelayerUploadError };

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { encodeCommitment, decodeCommitment, deriveIntentId } from "./commitment-codec.ts";
+import { encodeCommitment, decodeCommitment, deriveIntentId } from "./commitment-codec.js";
 
 // Tracer: the canonical wire format is
 //   blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)
