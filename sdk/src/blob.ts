@@ -11,7 +11,7 @@
  * (b) unit tests can inject a stub `computeBlob` and never trigger the import.
  */
 
-import type { BlobEncoding, ComputeBlob, Hex } from "./types.ts";
+import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
 
 /**
  * Convert a Walrus base64url blob id into the canonical 32-byte Bosphor commitment

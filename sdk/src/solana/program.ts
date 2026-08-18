@@ -12,7 +12,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex as toHex, hexToBytes as fromHex } from "@noble/hashes/utils.js";
-import type { Hex } from "../types.ts";
+import type { Hex } from "../types.js";
 
 // --- discriminators (identical to Anchor) ---
 

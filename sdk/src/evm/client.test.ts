@@ -2,14 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BosphorEvmClient,
-  ProofTimeoutError,
-  RelayerUploadError,
   decodeProofEndEpoch,
   type AdapterContract,
   type EvmTransactionReceipt,
-  type FetchLike,
-} from "./client.ts";
-import type { BlobEncoding, ComputeBlob, Hex } from "../types.ts";
+} from "./client.js";
+import { ProofTimeoutError, RelayerUploadError } from "../errors.js";
+import type { FetchLike } from "../store-flow.js";
+import type { BlobEncoding, ComputeBlob, Hex } from "../types.js";
 
 // --- Test doubles -----------------------------------------------------------
 

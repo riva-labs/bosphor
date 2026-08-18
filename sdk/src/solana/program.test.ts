@@ -12,7 +12,7 @@ import {
   decodeIntentState,
   decodeIntentSubmittedIntentId,
   findIntentSubmittedIntentId,
-} from "./program.ts";
+} from "./program.js";
 
 // The load-bearing check: our computed discriminators must equal the ones the
 // compiled bosphor_adapter program actually checks. If Anchor ever changes the

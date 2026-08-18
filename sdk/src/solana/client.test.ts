@@ -2,14 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BosphorSolanaClient,
-  ProofTimeoutError,
-  RelayerUploadError,
   type SolanaChain,
   type SolanaIntentState,
-  type FetchLike,
-} from "./client.ts";
-import { decodeIntentState, readSolanaProof, INTENT_STATE_LEN } from "./proof.ts";
-import type { BlobEncoding, ComputeBlob, Hex } from "../types.ts";
+} from "./client.js";
+import { ProofTimeoutError, RelayerUploadError } from "../errors.js";
+import type { FetchLike } from "../store-flow.js";
+import { decodeIntentState, readSolanaProof, INTENT_STATE_LEN } from "./proof.js";
+import type { BlobEncoding, ComputeBlob, Hex } from "../types.js";
 
 // --- Test doubles -----------------------------------------------------------
 

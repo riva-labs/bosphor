@@ -11,8 +11,23 @@
  * `ethers.Contract`, but the SDK core never imports `ethers` itself.
  */
 
-import type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.ts";
-import { defaultComputeBlob } from "../blob.ts";
+import type { ComputeBlob, Hex, StoreResult } from "../types.js";
+import { defaultComputeBlob } from "../blob.js";
+import { ProofTimeoutError } from "../errors.js";
+import {
+  DEFAULT_EPOCHS,
+  DEFAULT_DEADLINE_SECONDS,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_POLL_MS,
+  encodeIntent,
+  resolveFetch,
+  sleep,
+  uploadBlob,
+  type AwaitProofOptions,
+  type EncodeOptions,
+  type EncodedIntent,
+  type FetchLike,
+} from "../store-flow.js";
 
 /** Minimal structural view of the fields we read off an ethers `TransactionReceipt`. */
 export interface EvmLog {
@@ -82,24 +97,6 @@ export interface AdapterContract {
   runner?: { getAddress?(): Promise<string> } | null;
 }
 
-/** A `fetch`-shaped function, injectable so tests never hit the network. */
-export type FetchLike = (
-  url: string,
-  init: {
-    method: string;
-    body: Uint8Array;
-    headers: Record<string, string>;
-  },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
-
-/** Fields derived from the raw bytes plus the chosen storage terms. */
-export interface EncodedIntent extends BlobEncoding {
-  /** Committed storage duration in Walrus epochs. */
-  storageEpochs: number;
-  /** Intent deadline as unix seconds (u64). */
-  deadline: bigint;
-}
-
 /** The LayerZero messaging fee, as returned by `quote`. */
 export interface MessagingFee {
   nativeFee: bigint;
@@ -124,49 +121,6 @@ export interface BosphorEvmClientOptions {
   /** `fetch` implementation; defaults to the global `fetch`. */
   fetch?: FetchLike;
 }
-
-export interface EncodeOptions {
-  /** Storage duration in Walrus epochs. Defaults to the client default (5). */
-  epochs?: number;
-  /** Absolute deadline as unix seconds. Overrides the derived default when set. */
-  deadline?: bigint;
-}
-
-export interface AwaitProofOptions {
-  /** Give up after this many milliseconds. Defaults to 5 minutes. */
-  timeoutMs?: number;
-  /** Poll interval in milliseconds. Defaults to 3 seconds. */
-  pollMs?: number;
-}
-
-const DEFAULT_EPOCHS = 5;
-const DEFAULT_DEADLINE_SECONDS = 3600; // 1 hour
-const DEFAULT_TIMEOUT_MS = 5 * 60_000;
-const DEFAULT_POLL_MS = 3_000;
-
-/** Thrown when an intent does not execute within the proof await timeout. */
-export class ProofTimeoutError extends Error {
-  readonly intentId: Hex;
-  constructor(intentId: Hex, timeoutMs: number) {
-    super(`intent ${intentId} did not execute within ${timeoutMs}ms`);
-    this.name = "ProofTimeoutError";
-    this.intentId = intentId;
-  }
-}
-
-/** Thrown when the relayer rejects an out-of-band blob upload with a non-2xx. */
-export class RelayerUploadError extends Error {
-  readonly status: number;
-  readonly intentId: Hex;
-  constructor(intentId: Hex, status: number, reason: string) {
-    super(`relayer rejected blob for intent ${intentId} (HTTP ${status}): ${reason}`);
-    this.name = "RelayerUploadError";
-    this.status = status;
-    this.intentId = intentId;
-  }
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Decode the `endEpoch` from a Bosphor execution proof. The proof is
@@ -209,21 +163,7 @@ export class BosphorEvmClient {
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
     this.computeBlobFn = opts.computeBlob ?? defaultComputeBlob;
-
-    const injected = opts.fetch;
-    if (injected) {
-      this.fetchFn = injected;
-    } else if (typeof globalThis.fetch === "function") {
-      // Wrap the global fetch to the injectable shape.
-      this.fetchFn = (url, init) =>
-        globalThis.fetch(url, {
-          method: init.method,
-          body: init.body,
-          headers: init.headers,
-        });
-    } else {
-      throw new Error("no fetch available; pass a fetch implementation in options");
-    }
+    this.fetchFn = resolveFetch(opts.fetch);
   }
 
   /**
@@ -232,20 +172,10 @@ export class BosphorEvmClient {
    * here. Fails loudly if the blob id cannot be derived.
    */
   async encode(data: Uint8Array, opts: EncodeOptions = {}): Promise<EncodedIntent> {
-    if (data.length === 0) throw new Error("cannot store empty data");
-
-    const { blobId, size, encodingType } = await this.computeBlobFn(data);
-    if (size !== data.length) {
-      throw new Error(
-        `computeBlob reported size ${size} but data is ${data.length} bytes`,
-      );
-    }
-
-    const storageEpochs = opts.epochs ?? this.defaultEpochs;
-    const deadline =
-      opts.deadline ?? BigInt(Math.floor(Date.now() / 1000) + this.deadlineSeconds);
-
-    return { blobId, size, encodingType, storageEpochs, deadline };
+    return encodeIntent(this.computeBlobFn, data, opts, {
+      defaultEpochs: this.defaultEpochs,
+      deadlineSeconds: this.deadlineSeconds,
+    });
   }
 
   /** Estimate the LayerZero messaging fee for submitting the given encoded intent. */
@@ -299,22 +229,7 @@ export class BosphorEvmClient {
    * `RelayerUploadError` carrying the relayer's reason on any non-2xx.
    */
   async upload(intentId: Hex, data: Uint8Array): Promise<void> {
-    const url = `${this.relayerUrl}/blob/${intentId}`;
-    const res = await this.fetchFn(url, {
-      method: "POST",
-      body: data,
-      headers: { "content-type": "application/octet-stream" },
-    });
-
-    if (!res.ok) {
-      let reason = "";
-      try {
-        reason = await res.text();
-      } catch {
-        reason = "(no response body)";
-      }
-      throw new RelayerUploadError(intentId, res.status, reason);
-    }
+    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data);
   }
 
   /**

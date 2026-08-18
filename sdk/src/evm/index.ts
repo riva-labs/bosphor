@@ -6,27 +6,23 @@
  * `ethers.Contract`, but this module never imports `ethers` directly.
  */
 
-export {
-  BosphorEvmClient,
-  createBosphorClient,
-  ProofTimeoutError,
-  RelayerUploadError,
-  decodeProofEndEpoch,
-} from "./client.ts";
+export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./client.js";
 export type {
   AdapterContract,
   BosphorEvmClientOptions,
-  EncodeOptions,
-  AwaitProofOptions,
-  EncodedIntent,
   MessagingFee,
-  FetchLike,
   EvmLog,
   EvmContractTransaction,
   EvmTransactionReceipt,
-} from "./client.ts";
+} from "./client.js";
 
-export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.ts";
+// Typed error hierarchy (shared across chains).
+export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
+
+// Shared store-flow types (identical on every chain).
+export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
+
+export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/evm` is self-sufficient.
 export {
@@ -36,6 +32,6 @@ export {
   encodeCommitment,
   decodeCommitment,
   deriveIntentId,
-} from "../commitment-codec.ts";
-export type { Commitment } from "../commitment-codec.ts";
-export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.ts";
+} from "../commitment-codec.js";
+export type { Commitment } from "../commitment-codec.js";
+export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.js";

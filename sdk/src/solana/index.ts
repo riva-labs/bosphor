@@ -10,36 +10,33 @@
  * pulls it.
  */
 
-export {
-  BosphorSolanaClient,
-  createBosphorSolanaClient,
-  ProofTimeoutError,
-  RelayerUploadError,
-} from "./client.ts";
+export { BosphorSolanaClient, createBosphorSolanaClient } from "./client.js";
 export type {
   SolanaChain,
   SolanaSubmitFields,
   SolanaSubmitResult,
   SolanaIntentState,
   BosphorSolanaClientOptions,
-  EncodeOptions,
   SubmitOptions,
-  AwaitProofOptions,
-  EncodedIntent,
-  FetchLike,
-} from "./client.ts";
+} from "./client.js";
+
+// Typed error hierarchy (shared across chains).
+export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
+
+// Shared store-flow types (identical on every chain).
+export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
 
 export {
   decodeIntentState,
   readSolanaProof,
   INTENT_STATE_LEN,
-} from "./proof.ts";
-export type { DecodedIntentState } from "./proof.ts";
+} from "./proof.js";
+export type { DecodedIntentState } from "./proof.js";
 
-export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.ts";
-export type { DefaultSolanaChainOptions } from "./backend.ts";
+export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
+export type { DefaultSolanaChainOptions } from "./backend.js";
 
-export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.ts";
+export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/solana` is self-sufficient.
 export {
@@ -49,6 +46,6 @@ export {
   encodeCommitment,
   decodeCommitment,
   deriveIntentId,
-} from "../commitment-codec.ts";
-export type { Commitment } from "../commitment-codec.ts";
-export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.ts";
+} from "../commitment-codec.js";
+export type { Commitment } from "../commitment-codec.js";
+export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.js";
