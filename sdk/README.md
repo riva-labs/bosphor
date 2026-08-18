@@ -1,7 +1,19 @@
 # @bosphor/sdk
 
-The Bosphor SDK: cross-chain storage intents for Walrus. One package, one lean
-subpath per chain, and a high-level one-call flow for storing data.
+Store a file on [Walrus](https://walrus.xyz) from an EVM or Solana wallet, over
+[LayerZero](https://layerzero.network), and get a verifiable proof back on the
+origin chain. One package, one lean subpath per chain, and a one-call `store()`.
+
+- **One call.** `await client.store(bytes, { epochs })` runs the whole cross-chain
+  flow and returns `{ intentId, blobId, endEpoch }`, verified against on-chain state.
+- **Flat cross-chain cost.** The blob id is committed on-chain and the bytes travel
+  out-of-band, so the LayerZero fee is the same for a 1 KB file and a 1 GB file.
+- **Same API on every chain.** The EVM and Solana clients are byte-for-byte identical
+  where they overlap; the intent id is the same keccak digest across EVM, Sui, and Solana.
+- **Lean by default.** Chain SDKs are optional peer dependencies loaded lazily, so a
+  codec-only or single-chain consumer never pulls them.
+- **No fabricated results.** Every failure throws a typed [`BosphorError`](#errors)
+  with the on-chain or relayer reason; nothing is silently defaulted.
 
 ## Package layout
 
@@ -149,9 +161,68 @@ For CPI consumers, on-chain verification reads the same `IntentState` PDA.
 
 See `examples/store-file.solana.ts` for a runnable end-to-end script.
 
+## Errors
+
+Every failure throws a typed error that extends `BosphorError`, so you can catch the
+base class once and narrow on the concrete type. Nothing is fabricated on error.
+
+```ts
+import { BosphorError, ProofTimeoutError, RelayerUploadError } from "@bosphor/sdk";
+
+try {
+  await client.store(bytes, { epochs: 5 });
+} catch (e) {
+  if (e instanceof RelayerUploadError) {
+    // e.status (HTTP), e.reason (the relayer's message), e.intentId
+  } else if (e instanceof ProofTimeoutError) {
+    // e.intentId, e.timeoutMs — the intent may still execute; re-poll awaitProof
+  } else if (e instanceof BosphorError) {
+    // any other SDK error
+  }
+}
+```
+
+| Error | Thrown by | Fields | Meaning |
+|-------|-----------|--------|---------|
+| `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload (e.g. no pending intent, blob-id mismatch). |
+| `ProofTimeoutError` | `awaitProof`, `store` | `intentId`, `timeoutMs` | The intent did not execute within the timeout. It may still execute; re-poll with `awaitProof(intentId)`. |
+| `BosphorError` | base class | — | Superclass of every SDK error. |
+
+The errors are exported from the core `@bosphor/sdk` and from both chain subpaths.
+
+## API surface
+
+| Import | Exports |
+|--------|---------|
+| `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `Hex` |
+| `@bosphor/sdk/commitment` | The commitment codec on its own. |
+| `@bosphor/sdk/evm` | `BosphorEvmClient`, `createBosphorClient`, `decodeProofEndEpoch`, `defaultComputeBlob`; the errors + core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee` |
+| `@bosphor/sdk/solana` | `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the errors + core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions` |
+
 ## For Solidity integrators
 
 Contracts consuming Bosphor execution proofs can import `BosphorProof`
 (`contracts/evm/src/BosphorProof.sol`) to decode the `IntentExecuted` proof
 (`abi.encode(bytes32 blobId, uint256 endEpoch)`) and read execution state from the
 adapter.
+
+## Building from source
+
+The published package ships compiled ESM in `dist/` (`.js` + `.d.ts` + source maps);
+`main`, `module`, `types`, and the `exports` conditions all resolve there.
+
+```bash
+npm run build      # tsc -> dist/ (.js, .d.ts, maps)
+npm run typecheck  # tsc --noEmit
+npm test           # node --test over src/**/*.test.ts (no network, no peers)
+```
+
+The runnable examples import the package by name, so build once first:
+
+```bash
+npm run build
+node --import tsx examples/store-file.evm.ts
+```
+
+Publishing is gated by `prepublishOnly` (clean, build, test). The package is
+`publishConfig.access: public`; run `npm publish` from `sdk/` to release.
