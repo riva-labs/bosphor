@@ -61,9 +61,11 @@ export class SolanaLifecycleWatcher implements OnModuleInit {
   scheduledPoll(): void {
     if (!this.solana.isEnabled() || this.polling) return;
     this.polling = true;
-    void this.pollOnce().finally(() => {
-      this.polling = false;
-    });
+    void this.pollOnce()
+      .catch((err) => this.logger.warn(`Solana poll failed: ${err}`))
+      .finally(() => {
+        this.polling = false;
+      });
   }
 
   async pollOnce(): Promise<void> {

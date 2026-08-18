@@ -95,6 +95,33 @@ describe('SolanaService', () => {
     expect(newestSignature).toBe('sigPrev');
   });
 
+  it('swallows a transient RPC error and keeps the prior cursor', async () => {
+    const s = enabledService();
+    mockConn.getSignaturesForAddress.mockRejectedValue(
+      Object.assign(new Error('rate limited'), { code: -32020 }),
+    );
+
+    // Must not reject: a rejection here would become an unhandled rejection and
+    // crash the relayer (the public devnet RPC is rate-limited and lags).
+    const res = await s.pollIntentSubmitted('sigPrev');
+    expect(res).toEqual({ events: [], newestSignature: 'sigPrev' });
+  });
+
+  it('does not advance the cursor when a per-tx fetch fails mid-batch', async () => {
+    const s = enabledService();
+    mockConn.getSignaturesForAddress.mockResolvedValue([{ signature: 'sigNew', err: null }]);
+    mockConn.getTransaction.mockRejectedValue(new Error('tx not available'));
+
+    const res = await s.pollIntentSubmitted('sigOld');
+    expect(res).toEqual({ events: [], newestSignature: 'sigOld' });
+  });
+
+  it('getLatestSignature returns undefined on a transient RPC error', async () => {
+    const s = enabledService();
+    mockConn.getSignaturesForAddress.mockRejectedValue(new Error('boom'));
+    expect(await s.getLatestSignature()).toBeUndefined();
+  });
+
   it('getLatestSignature returns the newest signature', async () => {
     const s = enabledService();
     mockConn.getSignaturesForAddress.mockResolvedValue([{ signature: 'sigHead', err: null }]);

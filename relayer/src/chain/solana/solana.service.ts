@@ -18,6 +18,11 @@ export interface SolanaSubmitPoll {
 /** Max signatures fetched per poll (matches the DVN's paging window). */
 const SIGNATURE_PAGE_LIMIT = 100;
 
+/** Compact an error to a short single-line message for logs. */
+function short(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).slice(0, 100);
+}
+
 /**
  * Reads the Bosphor Solana adapter's `IntentSubmitted` events off devnet.
  *
@@ -54,48 +59,64 @@ export class SolanaService implements OnModuleInit {
   /**
    * Latest confirmed signature for the adapter program, or undefined if it has no
    * history yet. Used to seed the watcher cursor so it tracks intents from now
-   * forward rather than replaying the program's whole history on startup.
+   * forward rather than replaying the program's whole history on startup. A
+   * transient RPC failure returns undefined (the first poll then seeds forward),
+   * never rejecting, so a flaky public RPC cannot break startup.
    */
   async getLatestSignature(): Promise<string | undefined> {
     if (!this.connection || !this.program) return undefined;
-    const sigs = await this.connection.getSignaturesForAddress(
-      this.program,
-      { limit: 1 },
-      'confirmed',
-    );
-    return sigs[0]?.signature;
+    try {
+      const sigs = await this.connection.getSignaturesForAddress(
+        this.program,
+        { limit: 1 },
+        'confirmed',
+      );
+      return sigs[0]?.signature;
+    } catch (err) {
+      this.logger.warn(`getLatestSignature failed (${short(err)}); seeding cursor forward`);
+      return undefined;
+    }
   }
 
   /**
    * Fetch `IntentSubmitted` events emitted since `untilSignature` (exclusive),
    * oldest-first, with the newest signature seen for cursor advance. A failed
-   * (errored) transaction is skipped. Returns the prior cursor unchanged when
-   * there is nothing new.
+   * (errored) transaction is skipped.
+   *
+   * The public devnet RPC is rate-limited and lags; any RPC error is caught and
+   * the prior cursor is returned unchanged, so the batch is retried next cycle
+   * and a transient failure never advances past unprocessed intents nor crashes
+   * the relayer (mirrors the EVM poll's own error handling).
    */
   async pollIntentSubmitted(untilSignature?: string): Promise<SolanaSubmitPoll> {
     if (!this.connection || !this.program) return { events: [], newestSignature: untilSignature };
 
-    const sigs = await this.connection.getSignaturesForAddress(
-      this.program,
-      { until: untilSignature, limit: SIGNATURE_PAGE_LIMIT },
-      'confirmed',
-    );
-    if (sigs.length === 0) return { events: [], newestSignature: untilSignature };
+    try {
+      const sigs = await this.connection.getSignaturesForAddress(
+        this.program,
+        { until: untilSignature, limit: SIGNATURE_PAGE_LIMIT },
+        'confirmed',
+      );
+      if (sigs.length === 0) return { events: [], newestSignature: untilSignature };
 
-    // getSignaturesForAddress returns newest-first; the newest is the next cursor.
-    const newestSignature = sigs[0].signature;
-    const events: SolanaSubmittedEvent[] = [];
-    for (const s of sigs.reverse()) {
-      if (s.err) continue;
-      const tx = await this.connection.getTransaction(s.signature, {
-        commitment: 'confirmed',
-        maxSupportedTransactionVersion: 0,
-      });
-      const logs = tx?.meta?.logMessages ?? [];
-      for (const ev of parseIntentSubmittedEvents(logs)) {
-        events.push({ ...ev, signature: s.signature });
+      // getSignaturesForAddress returns newest-first; the newest is the next cursor.
+      const newestSignature = sigs[0].signature;
+      const events: SolanaSubmittedEvent[] = [];
+      for (const s of sigs.reverse()) {
+        if (s.err) continue;
+        const tx = await this.connection.getTransaction(s.signature, {
+          commitment: 'confirmed',
+          maxSupportedTransactionVersion: 0,
+        });
+        const logs = tx?.meta?.logMessages ?? [];
+        for (const ev of parseIntentSubmittedEvents(logs)) {
+          events.push({ ...ev, signature: s.signature });
+        }
       }
+      return { events, newestSignature };
+    } catch (err) {
+      this.logger.warn(`pollIntentSubmitted failed (${short(err)}); retrying next cycle`);
+      return { events: [], newestSignature: untilSignature };
     }
-    return { events, newestSignature };
   }
 }
