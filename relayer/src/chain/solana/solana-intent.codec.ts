@@ -15,7 +15,33 @@
  * the proven reconstruction used by the self-operated DVN.
  */
 
-import { hexlify } from 'ethers';
+import { getBytes, hexlify } from 'ethers';
+
+/**
+ * Anchor discriminator for the `confirm_execution` instruction
+ * (sha256("global:confirm_execution")[..8]). Pinned to the compiled program; the
+ * SDK's KNOWN_DISCRIMINATORS parity test guards the same value against drift.
+ */
+export const CONFIRM_EXECUTION_DISC = '224bf749597f657b';
+
+/**
+ * Encode the `confirm_execution` instruction data: discriminator ++ intentId(32)
+ * ++ returnedBlobId(32) ++ endEpoch(u64 LE). Mirrors the adapter's argument order
+ * and the SDK's encoder. `intentId` and `returnedBlobId` are 0x-hex bytes32.
+ */
+export function encodeConfirmExecutionData(
+  intentId: string,
+  returnedBlobId: string,
+  endEpoch: bigint,
+): Buffer {
+  const id = getBytes(intentId);
+  const blob = getBytes(returnedBlobId);
+  if (id.length !== 32) throw new Error(`intentId must be 32 bytes, got ${id.length}`);
+  if (blob.length !== 32) throw new Error(`returnedBlobId must be 32 bytes, got ${blob.length}`);
+  const epoch = Buffer.alloc(8);
+  epoch.writeBigUInt64LE(endEpoch);
+  return Buffer.concat([Buffer.from(CONFIRM_EXECUTION_DISC, 'hex'), id, blob, epoch]);
+}
 
 /** Anchor discriminator for `IntentSubmitted` (sha256("event:IntentSubmitted")[..8]). */
 export const INTENT_SUBMITTED_DISC = 'ce64e78df51e5063';

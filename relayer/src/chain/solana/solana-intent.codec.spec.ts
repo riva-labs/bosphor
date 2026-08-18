@@ -1,6 +1,8 @@
 import {
   decodeIntentSubmitted,
+  encodeConfirmExecutionData,
   parseIntentSubmittedEvents,
+  CONFIRM_EXECUTION_DISC,
   INTENT_SUBMITTED_DISC,
 } from './solana-intent.codec';
 
@@ -74,5 +76,31 @@ describe('parseIntentSubmittedEvents', () => {
 
   it('exposes the pinned event discriminator', () => {
     expect(INTENT_SUBMITTED_DISC).toBe('ce64e78df51e5063');
+  });
+});
+
+describe('encodeConfirmExecutionData', () => {
+  const intentId = '0x' + 'ab'.repeat(32);
+  const blobId = '0x' + 'cd'.repeat(32);
+
+  it('encodes discriminator ++ intentId ++ blobId ++ endEpoch(u64 LE)', () => {
+    const data = encodeConfirmExecutionData(intentId, blobId, 498n);
+    expect(data.length).toBe(8 + 32 + 32 + 8);
+    expect(data.subarray(0, 8).toString('hex')).toBe(CONFIRM_EXECUTION_DISC);
+    expect(data.subarray(8, 40).toString('hex')).toBe('ab'.repeat(32));
+    expect(data.subarray(40, 72).toString('hex')).toBe('cd'.repeat(32));
+    // 498 = 0x01f2, little-endian u64.
+    expect(data.subarray(72, 80).toString('hex')).toBe('f201000000000000');
+  });
+
+  it('rejects a non-32-byte intent id or blob id', () => {
+    expect(() => encodeConfirmExecutionData('0xab', blobId, 1n)).toThrow(/intentId must be 32 bytes/);
+    expect(() => encodeConfirmExecutionData(intentId, '0xcd', 1n)).toThrow(
+      /returnedBlobId must be 32 bytes/,
+    );
+  });
+
+  it('pins the confirm_execution discriminator', () => {
+    expect(CONFIRM_EXECUTION_DISC).toBe('224bf749597f657b');
   });
 });
