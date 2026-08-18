@@ -175,7 +175,7 @@ try {
   if (e instanceof RelayerUploadError) {
     // e.status (HTTP), e.reason (the relayer's message), e.intentId
   } else if (e instanceof ProofTimeoutError) {
-    // e.intentId, e.timeoutMs — the intent may still execute; re-poll awaitProof
+    // e.intentId, e.timeoutMs; the intent may still execute, so re-poll awaitProof
   } else if (e instanceof BosphorError) {
     // any other SDK error
   }
@@ -186,7 +186,7 @@ try {
 |-------|-----------|--------|---------|
 | `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload (e.g. no pending intent, blob-id mismatch). |
 | `ProofTimeoutError` | `awaitProof`, `store` | `intentId`, `timeoutMs` | The intent did not execute within the timeout. It may still execute; re-poll with `awaitProof(intentId)`. |
-| `BosphorError` | base class | — | Superclass of every SDK error. |
+| `BosphorError` | base class | (none) | Superclass of every SDK error. |
 
 The errors are exported from the core `@bosphor/sdk` and from both chain subpaths.
 
