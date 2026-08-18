@@ -14,7 +14,7 @@
  * fabricates values: a missing or malformed account throws.
  *
  * Anchor `IntentState` layout (from
- * `solana/programs/bosphor-adapter/src/state.rs`), little-endian scalars, after the
+ * `contracts/solana/programs/bosphor-adapter/src/state.rs`), little-endian scalars, after the
  * 8-byte account discriminator:
  *
  *   offset  size  field

@@ -23,7 +23,7 @@ import { decodeIntentState } from "./proof.js";
 import { encodeSubmitIntentData, findIntentSubmittedIntentId } from "./program.js";
 import type { SolanaChain, SolanaIntentState, SolanaSubmitFields, SolanaSubmitResult } from "./client.js";
 
-/** The Bosphor Solana adapter program id (see `solana/programs/bosphor-adapter`). */
+/** The Bosphor Solana adapter program id (see `contracts/solana/programs/bosphor-adapter`). */
 export const BOSPHOR_PROGRAM_ID = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF";
 
 /** On-chain PDA seeds, mirrored from `solana/.../constants.rs`. */

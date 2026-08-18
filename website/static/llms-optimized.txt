@@ -989,7 +989,7 @@ These operations depend on the relayer behaving correctly:
 
 # Sui Walrus Executor
 
-The walrus executor module (`sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
+The walrus executor module (`contracts/sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
 
 ## Overview
 
@@ -998,7 +998,7 @@ After the relayer uploads a user's payload to Walrus and receives a certified bl
 ## Module structure
 
 ```
-sui/executor/
+contracts/sui/executor/
   Move.toml          # Package manifest (depends on Walrus)
   sources/
     walrus_executor.move   # Core executor logic
@@ -1049,7 +1049,7 @@ Bosphor has four test layers: Solidity unit tests, Move unit tests, relayer unit
 ```bash
 # Run everything (except e2e, which needs live testnet)
 (cd contracts/evm && forge test -vvv)
-(cd sui/lz-receiver && sui move test --build-env testnet)
+(cd contracts/sui/lz-receiver && sui move test --build-env testnet)
 (cd relayer && npm test)
 
 # Full round-trip (requires deployed contracts + running relayer)
@@ -1084,11 +1084,11 @@ Tests are in `contracts/evm/test/BosphorAdapter.t.sol`. They use a minimal `Endp
 ## Move tests (Sui)
 
 ```bash
-cd sui/lz-receiver
+cd contracts/sui/lz-receiver
 sui move test --build-env testnet
 ```
 
-Tests are in `sui/lz-receiver/tests/lz_receiver_tests.move`.
+Tests are in `contracts/sui/lz-receiver/tests/lz_receiver_tests.move`.
 
 ### What is covered
 
@@ -1160,7 +1160,7 @@ Your wallet does not have enough testnet tokens. Request more from:
 Remove the existing `Published.toml` before redeploying:
 
 ```bash
-rm sui/lz-receiver/Published.toml
+rm contracts/sui/lz-receiver/Published.toml
 ```
 
 This file is generated during deployment and must be removed for a fresh deploy.

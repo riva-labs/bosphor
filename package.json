@@ -30,7 +30,7 @@
     "docs:build": "cd website && npm run build",
     "test": "npm run test:forge && npm run test:move && npm run test:relayer",
     "test:forge": "cd contracts/evm && forge test -vvv",
-    "test:move": "cd sui/lz-receiver && sui move test --build-env testnet",
+    "test:move": "cd contracts/sui/lz-receiver && sui move test --build-env testnet",
     "test:relayer": "cd relayer && npm run build && npm run test"
   },
   "dependencies": {

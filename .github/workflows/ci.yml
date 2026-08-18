@@ -20,7 +20,7 @@ jobs:
         with:
           filters: |
             solana:
-              - 'solana/**'
+              - 'contracts/solana/**'
               - '.github/workflows/ci.yml'
 
   forge-tests:
@@ -61,7 +61,7 @@ jobs:
 
       - name: Run Move tests
         run: sui move test --build-env testnet
-        working-directory: sui/lz-receiver
+        working-directory: contracts/sui/lz-receiver
 
   relayer-build-and-test:
     name: Relayer Build & Test
@@ -120,7 +120,7 @@ jobs:
       - name: Parity vectors are in sync with the reference codec
         run: |
           npm --prefix sdk run gen:vectors
-          if ! git diff --exit-code -- shared/parity/commitment-vectors.json sui/lz-receiver/tests/commitment_vectors.move solana/commitment-codec/tests/parity_vectors.rs; then
+          if ! git diff --exit-code -- shared/parity/commitment-vectors.json contracts/sui/lz-receiver/tests/commitment_vectors.move contracts/solana/commitment-codec/tests/parity_vectors.rs; then
             echo "::error::Parity vectors drifted from the TypeScript reference codec. Run 'npm run gen:vectors' in sdk/ and commit the result."
             exit 1
           fi
@@ -136,7 +136,7 @@ jobs:
 
       - name: Test
         run: cargo test
-        working-directory: solana/commitment-codec
+        working-directory: contracts/solana/commitment-codec
 
   solana-build:
     name: Solana Program Build
@@ -151,7 +151,7 @@ jobs:
       # avm and the SBF build need different Rust toolchains. avm compiles from
       # source and needs a recent stable (its deps require rustc >= 1.91), so keep
       # stable as the default. The SBF build uses the nightly pinned by
-      # solana/rust-toolchain.toml for host-side macro expansion; install it too so
+      # contracts/solana/rust-toolchain.toml for host-side macro expansion; install it too so
       # anchor build does not have to fetch it on demand.
       - name: Install Rust toolchains
         run: |
@@ -193,8 +193,8 @@ jobs:
       - name: Cache Solana build target
         uses: actions/cache@v6
         with:
-          path: solana/target
-          key: solana-target-${{ runner.os }}-${{ hashFiles('solana/Cargo.lock') }}
+          path: contracts/solana/target
+          key: solana-target-${{ runner.os }}-${{ hashFiles('contracts/solana/Cargo.lock') }}
           restore-keys: |
             solana-target-${{ runner.os }}-
 
@@ -203,7 +203,7 @@ jobs:
       # The compiled .so is correct; the SDK owns the program interface (no IDL).
       - name: Build Solana program
         run: anchor build --no-idl
-        working-directory: solana
+        working-directory: contracts/solana
 
   brand-check:
     name: Brand Check

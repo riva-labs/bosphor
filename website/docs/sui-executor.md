@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Sui Walrus Executor
 
-The walrus executor module (`sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
+The walrus executor module (`contracts/sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
 
 ## Overview
 
@@ -13,7 +13,7 @@ After the relayer uploads a user's payload to Walrus and receives a certified bl
 ## Module structure
 
 ```
-sui/executor/
+contracts/sui/executor/
   Move.toml          # Package manifest (depends on Walrus)
   sources/
     walrus_executor.move   # Core executor logic

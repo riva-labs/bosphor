@@ -39,7 +39,7 @@ Your wallet does not have enough testnet tokens. Request more from:
 Remove the existing `Published.toml` before redeploying:
 
 ```bash
-rm sui/lz-receiver/Published.toml
+rm contracts/sui/lz-receiver/Published.toml
 ```
 
 This file is generated during deployment and must be removed for a fresh deploy.

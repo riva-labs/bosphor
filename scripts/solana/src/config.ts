@@ -51,7 +51,7 @@ export const SUI_TESTNET_EID = 40378;
  */
 export const SOLANA_DEVNET_EID = 40168;
 
-// --- PDA seeds (must match solana/programs/bosphor-adapter/src/constants.rs) ---
+// --- PDA seeds (must match contracts/solana/programs/bosphor-adapter/src/constants.rs) ---
 
 const STORE_SEED = Buffer.from("store");
 const PEER_SEED = Buffer.from("peer");

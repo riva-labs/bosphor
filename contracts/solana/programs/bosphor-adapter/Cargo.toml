@@ -34,7 +34,7 @@ anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 # LayerZero v2 Solana OApp crates, path-depended from the vendored LayerZero-v2
 # tree. These carry `anchor-lang = { workspace = true }` deps that Cargo resolves
 # against the LZ anchor-latest workspace root (proven to build to SBF).
-oapp = { path = "../../../contracts/evm/lib/LayerZero-v2/packages/layerzero-v2/solana/anchor-latest/libs/oapp", package = "oapp-latest" }
+oapp = { path = "../../../evm/lib/LayerZero-v2/packages/layerzero-v2/solana/anchor-latest/libs/oapp", package = "oapp-latest" }
 
 # Reuse the canonical Bosphor commitment codec (encode + derive_intent_id + keccak).
 # Kept byte-for-byte identical to the TypeScript, Solidity, and Move implementations

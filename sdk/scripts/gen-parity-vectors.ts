@@ -3,7 +3,7 @@
  *
  * Outputs (single source of truth -> per-language fixtures, zero drift):
  *   - shared/parity/commitment-vectors.json   (canonical; read by TS + Forge)
- *   - sui/lz-receiver/tests/commitment_vectors.move  (generated; Move can't read files)
+ *   - contracts/sui/lz-receiver/tests/commitment_vectors.move  (generated; Move can't read files)
  *
  * Re-run with `npm run gen:vectors` in sdk/. CI asserts the working tree is clean
  * afterwards, so the fixtures can never silently drift from the reference codec.
@@ -171,7 +171,7 @@ const moveSrc =
   vectors.map(entry).join("\n") +
   `\n    v\n}\n`;
 
-const movePath = resolve(repoRoot, "sui/lz-receiver/tests/commitment_vectors.move");
+const movePath = resolve(repoRoot, "contracts/sui/lz-receiver/tests/commitment_vectors.move");
 writeFileSync(movePath, moveSrc);
 
 // --- generated Rust fixture (integration test for the Solana-side codec) ---
@@ -235,7 +235,7 @@ const rustSrc =
   `    }\n` +
   `}\n`;
 
-const rustPath = resolve(repoRoot, "solana/commitment-codec/tests/parity_vectors.rs");
+const rustPath = resolve(repoRoot, "contracts/solana/commitment-codec/tests/parity_vectors.rs");
 mkdirSync(dirname(rustPath), { recursive: true });
 writeFileSync(rustPath, rustSrc);
 

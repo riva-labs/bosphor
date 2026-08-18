@@ -60,8 +60,8 @@ See [website/docs/deployment.md](website/docs/deployment.md) for detailed setup 
 ## Architecture
 
 - `contracts/evm/src/BosphorAdapter.sol`: EVM OApp (LayerZero v2)
-- `sui/lz-receiver/sources/lz_receiver.move`: Sui LZ receiver
-- `sui/executor/sources/walrus_executor.move`: Walrus blob executor
+- `contracts/sui/lz-receiver/sources/lz_receiver.move`: Sui LZ receiver
+- `contracts/sui/executor/sources/walrus_executor.move`: Walrus blob executor
 - `relayer/`: NestJS relayer service with health endpoint
 
 See [website/docs/architecture.md](website/docs/architecture.md) for the full design.
