@@ -81,6 +81,14 @@ DATA="hello bosphor" NATIVE_FEE=8000000 npm run submit-intent
 RELAYER_URL=http://localhost:3456 npm run roundtrip-upload
 ```
 
+The relayer needs Solana-origin support enabled to accept the upload and run
+`execute_store`: set `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID` (the adapter program
+id) in its env. The relayer then watches the adapter's `IntentSubmitted` event and
+records the commitment, so its ingest binds the uploaded bytes exactly like an EVM
+origin. Unset, the relayer stays EVM-only. A Solana pubkey cannot own the Sui blob,
+so the M3 single-relayer model transfers it to `SOLANA_SUI_RECIPIENT` (defaults to
+the relayer's own Sui address).
+
 Note: no Solana-side ULN send config is needed for the forward leg. The default
 send config prices the executor + DVN fees; `submit-intent` quotes and pays them.
 The DVN set that actually secures the message is enforced by the **Sui** receive
@@ -91,11 +99,11 @@ config, wired in `bosphor-dvn`.
 - [x] Deploy + `init-store` + `set-libraries` + `set-peer` (applied live)
 - [x] `submit-intent` forward send (real messages Solana -> Sui, proven)
 - [x] Forward leg end-to-end: DVN verify+commit+self-execute -> `IntentReceived`
-- [ ] `roundtrip-upload` execute_store: blocked on relayer Solana-origin support
-      (relayer records the commitment only from EVM `IntentSubmitted`; a Solana
-      submit watcher is needed so `getCommitment` resolves)
+- [x] `roundtrip-upload` execute_store: relayer Solana-origin watcher records the
+      commitment so ingest + `execute_store` work (proven live: intent
+      `0xa81e037f...` stored on Walrus, reference-verify passed on Sui)
 - [ ] Return leg: program upgrade adds `confirm_execution` (needs devnet SOL for
-      the upgrade buffer), then relayer/owner confirms the proof
+      the upgrade buffer), then relayer/owner confirms the proof on Solana
 
 Instruction encoders for our program (`encodeInitStoreData`, `encodeSetPeerData`,
 `encodeSubmitIntentData`, `encodeConfirmExecutionData`) are reused from
