@@ -7,7 +7,6 @@
   "scripts": {
     "init-store": "tsx src/init-store.ts",
     "set-libraries": "tsx src/set-libraries.ts",
-    "set-config": "tsx src/set-config.ts",
     "set-peer": "tsx src/set-peer.ts",
     "submit-intent": "tsx src/submit-intent.ts",
     "roundtrip-upload": "tsx src/roundtrip-upload.ts"
