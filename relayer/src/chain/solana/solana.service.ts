@@ -111,6 +111,13 @@ export class SolanaService implements OnModuleInit {
    *
    * `returnedBlobId` is the canonical big-endian 0x-hex blob id (the same bytes the
    * EVM proof carries), matching the commitment recorded at submit.
+   *
+   * Idempotent: on the rate-limited devnet a confirm can land on-chain while the
+   * client times out (or is retried). If the send fails but the IntentState is
+   * already executed, that is treated as success (the sentinel `ALREADY_EXECUTED`),
+   * mirroring how the Sui path treats `EIntentAlreadyExecuted`. `confirm_execution`
+   * itself asserts `!executed`, so a genuine re-send would abort `AlreadyExecuted`;
+   * this turns that into a success instead of a stuck intent.
    */
   async confirmExecution(
     intentId: string,
@@ -137,9 +144,39 @@ export class SolanaService implements OnModuleInit {
       data: encodeConfirmExecutionData(intentId, returnedBlobId, endEpoch),
     });
 
-    return sendAndConfirmTransaction(this.connection, new Transaction().add(ix), [this.admin], {
-      commitment: 'confirmed',
-    });
+    try {
+      return await sendAndConfirmTransaction(
+        this.connection,
+        new Transaction().add(ix),
+        [this.admin],
+        { commitment: 'confirmed' },
+      );
+    } catch (err) {
+      // A confirm that already landed (client timeout, or a retry) leaves the
+      // intent executed on-chain. Re-reading the state proves it, so don't wedge
+      // the intent on a throw the network already made moot.
+      if (await this.isIntentExecuted(intentPda)) {
+        this.logger.log(`[${intentId}] confirm_execution already applied on-chain (idempotent)`);
+        return 'ALREADY_EXECUTED';
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Read the origin IntentState's `executed` flag. The account is
+   * `disc(8) ++ committedBlobId(32) ++ size(u32) ++ storageEpochs(u32) ++
+   * deadline(u64) ++ sender(32) ++ nonce(u64) ++ executed(bool) ++ ...`, so the
+   * flag sits at byte offset 96. Returns false if the account is missing or the
+   * read fails (caller then surfaces the original error).
+   */
+  private async isIntentExecuted(intentPda: PublicKey): Promise<boolean> {
+    try {
+      const acc = await this.connection!.getAccountInfo(intentPda, 'confirmed');
+      return acc !== null && acc.data.length > 96 && acc.data[96] === 1;
+    } catch {
+      return false;
+    }
   }
 
   /**

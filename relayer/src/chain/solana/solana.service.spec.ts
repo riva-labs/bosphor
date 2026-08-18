@@ -3,7 +3,15 @@
 const mockConn = {
   getSignaturesForAddress: jest.fn(),
   getTransaction: jest.fn(),
+  getAccountInfo: jest.fn(),
 };
+
+/** Build an IntentState account buffer with the executed flag at offset 96. */
+function intentStateAccount(executed: boolean): { data: Buffer } {
+  const data = Buffer.alloc(106);
+  data[96] = executed ? 1 : 0;
+  return { data };
+}
 const mockSendAndConfirm = jest.fn();
 jest.mock('@solana/web3.js', () => ({
   Connection: jest.fn(() => mockConn),
@@ -182,6 +190,23 @@ describe('SolanaService', () => {
 
       expect(sig).toBe('confirmSig');
       expect(mockSendAndConfirm).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats an already-executed intent as idempotent success when the send throws', async () => {
+      mockSendAndConfirm.mockRejectedValue(new Error('blockhash expired'));
+      mockConn.getAccountInfo.mockResolvedValue(intentStateAccount(true));
+      const s = serviceWithSigner();
+
+      const sig = await s.confirmExecution(INTENT_ID, BLOB_ID, 498n);
+      expect(sig).toBe('ALREADY_EXECUTED');
+    });
+
+    it('rethrows when the send fails and the intent is not executed on-chain', async () => {
+      mockSendAndConfirm.mockRejectedValue(new Error('rpc down'));
+      mockConn.getAccountInfo.mockResolvedValue(intentStateAccount(false));
+      const s = serviceWithSigner();
+
+      await expect(s.confirmExecution(INTENT_ID, BLOB_ID, 498n)).rejects.toThrow(/rpc down/);
     });
 
     it('throws when no signer is configured', async () => {
