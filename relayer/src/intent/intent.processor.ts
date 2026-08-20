@@ -22,6 +22,14 @@ import { POLL_INTERVAL_MS } from '../common/constants';
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
   private readonly processedIntents = new Map<string, number>();
+  // IntentReceived events seen before their out-of-band bytes (or committed
+  // sender) were available. The checkpoint cursor advances past the event, so it
+  // is never re-emitted; a periodic sweep completes the store once the bytes
+  // land, making forward-delivery and blob-upload order-independent.
+  private readonly pendingReceived = new Map<string, SuiLzEvent>();
+  // In-flight guard so the sweep and a fresh checkpoint event cannot both drive
+  // the same intent's store concurrently.
+  private readonly storing = new Set<string>();
   private readonly intentTtlMs: number;
   private readonly evmDstEid: number;
   private readonly solanaSrcEid: number;
@@ -93,41 +101,51 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
    * expires at its deadline if bytes never arrive. Nothing is fabricated.
    */
   async handleSuiLzEvent(event: SuiLzEvent): Promise<void> {
-    if (this.processedIntents.has(event.intentId)) return;
+    if (this.processedIntents.has(event.intentId) || this.storing.has(event.intentId)) return;
 
     const deadlineMs = event.deadline * 1000n;
     if (Date.now() > Number(deadlineMs)) {
       this.logger.log(`[${event.intentId}] Skipping - deadline expired (via Sui LZ)`);
       this.processedIntents.set(event.intentId, Date.now());
+      this.pendingReceived.delete(event.intentId);
       this.ingest.drop(event.intentId);
       return;
     }
 
     // The bytes must already be ingested and bound to the commitment. If not,
-    // do NOT mark processed: wait for ingest and retry on the next pass.
+    // remember the event so the sweep can complete the store once bytes arrive
+    // out-of-band (the checkpoint cursor will not re-emit this event).
     const buffered = this.ingest.peek(event.intentId);
     if (!buffered) {
-      this.logger.log(
-        `[${event.intentId}] IntentReceived but no ingested bytes yet - waiting for out-of-band upload`,
-      );
+      if (!this.pendingReceived.has(event.intentId)) {
+        this.logger.log(
+          `[${event.intentId}] IntentReceived but no ingested bytes yet - waiting for out-of-band upload`,
+        );
+      }
+      this.pendingReceived.set(event.intentId, event);
       return;
     }
 
-    // original_sender for execute_store comes from the EVM commitment recorded
-    // at submit. Without it we cannot transfer the blob to the right address.
-    const commitment = await this.lifecycle.getCommitment(event.intentId);
-    const sender = commitment?.sender;
-    if (!sender) {
-      this.logger.warn(
-        `[${event.intentId}] IntentReceived but no committed sender recorded yet - waiting`,
-      );
-      return;
-    }
-
-    this.logger.log(`[${event.intentId}] Intent received via Sui LZ (src_eid: ${event.srcEid})`);
-    await this.trackHop(event.intentId, 'received', { sender });
-
+    // Bytes are present: claim the in-flight slot synchronously (before any
+    // await) so the sweep and a concurrent checkpoint event cannot both drive
+    // this intent's store past the guard above.
+    this.storing.add(event.intentId);
     try {
+      // original_sender for execute_store comes from the EVM commitment recorded
+      // at submit. Without it we cannot transfer the blob to the right address.
+      const commitment = await this.lifecycle.getCommitment(event.intentId);
+      const sender = commitment?.sender;
+      if (!sender) {
+        this.logger.warn(
+          `[${event.intentId}] IntentReceived but no committed sender recorded yet - waiting`,
+        );
+        this.pendingReceived.set(event.intentId, event);
+        return;
+      }
+
+      this.logger.log(`[${event.intentId}] Intent received via Sui LZ (src_eid: ${event.srcEid})`);
+      await this.trackHop(event.intentId, 'received', { sender });
+
       await this.processIntent(
         event.intentId,
         sender,
@@ -137,6 +155,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         event.srcEid,
       );
       this.processedIntents.set(event.intentId, Date.now());
+      this.pendingReceived.delete(event.intentId);
       this.ingest.drop(event.intentId);
       this.metrics.recordIntentProcessed('sui_lz', 'success');
       this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
@@ -144,6 +163,29 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.metrics.recordIntentProcessed('sui_lz', 'failure');
       this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
       this.errorReporter.captureException(err, { intentId: event.intentId });
+    } finally {
+      this.storing.delete(event.intentId);
+    }
+  }
+
+  /**
+   * Completes stores whose IntentReceived arrived before the out-of-band bytes.
+   * The checkpoint cursor moves past the event so it is never re-emitted; this
+   * sweep re-drives the store as soon as the buffered bytes (and committed
+   * sender) are available, making delivery/upload order-independent.
+   */
+  @Interval(5000)
+  sweepPendingReceived(): void {
+    if (this.stopped) return;
+    for (const [intentId, event] of this.pendingReceived) {
+      if (this.processedIntents.has(intentId)) {
+        this.pendingReceived.delete(intentId);
+        continue;
+      }
+      if (this.storing.has(intentId)) continue;
+      if (this.ingest.peek(intentId)) {
+        void this.handleSuiLzEvent(event);
+      }
     }
   }
 
