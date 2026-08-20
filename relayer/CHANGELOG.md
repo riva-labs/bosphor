@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-08-20)
+
+### Bug Fixes
+
+- fix(relayer): complete blob store when IntentReceived precedes bytes
+
 ## 0.3.0 (2026-08-18)
 
 ### Features
