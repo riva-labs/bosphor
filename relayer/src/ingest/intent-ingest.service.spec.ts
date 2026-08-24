@@ -75,7 +75,7 @@ describe('IntentIngest.ingest', () => {
     await build();
   });
 
-  it('accepts bytes that match the commitment and buffers them without uploading', async () => {
+  it('accepts bytes that match the commitment without uploading', async () => {
     mockStore.getCommitment.mockResolvedValue(makeCommitment());
     const bytes = Buffer.from('hello'); // length 5, matches committed size
 
@@ -88,11 +88,8 @@ describe('IntentIngest.ingest', () => {
       size: 5,
     });
     // encodeBlob computes the id locally; there is no upload call to assert on.
+    // Persistence to the staged queue is covered in the durable-queue block below.
     expect(encodeBlob).toHaveBeenCalledWith(new Uint8Array(bytes));
-    // The accepted bytes are buffered for the processor to store later.
-    const buffered = ingest.peek(INTENT_ID);
-    expect(buffered?.bytes.equals(bytes)).toBe(true);
-    expect(buffered?.blobId).toBe(COMMITTED_BLOB_ID_B64URL);
   });
 
   it('rejects with unknown when no pending intent exists', async () => {
@@ -104,7 +101,6 @@ describe('IntentIngest.ingest', () => {
       expect.objectContaining({ ok: false, reason: 'unknown', intentId: INTENT_ID }),
     );
     expect(encodeBlob).not.toHaveBeenCalled();
-    expect(ingest.peek(INTENT_ID)).toBeUndefined();
   });
 
   it('rejects with already-executed when the intent has already stored', async () => {
@@ -154,17 +150,6 @@ describe('IntentIngest.ingest', () => {
     const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
 
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'wrong-blob-id' }));
-    expect(ingest.peek(INTENT_ID)).toBeUndefined();
-  });
-
-  it('take() returns and removes the buffered blob', async () => {
-    mockStore.getCommitment.mockResolvedValue(makeCommitment());
-    await ingest.ingest(INTENT_ID, Buffer.from('hello'));
-
-    const taken = ingest.take(INTENT_ID);
-    expect(taken?.blobId).toBe(COMMITTED_BLOB_ID_B64URL);
-    expect(ingest.peek(INTENT_ID)).toBeUndefined();
-    expect(ingest.take(INTENT_ID)).toBeUndefined();
   });
 });
 
@@ -205,7 +190,7 @@ describe('IntentIngest with the durable staged queue', () => {
     await build();
   });
 
-  it('durably writes accepted bytes to the staged queue (dual-write with the buffer)', async () => {
+  it('durably writes accepted bytes to the staged queue as the sole sink', async () => {
     const bytes = Buffer.from('hello');
     const result = await ingest.ingest(INTENT_ID, bytes);
 
@@ -215,7 +200,6 @@ describe('IntentIngest with the durable staged queue', () => {
       blobId: COMMITTED_BLOB_ID_B64URL,
       size: 5,
     });
-    expect(ingest.peek(INTENT_ID)?.bytes.equals(bytes)).toBe(true); // still buffered too
   });
 
   it('rejects with backpressure when the staged total plus this blob exceeds the ceiling', async () => {
@@ -228,7 +212,6 @@ describe('IntentIngest with the durable staged queue', () => {
     // Load is shed before the CPU-heavy recompute and without persisting anything.
     expect(encodeBlob).not.toHaveBeenCalled();
     expect(staged.upsertBytes).not.toHaveBeenCalled();
-    expect(ingest.peek(INTENT_ID)).toBeUndefined();
   });
 
   it('accepts right at the ceiling boundary', async () => {

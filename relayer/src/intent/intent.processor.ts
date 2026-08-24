@@ -23,8 +23,7 @@ import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
 import { StagedIntentStore } from '../staged/staged-intent.store';
 import { StagedIntentRow } from '../staged/staged-intent.types';
-import { blobIdMatches } from '../ingest/intent-ingest.service';
-import { walrusBlobIdToField } from '../common/walrus-blob-id';
+import { blobIdMatches, walrusBlobIdToField } from '../common/walrus-blob-id';
 import { CLAIM_INTERVAL_MS } from '../common/constants';
 
 /**
