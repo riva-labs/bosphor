@@ -1,4 +1,11 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import { Interval } from '@nestjs/schedule';
@@ -11,30 +18,58 @@ import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
 import { MetricsService } from '../metrics/metrics.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
+import { IntentCommitment } from '../lifecycle/intent-lifecycle.types';
 import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
-import { IntentIngest, BufferedBlob } from '../ingest/intent-ingest.service';
+import { StagedIntentStore } from '../staged/staged-intent.store';
+import { StagedIntentRow } from '../staged/staged-intent.types';
 import { blobIdMatches } from '../ingest/intent-ingest.service';
 import { walrusBlobIdToField } from '../common/walrus-blob-id';
-import { POLL_INTERVAL_MS } from '../common/constants';
+import { CLAIM_INTERVAL_MS } from '../common/constants';
 
+/**
+ * Marker stored in store_digest when execute_store aborts with
+ * EIntentAlreadyExecuted (a prior attempt recorded this intent on Sui). It lets
+ * a retry skip the re-record without a real digest, and keeps the column
+ * non-null so the idempotency guard fires.
+ */
+const ALREADY_RECORDED = 'already-recorded';
+
+/**
+ * Drives the durable store queue.
+ *
+ *   Sui IntentReceived (checkpoint)  ->  staged_intent.markReceived()
+ *   POST /blob (ingest)              ->  staged_intent.upsertBytes()
+ *   this loop (@CLAIM_INTERVAL_MS)   ->  drainDue() -> store() each ready row
+ *
+ * Single-writer: one process, bounded concurrency (STORE_CONCURRENCY), no
+ * SKIP LOCKED / lease. The only in-memory state is `inProcess`, a guard so the
+ * loop never double-starts the same intent within this process.
+ *
+ * store() is per-step idempotent: the persisted walrus_object_id / store_digest
+ * make a crash or retry re-run only the unfinished steps, so a slow or restarted
+ * store never re-uploads (no double WAL spend) or re-records. Bytes are freed
+ * once the blob is safe on Walrus and recorded on Sui.
+ *
+ * Durable-only: without DATABASE_URL the queue is disabled (staged is null) and
+ * this loop is inert; the relayer needs Postgres to process intents.
+ */
 @Injectable()
 export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(IntentProcessor.name);
-  private readonly processedIntents = new Map<string, number>();
-  // IntentReceived events seen before their out-of-band bytes (or committed
-  // sender) were available. The checkpoint cursor advances past the event, so it
-  // is never re-emitted; a periodic sweep completes the store once the bytes
-  // land, making forward-delivery and blob-upload order-independent.
-  private readonly pendingReceived = new Map<string, SuiLzEvent>();
-  // In-flight guard so the sweep and a fresh checkpoint event cannot both drive
-  // the same intent's store concurrently.
-  private readonly storing = new Set<string>();
-  private readonly intentTtlMs: number;
+  /** Intents being stored right now in this process (double-start guard). */
+  private readonly inProcess = new Set<string>();
   private readonly evmDstEid: number;
   private readonly solanaSrcEid: number;
-  private processing = false;
+  private readonly storeConcurrency: number;
+  private readonly batchSize: number;
+  private readonly backoffBaseMs: number;
+  private readonly backoffCapMs: number;
+  private readonly maxStoreAttempts: number;
+  private readonly returnMaxAttempts: number;
+  private readonly attemptTimeoutMs: number;
   private stopped = false;
+  private ticking = false;
 
   constructor(
     private readonly evm: EvmService,
@@ -48,260 +83,311 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly metrics: MetricsService,
     private readonly lifecycle: IntentLifecycleStore,
     private readonly errorReporter: ErrorReporter,
-    private readonly ingest: IntentIngest,
+    // The durable queue. Null without DATABASE_URL; the loop then stays inert.
+    // Explicit @Inject because the `| null` union erases DI type metadata.
+    @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
-    this.intentTtlMs = this.config.get<number>('INTENT_TTL_MS') ?? 3_600_000;
+    this.storeConcurrency = this.config.get<number>('STORE_CONCURRENCY') ?? 4;
+    this.batchSize = this.config.get<number>('STORE_BATCH_SIZE') ?? 20;
+    this.backoffBaseMs = this.config.get<number>('STORE_BACKOFF_BASE_MS') ?? 2000;
+    this.backoffCapMs = this.config.get<number>('STORE_BACKOFF_CAP_MS') ?? 300000;
+    this.maxStoreAttempts = this.config.get<number>('MAX_STORE_ATTEMPTS') ?? 8;
+    this.returnMaxAttempts = this.config.get<number>('RETURN_MAX_ATTEMPTS') ?? 20;
+    this.attemptTimeoutMs = this.config.get<number>('STORE_ATTEMPT_TIMEOUT_MS') ?? 120000;
   }
 
-  async onModuleInit() {
+  async onModuleInit(): Promise<void> {
     const block = await this.evm.getBlockNumber();
     this.logger.log(`EVM connected at block ${block}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
-    this.logger.log(`Fulfilling intents via Sui checkpoint stream (LayerZero delivery)`);
 
-    // Register callback for Sui checkpoint streaming events, then start the
-    // stream. Order matters: the callback must be set before streaming begins
-    // so that backfill events are not silently dropped.
-    this.suiCheckpoint.setOnEventCallback((event) => this.handleSuiLzEvent(event));
+    if (!this.staged) {
+      this.logger.warn(
+        'Durable store queue disabled (DATABASE_URL not set) - intents will NOT be processed',
+      );
+    } else {
+      this.logger.log('Fulfilling intents from the durable store queue (staged_intent)');
+    }
+
+    // Register the checkpoint callback before streaming so backfill events are
+    // not dropped. The callback only durably records the event; storage is done
+    // by the claim loop.
+    this.suiCheckpoint.setOnEventCallback((event) => this.onReceived(event));
     this.suiCheckpoint.startStreaming();
   }
 
-  async onModuleDestroy() {
+  async onModuleDestroy(): Promise<void> {
     this.logger.log('Shutting down intent processor...');
     this.stopped = true;
     this.suiCheckpoint.stop();
-    // Wait for any in-flight processing to complete
-    while (this.processing) {
+    // Wait for in-flight stores to finish. A bounded, timeout-guarded drain is
+    // added in the graceful-shutdown slice; here we simply wait them out so a
+    // store is not cut mid-flight (any unfinished row resumes idempotently).
+    while (this.inProcess.size > 0) {
       await new Promise((r) => setTimeout(r, 100));
     }
     this.logger.log('Intent processor stopped');
   }
 
-  @Interval(POLL_INTERVAL_MS)
-  poll(): void {
-    if (this.stopped) return;
-    // Intents are fulfilled from the Sui LZ event (the canonical LayerZero
-    // delivery). This interval only prunes the dedup map. The EVM poll was
-    // removed because lz_send_proof aborts EIntentNotReceived when it runs
-    // before the intent has been delivered to Sui (issue #138).
-    this.pruneProcessedIntents();
+  /**
+   * Sui IntentReceived: durably flag the row so the claim loop can store it once
+   * its bytes and committed sender are available. Order-independent - the bytes
+   * may arrive before or after this event.
+   */
+  async onReceived(event: SuiLzEvent): Promise<void> {
+    if (!this.staged) return;
+    try {
+      await this.staged.markReceived(event.intentId, {
+        srcEid: event.srcEid,
+        committedBlobId: u256ToHex(event.committedBlobId),
+        deadline: Number(event.deadline) * 1000, // seconds -> ms
+      });
+      this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
+    } catch (err) {
+      this.logger.error(`[${event.intentId}] Failed to record IntentReceived: ${err}`);
+      this.errorReporter.captureException(err, { intentId: event.intentId });
+    }
   }
 
   /**
-   * Called by SuiCheckpointService when an IntentReceived event is detected.
-   *
-   * M3 (#238): the event no longer carries the blob bytes, only the committed
-   * reference. The bytes arrive out-of-band via the ingest endpoint and are
-   * buffered by IntentIngest. Storage happens only here, after IntentReceived
-   * (the reorg guard): if the bytes have not been ingested yet the event is a
-   * no-op and is retried on the next checkpoint pass, so the intent naturally
-   * expires at its deadline if bytes never arrive. Nothing is fabricated.
+   * Claim loop: drain due rows, store the ready ones with bounded concurrency.
+   * A single non-reentrant tick (guarded by `ticking`) - a long store carries
+   * over ticks via `inProcess`, it does not stack.
    */
-  async handleSuiLzEvent(event: SuiLzEvent): Promise<void> {
-    if (this.processedIntents.has(event.intentId) || this.storing.has(event.intentId)) return;
-
-    const deadlineMs = event.deadline * 1000n;
-    if (Date.now() > Number(deadlineMs)) {
-      this.logger.log(`[${event.intentId}] Skipping - deadline expired (via Sui LZ)`);
-      this.processedIntents.set(event.intentId, Date.now());
-      this.pendingReceived.delete(event.intentId);
-      this.ingest.drop(event.intentId);
-      return;
-    }
-
-    // The bytes must already be ingested and bound to the commitment. If not,
-    // remember the event so the sweep can complete the store once bytes arrive
-    // out-of-band (the checkpoint cursor will not re-emit this event).
-    const buffered = this.ingest.peek(event.intentId);
-    if (!buffered) {
-      if (!this.pendingReceived.has(event.intentId)) {
-        this.logger.log(
-          `[${event.intentId}] IntentReceived but no ingested bytes yet - waiting for out-of-band upload`,
-        );
-      }
-      this.pendingReceived.set(event.intentId, event);
-      return;
-    }
-
-    // Bytes are present: claim the in-flight slot synchronously (before any
-    // await) so the sweep and a concurrent checkpoint event cannot both drive
-    // this intent's store past the guard above.
-    this.storing.add(event.intentId);
+  @Interval(CLAIM_INTERVAL_MS)
+  async tick(): Promise<void> {
+    if (this.stopped || !this.staged || this.ticking) return;
+    this.ticking = true;
     try {
-      // original_sender for execute_store comes from the EVM commitment recorded
-      // at submit. Without it we cannot transfer the blob to the right address.
-      const commitment = await this.lifecycle.getCommitment(event.intentId);
-      const sender = commitment?.sender;
-      if (!sender) {
-        this.logger.warn(
-          `[${event.intentId}] IntentReceived but no committed sender recorded yet - waiting`,
-        );
-        this.pendingReceived.set(event.intentId, event);
+      const now = Date.now();
+      const rows = await this.staged.drainDue(now, this.batchSize);
+      const ready: { row: StagedIntentRow; sender: string; commitment: IntentCommitment | null }[] = [];
+      for (const row of rows) {
+        if (ready.length >= this.storeConcurrency) break;
+        if (this.inProcess.has(row.intentId)) continue;
+        if (!row.received || !row.hasBytes) continue;
+        // Past-deadline rows are left for the reaper to expire.
+        if (row.deadline != null && now >= row.deadline) continue;
+        // original_sender for execute_store comes from the EVM/Solana commitment
+        // (single source of truth in the lifecycle store), not duplicated here.
+        const commitment = await this.lifecycle.getCommitment(row.intentId);
+        const sender = commitment?.sender;
+        if (!sender) continue;
+        ready.push({ row, sender, commitment });
+      }
+      await Promise.allSettled(ready.map((r) => this.runStore(r.row, r.sender, r.commitment)));
+    } catch (err) {
+      this.logger.error(`Claim tick failed: ${err}`);
+      this.errorReporter.captureException(err);
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  /**
+   * Claim the in-process slot, store with a per-attempt timeout, and on failure
+   * classify + retry. Two failure domains, deliberately not conflated:
+   *   pre-store  (blob not yet on Walrus+Sui): bounded; dead-letter at MAX.
+   *   post-store (return leg; blob already safe): never dead-letters storage,
+   *              retries with a generous budget and alerts past it.
+   * Per-step idempotency makes every retry cheap (no re-upload, no re-record).
+   */
+  private async runStore(
+    row: StagedIntentRow,
+    sender: string,
+    commitment: IntentCommitment | null,
+  ): Promise<void> {
+    const intentId = row.intentId;
+    this.inProcess.add(intentId);
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        this.inProcess.delete(intentId);
+      }
+    };
+    // The store settling always releases the slot, even if a timeout already
+    // returned control below - so a timed-out-but-still-running store is never
+    // re-picked concurrently (which could double-upload).
+    const work = this.store(row, sender, commitment).finally(release);
+
+    try {
+      await withTimeout(work, this.attemptTimeoutMs);
+      this.metrics.recordIntentProcessed('sui_lz', 'success');
+      this.logger.log(`[${intentId}] Intent fulfilled`);
+      return;
+    } catch (err) {
+      // Only release now if the store itself settled (not a still-running
+      // timeout, whose .finally(release) fires when the work actually ends).
+      if (!(err instanceof TimeoutError)) release();
+      this.metrics.recordIntentProcessed('sui_lz', 'failure');
+      this.errorReporter.captureException(err, { intentId });
+
+      const attempts = row.attempts + 1;
+      const backoff = Math.min(this.backoffBaseMs * 2 ** attempts, this.backoffCapMs);
+      const nextAt = Date.now() + backoff;
+
+      if (err instanceof StoreError && err.phase === 'post') {
+        // Storage is safe; keep retrying the return leg. Never dead-letter it.
+        await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
+        if (attempts >= this.returnMaxAttempts) {
+          this.metrics.recordDeadLetter('return');
+          this.logger.error(
+            `[${intentId}] Stored but proof undelivered after ${attempts} attempts: ${err}`,
+          );
+        } else {
+          this.logger.warn(`[${intentId}] Return leg failed (attempt ${attempts}): ${err}`);
+        }
         return;
       }
 
-      this.logger.log(`[${event.intentId}] Intent received via Sui LZ (src_eid: ${event.srcEid})`);
-      await this.trackHop(event.intentId, 'received', { sender });
-
-      await this.processIntent(
-        event.intentId,
-        sender,
-        buffered,
-        deadlineMs,
-        event.committedBlobId,
-        event.srcEid,
-      );
-      this.processedIntents.set(event.intentId, Date.now());
-      this.pendingReceived.delete(event.intentId);
-      this.ingest.drop(event.intentId);
-      this.metrics.recordIntentProcessed('sui_lz', 'success');
-      this.logger.log(`[${event.intentId}] Intent fulfilled (via Sui LZ)`);
-    } catch (err) {
-      this.metrics.recordIntentProcessed('sui_lz', 'failure');
-      this.logger.error(`[${event.intentId}] Intent failed: ${err}`);
-      this.errorReporter.captureException(err, { intentId: event.intentId });
-    } finally {
-      this.storing.delete(event.intentId);
+      // Pre-store (or timeout): bounded, dead-letter once attempts are exhausted.
+      if (attempts >= this.maxStoreAttempts) {
+        await this.staged!.markDead(intentId, `pre-store attempts exhausted (${attempts}): ${err}`);
+        this.metrics.recordDeadLetter('pre_store');
+        this.logger.error(`[${intentId}] Dead-lettered after ${attempts} attempts: ${err}`);
+      } else {
+        await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
+        this.logger.error(`[${intentId}] Store failed (attempt ${attempts}): ${err}`);
+      }
     }
   }
 
   /**
-   * Completes stores whose IntentReceived arrived before the out-of-band bytes.
-   * The checkpoint cursor moves past the event so it is never re-emitted; this
-   * sweep re-drives the store as soon as the buffered bytes (and committed
-   * sender) are available, making delivery/upload order-independent.
+   * Per-step idempotent store pipeline. Each step persists its result before the
+   * next, so a crash/retry resumes without repeating work or double-paying WAL.
    */
-  @Interval(5000)
-  sweepPendingReceived(): void {
-    if (this.stopped) return;
-    for (const [intentId, event] of this.pendingReceived) {
-      if (this.processedIntents.has(intentId)) {
-        this.pendingReceived.delete(intentId);
-        continue;
-      }
-      if (this.storing.has(intentId)) continue;
-      if (this.ingest.peek(intentId)) {
-        void this.handleSuiLzEvent(event);
-      }
-    }
-  }
-
-  private pruneProcessedIntents(): void {
-    const now = Date.now();
-    for (const [id, timestamp] of this.processedIntents) {
-      if (now - timestamp > this.intentTtlMs) {
-        this.processedIntents.delete(id);
-      }
-    }
-  }
-
-  private async processIntent(
-    intentId: string,
+  private async store(
+    row: StagedIntentRow,
     sender: string,
-    buffered: BufferedBlob,
-    deadlineMs: bigint,
-    committedBlobIdFromEvent: string,
-    srcEid: number,
+    commitment: IntentCommitment | null,
   ): Promise<void> {
-    // 0. Ensure the relayer holds enough WAL to pay for storage. Refills from
-    // SUI via the Walrus exchange when low, so an exhausted WAL balance never
-    // silently blocks fulfillment (a live failure mode we hit on testnet).
-    await this.walTopUp.ensureWal();
+    const staged = this.staged!;
+    const intentId = row.intentId;
 
-    // 1. Re-verify the recomputed blob id equals the committed id BEFORE
-    // spending WAL. Ingest already checked this, but the check is cheap and
-    // guards against a stale/tampered buffer between accept and store. Prefer
-    // the on-chain commitment recorded at submit; fall back to the event's
-    // committed id (u256 decimal) if the EVM commitment is unavailable.
-    const commitment = await this.lifecycle.getCommitment(intentId);
-    const committedRef = commitment?.committedBlobId ?? u256ToHex(committedBlobIdFromEvent);
-    if (!blobIdMatches(buffered.blobId, committedRef)) {
-      throw new Error(
-        `[${intentId}] Refusing to store: buffered blob id ${buffered.blobId} no longer ` +
-          `matches committed reference ${committedRef}`,
+    // 1. Re-verify the recomputed blob id equals the commitment BEFORE any spend.
+    // A mismatch is terminal (the buffered bytes are not what was committed).
+    const committedRef = commitment?.committedBlobId ?? row.committedBlobId ?? '0x' + '00'.repeat(32);
+    if (!blobIdMatches(row.blobId ?? '', committedRef)) {
+      await staged.markDead(
+        intentId,
+        `blob id ${row.blobId} does not match committed reference ${committedRef}`,
       );
-    }
-
-    // 2. Upload the ingested bytes to Walrus
-    this.logger.log(`[${intentId}] Uploading ingested bytes to Walrus...`);
-    const uploadStart = Date.now();
-    const walrusInfo = await this.walrus.upload(buffered.bytes);
-    this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
-    this.logger.log(`[${intentId}] Walrus blobId: ${walrusInfo.blobId}`);
-    this.logger.log(`[${intentId}] Walrus object: ${walrusInfo.suiObjectId}`);
-    this.logger.log(`[${intentId}] Expires epoch: ${walrusInfo.endEpoch}`);
-
-    // Metering hook: record the per-intent WAL cost for the M4 user-pays model.
-    // The SDK does not surface the exact charge yet, so walCostMist may be
-    // undefined ("unknown cost"); we record it when present and never fabricate.
-    if (walrusInfo.walCostMist !== undefined) {
-      this.metrics.recordWalStorageCost(Number(walrusInfo.walCostMist));
-    }
-    await this.trackHop(intentId, 'stored_walrus', {
-      blobId: walrusInfo.blobId,
-      suiObjectId: walrusInfo.suiObjectId,
-      endEpoch: walrusInfo.endEpoch,
-      walCostMist: walrusInfo.walCostMist?.toString(),
-    });
-
-    // 3. Record on Sui (skip if already executed from a prior attempt)
-    const blobObjectId = walrusInfo.suiObjectId;
-    let storeDigest: string | undefined;
-    try {
-      storeDigest = await this.sui.executeStore(intentId, sender, blobObjectId, deadlineMs);
-      // Wait for TX finality to avoid object version conflicts on the next TX
-      await this.sui.getClient().core.waitForTransaction({ digest: storeDigest });
-    } catch (err) {
-      const msg = String(err);
-      // EIntentAlreadyExecuted (abort code 2) means a prior attempt already
-      // recorded this intent on Sui; proceed to the LZ send. Match both the
-      // legacy "..., 2)" and the gRPC "abort code: 2" error formats.
-      if (
-        msg.includes('execute_store') &&
-        (msg.includes(', 2)') || msg.includes('abort code: 2'))
-      ) {
-        this.logger.log(`[${intentId}] execute_store already done, proceeding to LZ send`);
-      } else {
-        throw err;
-      }
-    }
-    await this.trackHop(intentId, 'recorded_sui', { txHash: storeDigest });
-
-    // 4. Return path: deliver the execution proof back to the ORIGIN chain. A
-    // Solana-origin intent (src_eid = solanaSrcEid) must be confirmed on Solana,
-    // not EVM: the EVM adapter has no record of it and confirmExecution would
-    // revert. Route by origin.
-    if (srcEid === this.solanaSrcEid) {
-      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
-      await this.returnToSolana(intentId, canonicalBlobIdHex, walrusInfo.endEpoch);
+      this.logger.warn(`[${intentId}] Dead-lettered: blob id mismatch`);
       return;
     }
 
-    // EVM origin: send the proof back over LayerZero. The quoted fee is
-    // authoritative (never a fabricated fallback). If the LZ send path is
-    // unavailable, fall back to the owner-gated confirmExecution hybrid path so
-    // the EVM intent still gets marked executed with the identical proof bytes
-    // (abi.encode(blobId, endEpoch)).
+    // 0. Ensure the relayer holds enough WAL to pay for storage.
+    await this.walTopUp.ensureWal();
+    await this.trackHop(intentId, 'received', { sender });
+
+    // 2. Upload to Walrus (idempotent: skip if a prior attempt already uploaded).
+    let walrusBlobId: string;
+    let walrusObjectId: string;
+    let endEpoch: number;
+    if (!row.walrusObjectId) {
+      const bytes = await staged.fetchBytes(intentId);
+      if (!bytes) throw new Error('ready row has no bytes to upload');
+      this.logger.log(`[${intentId}] Uploading ingested bytes to Walrus...`);
+      const uploadStart = Date.now();
+      const info = await this.walrus.upload(bytes);
+      this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
+      await staged.persistUpload(intentId, {
+        walrusObjectId: info.suiObjectId,
+        walrusBlobId: info.blobId,
+        endEpoch: info.endEpoch,
+      });
+      if (info.walCostMist !== undefined) {
+        this.metrics.recordWalStorageCost(Number(info.walCostMist));
+      }
+      walrusBlobId = info.blobId;
+      walrusObjectId = info.suiObjectId;
+      endEpoch = info.endEpoch;
+      this.logger.log(`[${intentId}] Walrus blobId: ${walrusBlobId} (object ${walrusObjectId})`);
+    } else {
+      walrusBlobId = row.walrusBlobId!;
+      walrusObjectId = row.walrusObjectId;
+      endEpoch = row.endEpoch!;
+      this.logger.log(`[${intentId}] Reusing prior Walrus upload ${walrusObjectId} (no re-spend)`);
+    }
+    await this.trackHop(intentId, 'stored_walrus', {
+      blobId: walrusBlobId,
+      suiObjectId: walrusObjectId,
+      endEpoch,
+    });
+
+    // 3. Record on Sui (idempotent: skip if a prior attempt already recorded).
+    let storeDigest = row.storeDigest;
+    if (!storeDigest) {
+      const deadlineMs = BigInt(row.deadline ?? Number(commitment?.deadline ?? 0));
+      try {
+        storeDigest = await this.sui.executeStore(intentId, sender, walrusObjectId, deadlineMs);
+        await this.sui.getClient().core.waitForTransaction({ digest: storeDigest });
+      } catch (err) {
+        const msg = String(err);
+        // EIntentAlreadyExecuted (abort code 2): a prior attempt recorded it.
+        if (msg.includes('execute_store') && (msg.includes(', 2)') || msg.includes('abort code: 2'))) {
+          this.logger.log(`[${intentId}] execute_store already done, proceeding`);
+          storeDigest = ALREADY_RECORDED;
+        } else {
+          throw err;
+        }
+      }
+      await staged.persistStore(intentId, storeDigest);
+    }
+    await this.trackHop(intentId, 'recorded_sui', {
+      txHash: storeDigest === ALREADY_RECORDED ? undefined : storeDigest,
+    });
+
+    // 4. Blob is safe on Walrus + recorded on Sui: free the bytes.
+    await staged.freeBytes(intentId);
+
+    // 5. Return leg (idempotent: skip if already returned). A failure here is
+    // POST-store: the blob is safe and WAL is spent, so the retry never
+    // re-uploads or re-records and never dead-letters the storage. Marked with a
+    // StoreError phase so runStore classifies it correctly.
+    if (!row.returned) {
+      try {
+        if (row.srcEid === this.solanaSrcEid) {
+          const canonical = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
+          await this.returnToSolana(intentId, canonical, endEpoch);
+        } else {
+          await this.returnToEvm(intentId, walrusBlobId, endEpoch);
+        }
+      } catch (retErr) {
+        throw new StoreError(String(retErr), 'post');
+      }
+      await staged.markReturned(intentId);
+    }
+
+    // 6. Settle.
+    await staged.markDone(intentId);
+  }
+
+  /**
+   * EVM-origin return leg: deliver the execution proof back over LayerZero. The
+   * quoted fee is authoritative (never a fabricated fallback). If the LZ send
+   * path is unavailable, fall back to the owner-gated confirmExecution hybrid so
+   * the EVM intent still gets marked executed with identical proof bytes.
+   */
+  private async returnToEvm(
+    intentId: string,
+    walrusBlobId: string,
+    endEpoch: number,
+  ): Promise<void> {
     try {
-      const quotedFee = await this.suiLz.quoteLzFee(
-        intentId,
-        walrusInfo.blobId,
-        walrusInfo.endEpoch,
-        this.evmDstEid,
-      );
-      // Add 10% buffer to the quoted fee for price drift between quote and send.
+      const quotedFee = await this.suiLz.quoteLzFee(intentId, walrusBlobId, endEpoch, this.evmDstEid);
+      // 10% buffer for price drift between quote and send.
       const feeAmount = (quotedFee * 11n) / 10n;
-      this.logger.log(
-        `[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount} with buffer)`,
-      );
+      this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount})`);
       this.logger.log(`[${intentId}] Sending LZ proof to EVM (dstEid: ${this.evmDstEid})...`);
       const lzDigest = await this.suiLz.lzSendProof(
         intentId,
-        walrusInfo.blobId,
-        walrusInfo.endEpoch,
+        walrusBlobId,
+        endEpoch,
         this.evmDstEid,
         feeAmount,
       );
@@ -314,12 +400,12 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         `[${intentId}] LZ send-proof unavailable (${(lzErr as Error).message}); ` +
           `falling back to owner confirmExecution`,
       );
-      // Build the same proof the LZ return would deliver: abi.encode(blobId, endEpoch)
-      // with the canonical big-endian blob id, so IntentExecuted decodes identically.
-      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusInfo.blobId).toString('hex');
+      // Same proof the LZ return would deliver: abi.encode(blobId, endEpoch) with
+      // the canonical big-endian blob id, so IntentExecuted decodes identically.
+      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
       const proof = ethers.AbiCoder.defaultAbiCoder().encode(
         ['bytes32', 'uint256'],
-        [canonicalBlobIdHex, BigInt(walrusInfo.endEpoch)],
+        [canonicalBlobIdHex, BigInt(endEpoch)],
       );
       const evmDigest = await this.evm.confirmExecution(intentId, proof);
       this.logger.log(`[${intentId}] Return confirmed via confirmExecution: ${evmDigest}`);
@@ -330,9 +416,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   /**
    * Solana-origin return leg: record the execution result on the origin
    * IntentState via the adapter's owner-gated confirm_execution. The canonical LZ
-   * proof path (Sui -> Solana lz_receive) is blocked by the same LZ testnet infra
-   * fault as the EVM leg (#272), so the trusted relayer confirms directly, still
-   * asserting on-chain that the returned blob id matches the commitment.
+   * proof path is blocked by the same LZ testnet infra fault as the EVM leg
+   * (#272), so the trusted relayer confirms directly.
    */
   private async returnToSolana(
     intentId: string,
@@ -355,8 +440,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Record a lifecycle hop for the public feed. Best-effort: a store failure is
-   * logged but never propagates, so feed persistence can never break intent
-   * fulfillment.
+   * logged but never propagates, so feed persistence can never break fulfillment.
    */
   private async trackHop(intentId: string, hop: IntentHop, details?: HopDetails): Promise<void> {
     try {
@@ -365,6 +449,38 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`[${intentId}] Failed to record ${hop} hop: ${err}`);
     }
   }
+}
+
+/** A store failure tagged with the phase it occurred in, for retry classification. */
+class StoreError extends Error {
+  constructor(
+    message: string,
+    readonly phase: 'pre' | 'post',
+  ) {
+    super(message);
+    this.name = 'StoreError';
+  }
+}
+
+/** Raised when a store attempt exceeds its per-attempt timeout. */
+class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Reject with a TimeoutError if `promise` does not settle within `ms`. The
+ * underlying work keeps running (JS has no cancellation); the caller keeps the
+ * in-process slot until it truly settles so it is never re-driven concurrently.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(`store attempt exceeded ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 /**

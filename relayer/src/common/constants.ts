@@ -13,6 +13,13 @@ export const MAX_BACKOFF_MS = 30_000;
 /** EVM event polling interval (ms). */
 export const POLL_INTERVAL_MS = 5_000;
 
+/**
+ * Durable store queue claim cadence (ms). The single-writer loop drains ready
+ * rows this often. A compile-time constant because @Interval needs one; the
+ * tunable knobs left to config are STORE_CONCURRENCY and the retry backoff.
+ */
+export const CLAIM_INTERVAL_MS = 2_000;
+
 /** WAL coin type (the token that pays for storage) per Sui network. */
 export const WAL_COIN_TYPE_BY_NETWORK: Record<'mainnet' | 'testnet', string> = {
   testnet: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',

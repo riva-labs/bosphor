@@ -10,10 +10,23 @@ import {
   Param,
   Post,
   Req,
+  Res,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { IntentIngest } from './intent-ingest.service';
 import { IngestRejectReason } from './intent-ingest.types';
+
+/** Seconds a backpressured client should wait before retrying the upload. */
+const BACKPRESSURE_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * The one response method this controller needs. Typed structurally to avoid an
+ * @types/express dependency (the app declares express structurally in main.ts).
+ */
+interface ResponseLike {
+  header(name: string, value: string): unknown;
+}
 
 /** Minimal shape of the raw-body request we rely on (populated by express.raw). */
 interface RawBodyRequest {
@@ -46,6 +59,7 @@ export class IngestController {
   async ingestBlob(
     @Param('intentId') intentId: string,
     @Req() req: RawBodyRequest,
+    @Res({ passthrough: true }) res: ResponseLike,
   ): Promise<IngestAck> {
     const bytes = req.body;
     if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
@@ -57,6 +71,11 @@ export class IngestController {
       return { intentId: result.intentId, blobId: result.blobId, size: result.size };
     }
 
+    // Backpressure is transient: tell the client when to retry so it can back off
+    // instead of hammering a full queue.
+    if (result.reason === 'backpressure') {
+      res.header('Retry-After', String(BACKPRESSURE_RETRY_AFTER_SECONDS));
+    }
     throw this.toHttpError(result.reason, result.message);
   }
 
@@ -75,6 +94,8 @@ export class IngestController {
       case 'wrong-size':
       case 'wrong-blob-id':
         return new UnprocessableEntityException(message); // 422
+      case 'backpressure':
+        return new ServiceUnavailableException(message); // 503
     }
   }
 }

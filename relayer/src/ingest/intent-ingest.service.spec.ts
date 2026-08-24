@@ -4,6 +4,7 @@ import { IntentIngest, blobIdMatches } from './intent-ingest.service';
 import { SuiService } from '../chain/sui/sui.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { IntentCommitment } from '../lifecycle/intent-lifecycle.types';
+import { StagedIntentStore } from '../staged/staged-intent.store';
 
 const INTENT_ID = '0x' + 'ab'.repeat(32);
 
@@ -164,5 +165,89 @@ describe('IntentIngest.ingest', () => {
     expect(taken?.blobId).toBe(COMMITTED_BLOB_ID_B64URL);
     expect(ingest.peek(INTENT_ID)).toBeUndefined();
     expect(ingest.take(INTENT_ID)).toBeUndefined();
+  });
+});
+
+describe('IntentIngest with the durable staged queue', () => {
+  let ingest: IntentIngest;
+  let mockStore: { getCommitment: jest.Mock };
+  let staged: { stagedBytesTotal: jest.Mock; upsertBytes: jest.Mock };
+  let encodeBlob: jest.Mock;
+
+  async function build(maxStagedBytes = 268_435_456): Promise<void> {
+    encodeBlob = jest.fn().mockResolvedValue({ blobId: COMMITTED_BLOB_ID_B64URL });
+    mockStore = { getCommitment: jest.fn().mockResolvedValue(makeCommitment()) };
+    staged = { stagedBytesTotal: jest.fn().mockResolvedValue(0), upsertBytes: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        IntentIngest,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'MAX_INGEST_BLOB_BYTES') return 10_485_760;
+              if (key === 'MAX_STAGED_BYTES') return maxStagedBytes;
+              return undefined;
+            }),
+          },
+        },
+        { provide: SuiService, useValue: { getWalrusClient: () => ({ walrus: { encodeBlob } }) } },
+        { provide: IntentLifecycleStore, useValue: mockStore },
+        { provide: StagedIntentStore, useValue: staged },
+      ],
+    }).compile();
+
+    ingest = module.get(IntentIngest);
+  }
+
+  beforeEach(async () => {
+    await build();
+  });
+
+  it('durably writes accepted bytes to the staged queue (dual-write with the buffer)', async () => {
+    const bytes = Buffer.from('hello');
+    const result = await ingest.ingest(INTENT_ID, bytes);
+
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
+    expect(staged.upsertBytes).toHaveBeenCalledWith(INTENT_ID, {
+      bytes,
+      blobId: COMMITTED_BLOB_ID_B64URL,
+      size: 5,
+    });
+    expect(ingest.peek(INTENT_ID)?.bytes.equals(bytes)).toBe(true); // still buffered too
+  });
+
+  it('rejects with backpressure when the staged total plus this blob exceeds the ceiling', async () => {
+    await build(100); // ceiling 100 bytes
+    staged.stagedBytesTotal.mockResolvedValue(96); // 96 + 5 > 100
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'backpressure' }));
+    // Load is shed before the CPU-heavy recompute and without persisting anything.
+    expect(encodeBlob).not.toHaveBeenCalled();
+    expect(staged.upsertBytes).not.toHaveBeenCalled();
+    expect(ingest.peek(INTENT_ID)).toBeUndefined();
+  });
+
+  it('accepts right at the ceiling boundary', async () => {
+    await build(100);
+    staged.stagedBytesTotal.mockResolvedValue(95); // 95 + 5 == 100, not over
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
+    expect(staged.upsertBytes).toHaveBeenCalled();
+  });
+
+  it('checks backpressure only after the cheap validations (a wrong-size upload is not backpressure)', async () => {
+    await build(1); // ceiling 1 byte: everything would be "full"
+    mockStore.getCommitment.mockResolvedValue(makeCommitment({ size: 99 }));
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello')); // 5 != 99
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'wrong-size' }));
+    expect(staged.stagedBytesTotal).not.toHaveBeenCalled();
   });
 });

@@ -90,6 +90,29 @@ export const configValidationSchema = Joi.object({
   // oversized upload with a distinct reason (413) rather than allocating it.
   MAX_INGEST_BLOB_BYTES: Joi.number().integer().default(10485760), // 10 MiB
 
+  // Aggregate backpressure ceiling for the durable store queue: total bytes held
+  // across all staged (not-yet-stored) intents. Over this, ingest sheds load with
+  // a 503 + Retry-After instead of buffering unbounded (the OOM guard). Only
+  // enforced when DATABASE_URL is set (the durable queue is active).
+  MAX_STAGED_BYTES: Joi.number().integer().default(268435456), // 256 MiB
+
+  // Durable store queue processing knobs (single-writer loop).
+  // How many intents the loop stores in parallel per tick.
+  STORE_CONCURRENCY: Joi.number().integer().min(1).default(4),
+  // Rows scanned per claim tick (an upper bound on per-tick work).
+  STORE_BATCH_SIZE: Joi.number().integer().min(1).default(20),
+  // Exponential backoff for a failed store attempt: min(BASE * 2^attempts, CAP).
+  STORE_BACKOFF_BASE_MS: Joi.number().integer().default(2000),
+  STORE_BACKOFF_CAP_MS: Joi.number().integer().default(300000), // 5 min
+  // Pre-store attempts (blob not yet on Walrus+Sui) before dead-lettering.
+  MAX_STORE_ATTEMPTS: Joi.number().integer().min(1).default(8),
+  // Return-leg attempts (blob already stored) before alerting. The storage is
+  // safe, so this never dead-letters; it keeps retrying and raises a metric.
+  RETURN_MAX_ATTEMPTS: Joi.number().integer().min(1).default(20),
+  // Upper bound on one store attempt; a hung Walrus/Sui call is aborted and the
+  // row rescheduled instead of pinning the in-process slot forever.
+  STORE_ATTEMPT_TIMEOUT_MS: Joi.number().integer().default(120000), // 2 min
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 (2026-08-24)
+
+### Features
+
+- feat(relayer): drive stores from the durable queue with a single-writer loop
+- feat(relayer): durably stage ingested bytes + aggregate backpressure
+- feat(relayer): add staged_intent durable store queue table + store
+
 ## 0.3.1 (2026-08-20)
 
 ### Bug Fixes

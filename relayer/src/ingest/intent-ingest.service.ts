@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SuiService } from '../chain/sui/sui.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
+import { StagedIntentStore } from '../staged/staged-intent.store';
 import { IngestRejected, IngestResult } from './intent-ingest.types';
 import { blobIdMatches } from '../common/walrus-blob-id';
 
@@ -31,6 +32,7 @@ export interface BufferedBlob {
 export class IntentIngest {
   private readonly logger = new Logger(IntentIngest.name);
   private readonly maxIngestBytes: number;
+  private readonly maxStagedBytes: number;
   /** Accepted bytes keyed by intent id, awaiting store after IntentReceived. */
   private readonly buffered = new Map<string, BufferedBlob>();
 
@@ -38,8 +40,13 @@ export class IntentIngest {
     private readonly config: ConfigService,
     private readonly sui: SuiService,
     private readonly lifecycle: IntentLifecycleStore,
+    // The durable queue. Null when DATABASE_URL is unset (local dev / tests):
+    // ingest falls back to the in-memory buffer with no aggregate backpressure.
+    // Explicit @Inject token because the `| null` union erases DI type metadata.
+    @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
   ) {
     this.maxIngestBytes = this.config.get<number>('MAX_INGEST_BLOB_BYTES') ?? 10_485_760;
+    this.maxStagedBytes = this.config.get<number>('MAX_STAGED_BYTES') ?? 268_435_456;
   }
 
   /**
@@ -83,6 +90,21 @@ export class IntentIngest {
       );
     }
 
+    // Aggregate backpressure: shed load before the CPU-heavy blob-id recompute
+    // (and before buffering) when the durable queue is already near its byte
+    // ceiling. Sourced from a live SUM over staged rows, never an in-memory
+    // counter (which drifts and is wrong across restart/multi-instance).
+    if (this.staged) {
+      const stagedBytes = await this.staged.stagedBytesTotal();
+      if (stagedBytes + bytes.length > this.maxStagedBytes) {
+        return this.reject(
+          intentId,
+          'backpressure',
+          `staged bytes ${stagedBytes} + ${bytes.length} exceed MAX_STAGED_BYTES ${this.maxStagedBytes}`,
+        );
+      }
+    }
+
     // Recompute the Walrus blob id locally (no upload) and require it to equal
     // the on-chain commitment. This is the load-bearing binding: it proves the
     // bytes are exactly what the sender paid to store.
@@ -97,6 +119,11 @@ export class IntentIngest {
     }
 
     this.buffered.set(intentId, { bytes, blobId, size: bytes.length });
+    // Durable-write the same bytes to the store queue so an accepted upload
+    // survives a crash. Dual-write during the transition: the processor still
+    // reads the in-memory buffer until it is switched to the queue (T3), and the
+    // buffer is retired once the queue is the sole store (T7).
+    await this.staged?.upsertBytes(intentId, { bytes, blobId, size: bytes.length });
     this.logger.log(
       `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (buffered for store)`,
     );
