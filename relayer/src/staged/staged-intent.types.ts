@@ -2,7 +2,7 @@
  * Types for the durable store queue (`staged_intent`).
  *
  * M3 hardening: the relayer's store pipeline was fully in-memory (bytes in a Map,
- * a sweep, an in-flight Set). This queue makes it durable — bytes live in
+ * a sweep, an in-flight Set). This queue makes it durable - bytes live in
  * Postgres, one row per intent, processed by a single-writer loop. See the
  * StagedIntentStore for the data-access surface.
  *
@@ -43,11 +43,11 @@ export interface StagedIntentRow {
   hasBytes: boolean;
   /** Recomputed Walrus blob id (base64url) from ingest. */
   blobId?: string;
-  /** Set after a successful Walrus upload — retry/crash skips re-upload (no double WAL). */
+  /** Set after a successful Walrus upload - retry/crash skips re-upload (no double WAL). */
   walrusObjectId?: string;
   walrusBlobId?: string;
   endEpoch?: number;
-  /** Set after a successful execute_store — retry skips re-recording on Sui. */
+  /** Set after a successful execute_store - retry skips re-recording on Sui. */
   storeDigest?: string;
   /** Whether the return-leg proof has been confirmed. */
   returned: boolean;

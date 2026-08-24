@@ -23,7 +23,7 @@ const TABLE = 'staged_intent';
 /**
  * Postgres-backed durable store queue. One row per intent; the raw bytes live in
  * a BYTEA column until the blob is safely on Walrus and recorded on Sui, then are
- * nulled to reclaim space. This is a pure data-access layer — scheduling,
+ * nulled to reclaim space. This is a pure data-access layer - scheduling,
  * classification, and the store pipeline live in the processor (later slices).
  *
  *   ingest   -> upsertBytes()   (bytes + blob_id + size)
@@ -119,7 +119,7 @@ export class StagedIntentStore {
 
   /**
    * Active rows that are due (`next_attempt_at <= now`), oldest first. Returns
-   * metadata only — never the BYTEA payload — so the poll stays cheap.
+   * metadata only - never the BYTEA payload - so the poll stays cheap.
    */
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     const { rows } = await this.pool.query(

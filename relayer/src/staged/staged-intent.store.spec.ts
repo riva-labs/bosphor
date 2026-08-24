@@ -78,7 +78,7 @@ class FakePool implements PgQueryable {
     const isBytes = sql.includes('bytes,'); // upsertBytes column list carries `bytes`
 
     if (existing) {
-      // ON CONFLICT ... WHERE state='active' — terminal rows are untouched.
+      // ON CONFLICT ... WHERE state='active' - terminal rows are untouched.
       if (existing.state !== 'active') return { rows: [] };
       if (isBytes) {
         existing.bytes = params[1] as Buffer;
@@ -132,7 +132,7 @@ class FakePool implements PgQueryable {
   }
 
   private update(sql: string, params: unknown[]): { rows: Record<string, unknown>[] } {
-    // Bulk expire has no intent_id param — it scans by deadline.
+    // Bulk expire has no intent_id param - it scans by deadline.
     if (sql.includes("state = 'expired'")) {
       const now = params[0] as number;
       const expired: Record<string, unknown>[] = [];

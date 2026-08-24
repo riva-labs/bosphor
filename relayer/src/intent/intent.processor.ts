@@ -134,7 +134,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Sui IntentReceived: durably flag the row so the claim loop can store it once
-   * its bytes and committed sender are available. Order-independent — the bytes
+   * its bytes and committed sender are available. Order-independent - the bytes
    * may arrive before or after this event.
    */
   async onReceived(event: SuiLzEvent): Promise<void> {
@@ -154,7 +154,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Claim loop: drain due rows, store the ready ones with bounded concurrency.
-   * A single non-reentrant tick (guarded by `ticking`) — a long store carries
+   * A single non-reentrant tick (guarded by `ticking`) - a long store carries
    * over ticks via `inProcess`, it does not stack.
    */
   @Interval(CLAIM_INTERVAL_MS)
@@ -210,7 +210,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       }
     };
     // The store settling always releases the slot, even if a timeout already
-    // returned control below — so a timed-out-but-still-running store is never
+    // returned control below - so a timed-out-but-still-running store is never
     // re-picked concurrently (which could double-upload).
     const work = this.store(row, sender, commitment).finally(release);
 
