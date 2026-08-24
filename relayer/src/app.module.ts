@@ -10,6 +10,7 @@ import { IngestModule } from './ingest/ingest.module';
 import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
+import { StagedModule } from './staged/staged.module';
 import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { ObservabilityModule } from './observability/observability.module';
     ObservabilityModule,
     MetricsModule,
     LifecycleModule,
+    StagedModule,
     EvmModule,
     SuiModule,
     SolanaModule,
