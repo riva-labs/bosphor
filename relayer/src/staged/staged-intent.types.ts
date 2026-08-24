@@ -82,3 +82,13 @@ export interface UploadResult {
   walrusBlobId: string;
   endEpoch: number;
 }
+
+/** Queue-depth snapshot for the metrics gauges. */
+export interface StagedStats {
+  /** Rows still in play (not yet done/dead/expired). */
+  active: number;
+  /** Rows dead-lettered (pre-store attempts exhausted or a terminal error). */
+  dead: number;
+  /** Total committed bytes still held in the queue (backpressure headroom). */
+  bytes: number;
+}

@@ -4,11 +4,18 @@ function build(cfg: Record<string, number> = {}, staged: unknown = undefined) {
   const store = staged ?? {
     expireDue: jest.fn().mockResolvedValue(0),
     purgeTerminal: jest.fn().mockResolvedValue(0),
+    stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
   };
   const config = { get: jest.fn((k: string) => cfg[k]) };
   const errorReporter = { captureException: jest.fn() };
-  const reaper = new StagedReaper(config as never, errorReporter as never, store as never);
-  return { reaper, store, errorReporter };
+  const metrics = { setStagedQueueStats: jest.fn() };
+  const reaper = new StagedReaper(
+    config as never,
+    errorReporter as never,
+    metrics as never,
+    store as never,
+  );
+  return { reaper, store, errorReporter, metrics };
 }
 
 describe('StagedReaper', () => {
@@ -16,6 +23,7 @@ describe('StagedReaper', () => {
     const store = {
       expireDue: jest.fn().mockResolvedValue(2),
       purgeTerminal: jest.fn().mockResolvedValue(3),
+      stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
     };
     const { reaper } = build({ STAGED_RETENTION_MS: 60_000 }, store);
     const before = Date.now();
@@ -33,6 +41,7 @@ describe('StagedReaper', () => {
     const store = {
       expireDue: jest.fn().mockResolvedValue(0),
       purgeTerminal: jest.fn().mockResolvedValue(0),
+      stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
     };
     const { reaper } = build({}, store);
     const before = Date.now();
@@ -40,6 +49,18 @@ describe('StagedReaper', () => {
 
     const [cutoff] = store.purgeTerminal.mock.calls[0];
     expect(cutoff).toBeLessThanOrEqual(before - 86_400_000 + 1_000);
+  });
+
+  it('publishes queue-depth gauges from the post-reap stats snapshot', async () => {
+    const store = {
+      expireDue: jest.fn().mockResolvedValue(0),
+      purgeTerminal: jest.fn().mockResolvedValue(0),
+      stats: jest.fn().mockResolvedValue({ active: 7, dead: 2, bytes: 4096 }),
+    };
+    const { reaper, metrics } = build({}, store);
+    await reaper.reap();
+
+    expect(metrics.setStagedQueueStats).toHaveBeenCalledWith({ active: 7, dead: 2, bytes: 4096 });
   });
 
   it('is inert when the durable queue is disabled (staged null)', async () => {
@@ -55,6 +76,7 @@ describe('StagedReaper', () => {
         .mockImplementationOnce(() => new Promise<number>((r) => (resolveExpire = r)))
         .mockResolvedValue(0),
       purgeTerminal: jest.fn().mockResolvedValue(0),
+      stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
     };
     const { reaper } = build({}, store);
     const first = reaper.reap();
@@ -71,6 +93,7 @@ describe('StagedReaper', () => {
     const store = {
       expireDue: jest.fn().mockRejectedValue(new Error('db down')),
       purgeTerminal: jest.fn().mockResolvedValue(0),
+      stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
     };
     const { reaper, errorReporter } = build({}, store);
     await expect(reaper.reap()).resolves.toBeUndefined();

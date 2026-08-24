@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { StagedIntentStore } from './staged-intent.store';
 import { ErrorReporter } from '../observability/error-reporter';
+import { MetricsService } from '../metrics/metrics.service';
 import { REAP_INTERVAL_MS } from '../common/constants';
 
 /**
@@ -15,6 +16,8 @@ import { REAP_INTERVAL_MS } from '../common/constants';
  *              rows; this is what actually settles them).
  *   purge   -> terminal rows (done/dead/expired) older than STAGED_RETENTION_MS
  *              are deleted so the table does not grow without bound.
+ *   gauges  -> publish the queue depth (active / bytes / dead) so the dashboard
+ *              and alerts see backpressure headroom and dead-letter buildup.
  *
  * Inert without DATABASE_URL (staged is null). Non-reentrant (`reaping` guard) so
  * a slow pass never overlaps the next tick. Being single-writer, no lease or
@@ -29,6 +32,7 @@ export class StagedReaper {
   constructor(
     private readonly config: ConfigService,
     private readonly errorReporter: ErrorReporter,
+    private readonly metrics: MetricsService,
     // The durable queue. Null without DATABASE_URL; the reaper then stays inert.
     // Explicit @Inject because the `| null` union erases DI type metadata.
     @Optional()
@@ -52,6 +56,9 @@ export class StagedReaper {
       if (purged > 0) {
         this.logger.log(`Purged ${purged} terminal row(s) past retention`);
       }
+      // Publish queue depth after the janitorial passes so the gauges reflect the
+      // post-reap state.
+      this.metrics.setStagedQueueStats(await this.staged.stats());
     } catch (err) {
       // Loud, not silent: a reap failure is logged and reported, and the next
       // tick retries. It never blocks the store path.

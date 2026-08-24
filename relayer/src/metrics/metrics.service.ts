@@ -76,6 +76,28 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Durable store queue depth. `active` is rows still in play (crude queue
+  // length), `bytes` the total committed size still held in BYTEA (backpressure
+  // headroom vs MAX_STAGED_BYTES), `dead` the count dead-lettered. Set
+  // periodically by the reaper from a single aggregate scan.
+  private readonly stagedActive = new Gauge({
+    name: 'bosphor_relayer_staged_intent_active',
+    help: 'Durable-queue rows still active (not yet done/dead/expired)',
+    registers: [this.registry],
+  });
+
+  private readonly stagedBytes = new Gauge({
+    name: 'bosphor_relayer_staged_bytes',
+    help: 'Total committed bytes still held in the durable queue (backpressure headroom)',
+    registers: [this.registry],
+  });
+
+  private readonly stagedDead = new Gauge({
+    name: 'bosphor_relayer_staged_dead',
+    help: 'Durable-queue rows that dead-lettered (pre-store attempts exhausted)',
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -126,6 +148,13 @@ export class MetricsService {
   /** Record a durable-queue dead-letter (pre-store) or return-budget exhaustion. */
   recordDeadLetter(phase: 'pre_store' | 'return'): void {
     this.storeDeadLetter.inc({ phase });
+  }
+
+  /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */
+  setStagedQueueStats(stats: { active: number; dead: number; bytes: number }): void {
+    if (Number.isFinite(stats.active)) this.stagedActive.set(stats.active);
+    if (Number.isFinite(stats.bytes)) this.stagedBytes.set(stats.bytes);
+    if (Number.isFinite(stats.dead)) this.stagedDead.set(stats.dead);
   }
 
   get contentType(): string {
