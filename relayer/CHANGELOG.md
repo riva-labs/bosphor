@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 (2026-08-24)
+
+### Bug Fixes
+
+- fix(relayer): create staged_intent table on boot (DI token erasure)
+
 ## 0.5.0 (2026-08-24)
 
 ### Features
