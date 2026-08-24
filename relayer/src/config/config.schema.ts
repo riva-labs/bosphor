@@ -112,6 +112,14 @@ export const configValidationSchema = Joi.object({
   // Upper bound on one store attempt; a hung Walrus/Sui call is aborted and the
   // row rescheduled instead of pinning the in-process slot forever.
   STORE_ATTEMPT_TIMEOUT_MS: Joi.number().integer().default(120000), // 2 min
+  // Retention window for terminal rows (done/dead/expired). The reaper purges
+  // rows older than this so the queue table does not grow without bound; the
+  // durable evidence they carry lives in the intent_lifecycle feed regardless.
+  STAGED_RETENTION_MS: Joi.number().integer().default(86400000), // 24 h
+  // Graceful-shutdown drain budget. On SIGTERM the processor waits up to this
+  // long for in-flight stores to settle before exiting; anything still active
+  // resumes idempotently on next boot (no re-upload / re-record).
+  SHUTDOWN_DRAIN_MS: Joi.number().integer().default(30000), // 30 s
 
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),

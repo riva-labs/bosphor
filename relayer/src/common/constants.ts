@@ -20,6 +20,14 @@ export const POLL_INTERVAL_MS = 5_000;
  */
 export const CLAIM_INTERVAL_MS = 2_000;
 
+/**
+ * Reaper cadence (ms). A single-writer maintenance loop expires past-deadline
+ * rows that never stored and purges terminal rows past their retention window.
+ * A compile-time constant because @Interval needs one; the retention window
+ * itself is the config knob (STAGED_RETENTION_MS).
+ */
+export const REAP_INTERVAL_MS = 10_000;
+
 /** WAL coin type (the token that pays for storage) per Sui network. */
 export const WAL_COIN_TYPE_BY_NETWORK: Record<'mainnet' | 'testnet', string> = {
   testnet: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',

@@ -113,6 +113,7 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     STORE_ATTEMPT_TIMEOUT_MS: 120_000,
     STORE_BACKOFF_BASE_MS: 2000,
     STORE_BACKOFF_CAP_MS: 300_000,
+    SHUTDOWN_DRAIN_MS: 30_000,
     ...cfgOverrides,
   };
   const config = {
@@ -337,5 +338,25 @@ describe('IntentProcessor durable queue', () => {
     const { proc } = build();
     (proc as unknown as { staged: null }).staged = null;
     await expect(proc.tick()).resolves.toBeUndefined();
+  });
+
+  it('graceful shutdown drains promptly when nothing is in flight', async () => {
+    const { proc } = build();
+    const start = Date.now();
+    await proc.onModuleDestroy();
+    // No in-flight store -> returns without waiting out the drain budget.
+    expect(Date.now() - start).toBeLessThan(1_000);
+  });
+
+  it('graceful shutdown gives up at SHUTDOWN_DRAIN_MS if a store never settles', async () => {
+    const { proc } = build([], { SHUTDOWN_DRAIN_MS: 150 });
+    // Pin a fake in-flight store so the drain loop never sees inProcess empty.
+    (proc as unknown as { inProcess: Set<string> }).inProcess.add('0xstuck');
+    const start = Date.now();
+    await proc.onModuleDestroy();
+    const elapsed = Date.now() - start;
+    // Waited out the budget (not forever) then exited.
+    expect(elapsed).toBeGreaterThanOrEqual(150);
+    expect(elapsed).toBeLessThan(2_000);
   });
 });
