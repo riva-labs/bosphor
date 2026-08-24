@@ -39,6 +39,20 @@ class FakePool implements PgQueryable {
       return { rows: r ? [{ bytes: r.bytes }] : [] };
     }
 
+    // stats() aggregate - checked before the plain SUM(size) branch because this
+    // query also contains "sum(size)" (as a FILTER'd column).
+    if (sql.includes('count(*) filter')) {
+      let active = 0;
+      let dead = 0;
+      let bytes = 0;
+      for (const r of this.rows.values()) {
+        if (r.state === 'active') active++;
+        if (r.state === 'dead') dead++;
+        if (r.bytes !== null && r.size != null) bytes += Number(r.size);
+      }
+      return { rows: [{ active, dead, bytes }] };
+    }
+
     if (sql.includes('sum(size)')) {
       let total = 0;
       for (const r of this.rows.values()) {
@@ -313,6 +327,18 @@ describe('StagedIntentStore', () => {
 
     await store.markDone('0x1'); // frees bytes -> drops out of the total
     expect(await store.stagedBytesTotal()).toBe(250);
+  });
+
+  it('reports queue-depth stats: active count, dead count, and held bytes', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.upsertBytes('0x1', { bytes: bytes('aa'), blobId: 'b1', size: 100 });
+    await store.upsertBytes('0x2', { bytes: bytes('bb'), blobId: 'b2', size: 250 });
+    await store.upsertBytes('0x3', { bytes: bytes('cc'), blobId: 'b3', size: 999 });
+    await store.markDead('0x3', 'terminal'); // dead + frees its bytes
+
+    expect(await store.stats()).toEqual({ active: 2, dead: 1, bytes: 350 });
   });
 
   it('expires past-deadline active rows and frees their bytes', async () => {

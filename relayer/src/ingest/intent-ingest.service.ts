@@ -6,15 +6,6 @@ import { StagedIntentStore } from '../staged/staged-intent.store';
 import { IngestRejected, IngestResult } from './intent-ingest.types';
 import { blobIdMatches } from '../common/walrus-blob-id';
 
-/** A buffered blob awaiting storage after the Sui IntentReceived event. */
-export interface BufferedBlob {
-  bytes: Buffer;
-  /** Recomputed Walrus blob id (base64url) that matched the commitment. */
-  blobId: string;
-  /** Committed size, re-checked before the WAL spend. */
-  size: number;
-}
-
 /**
  * Binds out-of-band bytes to an on-chain commitment.
  *
@@ -22,8 +13,8 @@ export interface BufferedBlob {
  * a commitment (blob id + size + deadline, emitted by EVM IntentSubmitted); the
  * raw bytes reach the relayer out-of-band via the ingest endpoint. This service
  * is the gate: it proves the received bytes are exactly what the sender
- * committed to before any WAL is spent, then buffers them in memory for the
- * processor to store after IntentReceived fires (the reorg guard).
+ * committed to before any WAL is spent, then durably writes them to the store
+ * queue (staged_intent) for the processor to store after IntentReceived fires.
  *
  * No upload happens here. The Walrus blob id is recomputed locally via the SDK's
  * encodeBlob, which derives the id without contacting the network.
@@ -33,16 +24,15 @@ export class IntentIngest {
   private readonly logger = new Logger(IntentIngest.name);
   private readonly maxIngestBytes: number;
   private readonly maxStagedBytes: number;
-  /** Accepted bytes keyed by intent id, awaiting store after IntentReceived. */
-  private readonly buffered = new Map<string, BufferedBlob>();
 
   constructor(
     private readonly config: ConfigService,
     private readonly sui: SuiService,
     private readonly lifecycle: IntentLifecycleStore,
-    // The durable queue. Null when DATABASE_URL is unset (local dev / tests):
-    // ingest falls back to the in-memory buffer with no aggregate backpressure.
-    // Explicit @Inject token because the `| null` union erases DI type metadata.
+    // The durable store queue, the sole sink for accepted bytes. Null when
+    // DATABASE_URL is unset (local dev / tests): ingest then validates but has
+    // nowhere durable to persist, and the processor is likewise inert. Explicit
+    // @Inject token because the `| null` union erases DI type metadata.
     @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
   ) {
     this.maxIngestBytes = this.config.get<number>('MAX_INGEST_BLOB_BYTES') ?? 10_485_760;
@@ -53,8 +43,8 @@ export class IntentIngest {
    * Validate and buffer out-of-band bytes for `intentId`. Validation runs in a
    * fixed order, each failure returning a distinct typed reason:
    *   unknown -> already-executed -> expired -> oversized -> wrong-size -> wrong-blob-id.
-   * On acceptance the bytes are buffered in memory (not uploaded) keyed by
-   * intent id for the processor to store after IntentReceived.
+   * On acceptance the bytes are durably written to the store queue (not uploaded)
+   * keyed by intent id for the processor to store after IntentReceived.
    */
   async ingest(intentId: string, bytes: Buffer): Promise<IngestResult> {
     const commitment = await this.lifecycle.getCommitment(intentId);
@@ -118,33 +108,13 @@ export class IntentIngest {
       );
     }
 
-    this.buffered.set(intentId, { bytes, blobId, size: bytes.length });
-    // Durable-write the same bytes to the store queue so an accepted upload
-    // survives a crash. Dual-write during the transition: the processor still
-    // reads the in-memory buffer until it is switched to the queue (T3), and the
-    // buffer is retired once the queue is the sole store (T7).
+    // Durably write the accepted bytes to the store queue: the single source of
+    // truth for pending stores, so an accepted upload survives a crash.
     await this.staged?.upsertBytes(intentId, { bytes, blobId, size: bytes.length });
     this.logger.log(
-      `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (buffered for store)`,
+      `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (staged for store)`,
     );
     return { ok: true, intentId, blobId, size: bytes.length };
-  }
-
-  /** Take (and remove) the buffered bytes for an intent, if any have arrived. */
-  take(intentId: string): BufferedBlob | undefined {
-    const blob = this.buffered.get(intentId);
-    if (blob) this.buffered.delete(intentId);
-    return blob;
-  }
-
-  /** Peek buffered bytes without removing them (used to re-verify before spend). */
-  peek(intentId: string): BufferedBlob | undefined {
-    return this.buffered.get(intentId);
-  }
-
-  /** Drop buffered bytes for an intent (e.g. after a terminal failure). */
-  drop(intentId: string): void {
-    this.buffered.delete(intentId);
   }
 
   private isExecuted(status: string): boolean {

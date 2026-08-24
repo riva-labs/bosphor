@@ -12,7 +12,7 @@
   "timezone": "",
   "title": "Bosphor Relayer",
   "uid": "bosphor-relayer",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "id": 1,
@@ -268,7 +268,7 @@
       "id": 9,
       "type": "table",
       "title": "Recent intents (lifecycle)",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 20 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "bosphor-postgres" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "options": { "showHeader": true },
@@ -280,6 +280,134 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT to_timestamp(created_at/1000) AS \"created\", intent_id, status, sender, blob_id, sui_object_id, jsonb_array_length(hops) AS hops FROM intent_lifecycle ORDER BY created_at DESC LIMIT 50"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Durable queue depth (active)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 25 }, { "color": "red", "value": 50 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_intent_active"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Staged bytes (backpressure headroom)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 161061273 }, { "color": "red", "value": 214748364 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_bytes"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Dead-lettered rows",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_dead"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Dead-letters (1h, by phase)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "sum(increase(bosphor_relayer_store_dead_letter_total[1h]))"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Durable queue depth",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_intent_active",
+          "legendFormat": "active"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_dead",
+          "legendFormat": "dead"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Staged bytes vs backpressure ceiling",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "bosphor-prometheus" },
+          "expr": "bosphor_relayer_staged_bytes",
+          "legendFormat": "staged bytes"
         }
       ]
     }

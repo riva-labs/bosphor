@@ -123,3 +123,54 @@ groups:
             The last successful end-to-end round-trip was
             {{ $value | printf "%.0f" }}s ago. The EVM -> Sui -> EVM path is not
             completing. This is the primary end-to-end health signal.
+
+  - name: bosphor-relayer-queue
+    rules:
+      # A pre-store dead-letter means a blob exhausted its store attempts (or hit
+      # a terminal error) and was permanently dropped from the durable queue. The
+      # intent will never be fulfilled without intervention, so this is the core
+      # "we lost a store" signal for the durable queue.
+      - alert: BosphorRelayerStoreDeadLetter
+        expr: increase(bosphor_relayer_store_dead_letter_total{phase="pre_store"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer dead-lettered a store"
+          description: >-
+            {{ $value | printf "%.0f" }} intent(s) dead-lettered in the durable
+            store queue in the last 15m (pre-store attempts exhausted or a
+            terminal error). The blob was never stored. Inspect staged_intent rows
+            in state='dead' and their last_error.
+
+      # The blob is safe on Walrus and recorded on Sui, but its return proof could
+      # not be delivered within the return-leg budget. Storage is not lost, but
+      # the origin chain still shows the intent unexecuted until the proof lands.
+      - alert: BosphorRelayerReturnUndelivered
+        expr: increase(bosphor_relayer_store_dead_letter_total{phase="return"}[15m]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor relayer stored a blob but could not deliver its proof"
+          description: >-
+            {{ $value | printf "%.0f" }} intent(s) exceeded the return-leg budget
+            in the last 15m. The storage is safe (Walrus + Sui), but the proof has
+            not reached the origin chain. Check LayerZero delivery and the
+            confirmExecution fallback.
+
+      # Backpressure headroom: staged bytes are approaching MAX_STAGED_BYTES
+      # (default 256 MiB). At the ceiling, ingest sheds new blobs with a 503, so
+      # this is the early warning that the store queue is not draining fast enough.
+      - alert: BosphorRelayerStagedBytesHigh
+        expr: bosphor_relayer_staged_bytes > 214748364
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor relayer staged bytes near the backpressure ceiling"
+          description: >-
+            The durable queue holds {{ $value | printf "%.0f" }} bytes, over 80%
+            of the 256 MiB MAX_STAGED_BYTES ceiling, for 5m. The store queue is
+            not draining fast enough; at the ceiling ingest returns 503. Check
+            Walrus/Sui throughput and the dead-letter rate.

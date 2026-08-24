@@ -3,6 +3,7 @@ import {
   ReceivedDetails,
   StagedBytes,
   StagedIntentRow,
+  StagedStats,
   UploadResult,
 } from './staged-intent.types';
 
@@ -222,6 +223,28 @@ export class StagedIntentStore {
       `SELECT COALESCE(SUM(size), 0) AS total FROM ${TABLE} WHERE bytes IS NOT NULL`,
     );
     return Number(rows[0]?.total ?? 0);
+  }
+
+  /**
+   * Queue-depth snapshot for the metrics gauges, in one aggregate scan:
+   * `active` rows still in play, `dead` rows dead-lettered, and `bytes` the total
+   * committed size still held in BYTEA (summed from the `size` column, never the
+   * payload, so it does not de-TOAST).
+   */
+  async stats(): Promise<StagedStats> {
+    const { rows } = await this.pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE state = 'active') AS active,
+         COUNT(*) FILTER (WHERE state = 'dead') AS dead,
+         COALESCE(SUM(size) FILTER (WHERE bytes IS NOT NULL), 0) AS bytes
+       FROM ${TABLE}`,
+    );
+    const r = rows[0] ?? {};
+    return {
+      active: Number(r.active ?? 0),
+      dead: Number(r.dead ?? 0),
+      bytes: Number(r.bytes ?? 0),
+    };
   }
 
   /**

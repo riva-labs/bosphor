@@ -23,8 +23,7 @@ import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
 import { StagedIntentStore } from '../staged/staged-intent.store';
 import { StagedIntentRow } from '../staged/staged-intent.types';
-import { blobIdMatches } from '../ingest/intent-ingest.service';
-import { walrusBlobIdToField } from '../common/walrus-blob-id';
+import { blobIdMatches, walrusBlobIdToField } from '../common/walrus-blob-id';
 import { CLAIM_INTERVAL_MS } from '../common/constants';
 
 /**
@@ -68,6 +67,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly maxStoreAttempts: number;
   private readonly returnMaxAttempts: number;
   private readonly attemptTimeoutMs: number;
+  private readonly shutdownDrainMs: number;
   private stopped = false;
   private ticking = false;
 
@@ -96,6 +96,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.maxStoreAttempts = this.config.get<number>('MAX_STORE_ATTEMPTS') ?? 8;
     this.returnMaxAttempts = this.config.get<number>('RETURN_MAX_ATTEMPTS') ?? 20;
     this.attemptTimeoutMs = this.config.get<number>('STORE_ATTEMPT_TIMEOUT_MS') ?? 120000;
+    this.shutdownDrainMs = this.config.get<number>('SHUTDOWN_DRAIN_MS') ?? 30000;
   }
 
   async onModuleInit(): Promise<void> {
@@ -123,11 +124,19 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Shutting down intent processor...');
     this.stopped = true;
     this.suiCheckpoint.stop();
-    // Wait for in-flight stores to finish. A bounded, timeout-guarded drain is
-    // added in the graceful-shutdown slice; here we simply wait them out so a
-    // store is not cut mid-flight (any unfinished row resumes idempotently).
-    while (this.inProcess.size > 0) {
+    // Bounded graceful drain: give in-flight stores up to SHUTDOWN_DRAIN_MS to
+    // settle so none is cut mid-flight, but never block shutdown past the budget.
+    // Any row still active on exit resumes idempotently on next boot (the
+    // persisted per-step results mean no re-upload / re-record).
+    const deadline = Date.now() + this.shutdownDrainMs;
+    while (this.inProcess.size > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 100));
+    }
+    if (this.inProcess.size > 0) {
+      this.logger.warn(
+        `Shutdown drain timed out after ${this.shutdownDrainMs}ms with ` +
+          `${this.inProcess.size} store(s) in flight; they resume on next boot`,
+      );
     }
     this.logger.log('Intent processor stopped');
   }
