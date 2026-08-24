@@ -1863,6 +1863,25 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `PORT` | `3000` | HTTP server port |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 
+### Durable store queue variables
+
+The store path is a durable Postgres queue (see [Durable store queue](#durable-store-queue) below). It is active only when `DATABASE_URL` is set; without it the relayer validates ingest but has nowhere durable to persist and does not process stores.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | - | Postgres connection string. Enables the durable store queue (and the public intent feed). Unset means in-memory dev only, no store processing |
+| `MAX_INGEST_BLOB_BYTES` | `10485760` | Absolute per-blob cap (10 MiB); an oversized upload is rejected before allocation |
+| `MAX_STAGED_BYTES` | `268435456` | Aggregate backpressure ceiling (256 MiB). Over this, ingest sheds load with `503` + `Retry-After` |
+| `STORE_CONCURRENCY` | `4` | Intents stored in parallel per claim tick |
+| `STORE_BATCH_SIZE` | `20` | Rows scanned per claim tick (upper bound on per-tick work) |
+| `STORE_BACKOFF_BASE_MS` | `2000` | Exponential backoff base for a failed store: `min(BASE * 2^attempts, CAP)` |
+| `STORE_BACKOFF_CAP_MS` | `300000` | Backoff ceiling (5 min) |
+| `MAX_STORE_ATTEMPTS` | `8` | Pre-store attempts (blob not yet on Walrus+Sui) before dead-lettering |
+| `RETURN_MAX_ATTEMPTS` | `20` | Return-leg attempts (blob already stored) before alerting; never dead-letters |
+| `STORE_ATTEMPT_TIMEOUT_MS` | `120000` | Upper bound on one store attempt (2 min); a hung call is aborted and rescheduled |
+| `STAGED_RETENTION_MS` | `86400000` | Retention for terminal rows (24 h); the reaper purges older rows |
+| `SHUTDOWN_DRAIN_MS` | `30000` | Graceful-shutdown drain budget; in-flight stores get this long to settle before exit |
+
 ### LZ infrastructure variables
 
 The relayer needs references to 18 LayerZero v2 shared objects on Sui testnet. These are pre-filled in `relayer/.env.example` and rarely change:
@@ -1906,17 +1925,30 @@ The relayer uses two different mechanisms for event detection:
 - **Sui**: Receives events in near-real-time via gRPC checkpoint streaming with automatic backfill on startup and exponential backoff reconnection
 - **Solana** (optional): When `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID` are set, polls the adapter program's `IntentSubmitted` events every 5 seconds and records the commitment, so a Solana-origin intent's out-of-band bytes bind and `execute_store` runs exactly like an EVM origin. Origin detection is uniform: fulfillment is always driven by the Sui `IntentReceived` delivery, regardless of source chain. The return proof is routed back to the origin chain: a Solana-origin intent is confirmed on Solana via the adapter's `confirm_execution` (signed with `SOLANA_RELAYER_KEYPAIR`), the mirror of the EVM `confirmExecution` fallback.
 
-Processed intents are tracked in an in-memory `Map<intentId, timestamp>` to prevent duplicate processing.
+Detection and storage are decoupled through the durable store queue: the checkpoint callback only records that `IntentReceived` fired, and a separate single-writer loop does the storage. Deduplication is durable, not in-memory: every row is terminal-sticky (`state = 'active'` guards every write), so a backfilled event can never resurrect a `done`/`dead`/`expired` intent. On-chain guards (`EIntentAlreadyExecuted`, `AlreadyExecuted`) remain the last line of defense against double-execution.
 
-### TTL-based pruning
+## Durable store queue
 
-Processed intent entries expire after `INTENT_TTL_MS` (default: 1 hour). Expired entries are pruned on each poll cycle. This means:
+Once the bytes for an intent are accepted at ingest, the whole store path is a durable Postgres queue (`staged_intent`), so a crash never loses accepted bytes or repeats paid work. It is active only when `DATABASE_URL` is set.
 
-- An intent processed at 10:00 will be pruned at 11:00
-- If the same intent event appears again after pruning, the relayer will attempt to re-process it
-- On-chain guards (`EIntentAlreadyExecuted`, `AlreadyExecuted`) prevent actual double-execution
+- **The table is the queue.** Ingest writes accepted bytes (BYTEA) plus the recomputed blob id and committed size into one row per intent; the Sui `IntentReceived` event flags the same row. There is no in-memory buffer.
+- **One writer drains it.** A single loop every 2s (`CLAIM_INTERVAL_MS`) selects the oldest active, due rows and stores up to `STORE_CONCURRENCY` of them in parallel. Readiness (has bytes, received, committed sender known, deadline in the future) is recomputed each tick, not stored.
+- **Per-step idempotency.** Each step persists its result (`walrus_object_id`, `store_digest`) before the next, so a crash or retry re-runs only the unfinished steps. A retry never re-uploads (no double WAL spend) or re-records. Bytes are freed once the blob is safe on Walrus and recorded on Sui.
+- **Backpressure.** Ingest sums the committed `size` of rows still holding bytes; over `MAX_STAGED_BYTES` it returns `503` + `Retry-After` instead of buffering unbounded. This is the OOM guard.
+- **Retry and dead-letter.** A pre-store failure retries with exponential backoff up to `MAX_STORE_ATTEMPTS`, then dead-letters (`state = 'dead'`, bytes freed, `store_dead_letter_total{phase="pre_store"}`). A return-leg failure (blob already stored) never dead-letters the storage: it retries up to `RETURN_MAX_ATTEMPTS` and then alerts (`phase="return"`), because the WAL is already spent and the proof must eventually land.
+- **Reaper.** A maintenance loop every 10s expires active rows whose deadline passed before they stored and purges terminal rows older than `STAGED_RETENTION_MS`.
+- **Graceful shutdown.** On `SIGTERM` the processor stops claiming and waits up to `SHUTDOWN_DRAIN_MS` for in-flight stores to settle; anything still active resumes idempotently on the next boot.
 
-Set `INTENT_TTL_MS` higher if your relayer restarts frequently and you see unnecessary retry attempts.
+### Migration: cutting over to the durable queue
+
+An earlier relayer held accepted-but-unstored bytes in memory. Those bytes are not in Postgres and their `IntentReceived` events have already passed the checkpoint cursor, so they will not re-emit. Deploying the durable queue on top of a running old process would silently orphan them. Cut over with a drain-then-cut runbook, never a hot swap:
+
+1. **Stop new ingest.** At the reverse proxy (nginx), return `503` for the ingest route so no new bytes are accepted.
+2. **Drain the old process.** Wait until it has stored everything in flight (its buffered/pending logs go quiet and no stores are running). Its accepted bytes are now safely on Walrus + Sui.
+3. **Deploy the new code.** With `DATABASE_URL` set, the new process boots against an empty `staged_intent` table, which is now correct (nothing is in flight to migrate).
+4. **Re-open ingest.** Remove the `503` at the proxy. New uploads land directly in the durable queue.
+
+No dual-run and no bridge code are needed. The relayer is not auto-deployed on merge (it runs under Docker on the host); deploy this change by hand following the steps above.
 
 ## Fee quoting
 
@@ -1971,6 +2003,10 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_wal_balance_wal` | gauge | (none) | Relayer WAL balance (the Walrus storage token) |
 | `bosphor_relayer_sui_balance_sui` | gauge | (none) | Relayer SUI balance (gas + WAL swap funding) |
 | `bosphor_relayer_wal_topup_total` | counter | `result` (`success`/`failure`/`insufficient_sui`) | SUI→WAL auto top-up attempts |
+| `bosphor_relayer_staged_intent_active` | gauge | (none) | Durable-queue rows still active (crude queue length) |
+| `bosphor_relayer_staged_bytes` | gauge | (none) | Total committed bytes still held in the queue (backpressure headroom vs `MAX_STAGED_BYTES`) |
+| `bosphor_relayer_staged_dead` | gauge | (none) | Durable-queue rows that dead-lettered |
+| `bosphor_relayer_store_dead_letter_total` | counter | `phase` (`pre_store`/`return`) | Dead-lettered stores (`pre_store`) and undelivered return proofs (`return`) |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
 
@@ -1995,11 +2031,13 @@ Every Walrus store is paid for in WAL, which drains over time. There is no fauce
 
 | Scenario | Behavior |
 |----------|----------|
-| Intent deadline expired | Skipped, marked as processed |
-| ABI decode failure | Marked as processed, not retried |
-| Walrus upload failure | NOT marked as processed, retried on next poll |
-| Sui TX failure | NOT marked as processed, retried on next poll |
-| LZ fee quote failure | Falls back to default 0.5 SUI fee |
+| Intent deadline expired before store | Reaper marks the row `expired`, frees its bytes |
+| Blob id / size mismatch at store | Terminal: row marked `dead`, bytes freed (no WAL spent) |
+| Walrus upload failure | Row rescheduled with backoff; dead-lettered after `MAX_STORE_ATTEMPTS` |
+| Sui `execute_store` failure | Same as upload: rescheduled with backoff, then dead-lettered |
+| Return-leg (proof) failure | Storage stays safe; retried up to `RETURN_MAX_ATTEMPTS`, then alerts (never dead-letters) |
+| Store attempt hangs | Aborted at `STORE_ATTEMPT_TIMEOUT_MS` and rescheduled |
+| LZ fee quote failure | Return leg falls back to the owner-gated `confirmExecution` with identical proof bytes |
 
 ## Error tracking (Sentry)
 
