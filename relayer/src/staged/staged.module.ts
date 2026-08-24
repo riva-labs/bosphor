@@ -1,4 +1,4 @@
-import { Global, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
+import { Global, Inject, Logger, Module, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { StagedIntentStore } from './staged-intent.store';
@@ -35,7 +35,14 @@ import { StagedReaper } from './staged-reaper.service';
   exports: [StagedIntentStore],
 })
 export class StagedModule implements OnModuleInit {
-  constructor(@Optional() private readonly store: StagedIntentStore | null) {}
+  // Explicit @Inject token: the `| null` union erases DI type metadata, so
+  // without it Nest cannot resolve the provider and @Optional silently injects
+  // null, which skips init() and leaves the staged_intent table uncreated. This
+  // only surfaces when DATABASE_URL is set (the store is non-null). Matches the
+  // same guard in IntentProcessor and IntentIngest.
+  constructor(
+    @Optional() @Inject(StagedIntentStore) private readonly store: StagedIntentStore | null = null,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     if (this.store) {
