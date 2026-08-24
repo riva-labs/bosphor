@@ -96,6 +96,15 @@ export const configValidationSchema = Joi.object({
   // enforced when DATABASE_URL is set (the durable queue is active).
   MAX_STAGED_BYTES: Joi.number().integer().default(268435456), // 256 MiB
 
+  // Durable store queue processing knobs (single-writer loop).
+  // How many intents the loop stores in parallel per tick.
+  STORE_CONCURRENCY: Joi.number().integer().min(1).default(4),
+  // Rows scanned per claim tick (an upper bound on per-tick work).
+  STORE_BATCH_SIZE: Joi.number().integer().min(1).default(20),
+  // Exponential backoff for a failed store attempt: min(BASE * 2^attempts, CAP).
+  STORE_BACKOFF_BASE_MS: Joi.number().integer().default(2000),
+  STORE_BACKOFF_CAP_MS: Joi.number().integer().default(300000), // 5 min
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
