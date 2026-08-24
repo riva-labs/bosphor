@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 (2026-08-24)
+
+### Features
+
+- feat(relayer): durable-queue depth gauges + Grafana panels and alerts
+- feat(relayer): reaper for expiry/purge + bounded graceful drain
+
 ## 0.4.0 (2026-08-24)
 
 ### Features
