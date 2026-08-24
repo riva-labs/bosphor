@@ -65,6 +65,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly batchSize: number;
   private readonly backoffBaseMs: number;
   private readonly backoffCapMs: number;
+  private readonly maxStoreAttempts: number;
+  private readonly returnMaxAttempts: number;
+  private readonly attemptTimeoutMs: number;
   private stopped = false;
   private ticking = false;
 
@@ -90,6 +93,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.batchSize = this.config.get<number>('STORE_BATCH_SIZE') ?? 20;
     this.backoffBaseMs = this.config.get<number>('STORE_BACKOFF_BASE_MS') ?? 2000;
     this.backoffCapMs = this.config.get<number>('STORE_BACKOFF_CAP_MS') ?? 300000;
+    this.maxStoreAttempts = this.config.get<number>('MAX_STORE_ATTEMPTS') ?? 8;
+    this.returnMaxAttempts = this.config.get<number>('RETURN_MAX_ATTEMPTS') ?? 20;
+    this.attemptTimeoutMs = this.config.get<number>('STORE_ATTEMPT_TIMEOUT_MS') ?? 120000;
   }
 
   async onModuleInit(): Promise<void> {
@@ -181,30 +187,72 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Claim the in-process slot, store, and on failure reschedule with backoff. */
+  /**
+   * Claim the in-process slot, store with a per-attempt timeout, and on failure
+   * classify + retry. Two failure domains, deliberately not conflated:
+   *   pre-store  (blob not yet on Walrus+Sui): bounded; dead-letter at MAX.
+   *   post-store (return leg; blob already safe): never dead-letters storage,
+   *              retries with a generous budget and alerts past it.
+   * Per-step idempotency makes every retry cheap (no re-upload, no re-record).
+   */
   private async runStore(
     row: StagedIntentRow,
     sender: string,
     commitment: IntentCommitment | null,
   ): Promise<void> {
-    this.inProcess.add(row.intentId);
+    const intentId = row.intentId;
+    this.inProcess.add(intentId);
+    let released = false;
+    const release = () => {
+      if (!released) {
+        released = true;
+        this.inProcess.delete(intentId);
+      }
+    };
+    // The store settling always releases the slot, even if a timeout already
+    // returned control below — so a timed-out-but-still-running store is never
+    // re-picked concurrently (which could double-upload).
+    const work = this.store(row, sender, commitment).finally(release);
+
     try {
-      await this.store(row, sender, commitment);
+      await withTimeout(work, this.attemptTimeoutMs);
       this.metrics.recordIntentProcessed('sui_lz', 'success');
-      this.logger.log(`[${row.intentId}] Intent fulfilled`);
+      this.logger.log(`[${intentId}] Intent fulfilled`);
+      return;
     } catch (err) {
-      // Transient retry with exponential backoff. Terminal classification and
-      // dead-lettering are layered on in the retry/dead-letter slice; here every
-      // failure simply reschedules, and per-step idempotency makes the retry
-      // cheap (no re-upload, no re-record).
+      // Only release now if the store itself settled (not a still-running
+      // timeout, whose .finally(release) fires when the work actually ends).
+      if (!(err instanceof TimeoutError)) release();
+      this.metrics.recordIntentProcessed('sui_lz', 'failure');
+      this.errorReporter.captureException(err, { intentId });
+
       const attempts = row.attempts + 1;
       const backoff = Math.min(this.backoffBaseMs * 2 ** attempts, this.backoffCapMs);
-      await this.staged!.reschedule(row.intentId, attempts, Date.now() + backoff, String(err));
-      this.metrics.recordIntentProcessed('sui_lz', 'failure');
-      this.logger.error(`[${row.intentId}] Store failed (attempt ${attempts}): ${err}`);
-      this.errorReporter.captureException(err, { intentId: row.intentId });
-    } finally {
-      this.inProcess.delete(row.intentId);
+      const nextAt = Date.now() + backoff;
+
+      if (err instanceof StoreError && err.phase === 'post') {
+        // Storage is safe; keep retrying the return leg. Never dead-letter it.
+        await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
+        if (attempts >= this.returnMaxAttempts) {
+          this.metrics.recordDeadLetter('return');
+          this.logger.error(
+            `[${intentId}] Stored but proof undelivered after ${attempts} attempts: ${err}`,
+          );
+        } else {
+          this.logger.warn(`[${intentId}] Return leg failed (attempt ${attempts}): ${err}`);
+        }
+        return;
+      }
+
+      // Pre-store (or timeout): bounded, dead-letter once attempts are exhausted.
+      if (attempts >= this.maxStoreAttempts) {
+        await this.staged!.markDead(intentId, `pre-store attempts exhausted (${attempts}): ${err}`);
+        this.metrics.recordDeadLetter('pre_store');
+        this.logger.error(`[${intentId}] Dead-lettered after ${attempts} attempts: ${err}`);
+      } else {
+        await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
+        this.logger.error(`[${intentId}] Store failed (attempt ${attempts}): ${err}`);
+      }
     }
   }
 
@@ -297,14 +345,20 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // 4. Blob is safe on Walrus + recorded on Sui: free the bytes.
     await staged.freeBytes(intentId);
 
-    // 5. Return leg (idempotent: skip if already returned). Its failure retries
-    // without re-uploading or re-recording, since those steps are now persisted.
+    // 5. Return leg (idempotent: skip if already returned). A failure here is
+    // POST-store: the blob is safe and WAL is spent, so the retry never
+    // re-uploads or re-records and never dead-letters the storage. Marked with a
+    // StoreError phase so runStore classifies it correctly.
     if (!row.returned) {
-      if (row.srcEid === this.solanaSrcEid) {
-        const canonical = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
-        await this.returnToSolana(intentId, canonical, endEpoch);
-      } else {
-        await this.returnToEvm(intentId, walrusBlobId, endEpoch);
+      try {
+        if (row.srcEid === this.solanaSrcEid) {
+          const canonical = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
+          await this.returnToSolana(intentId, canonical, endEpoch);
+        } else {
+          await this.returnToEvm(intentId, walrusBlobId, endEpoch);
+        }
+      } catch (retErr) {
+        throw new StoreError(String(retErr), 'post');
       }
       await staged.markReturned(intentId);
     }
@@ -395,6 +449,38 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`[${intentId}] Failed to record ${hop} hop: ${err}`);
     }
   }
+}
+
+/** A store failure tagged with the phase it occurred in, for retry classification. */
+class StoreError extends Error {
+  constructor(
+    message: string,
+    readonly phase: 'pre' | 'post',
+  ) {
+    super(message);
+    this.name = 'StoreError';
+  }
+}
+
+/** Raised when a store attempt exceeds its per-attempt timeout. */
+class TimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Reject with a TimeoutError if `promise` does not settle within `ms`. The
+ * underlying work keeps running (JS has no cancellation); the caller keeps the
+ * in-process slot until it truly settles so it is never re-driven concurrently.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(`store attempt exceeded ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 /**

@@ -46,7 +46,7 @@ function makeRow(o: Partial<StagedIntentRow> = {}): StagedIntentRow {
   };
 }
 
-function build(rows: StagedIntentRow[] = []) {
+function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number> = {}) {
   const staged = {
     markReceived: jest.fn().mockResolvedValue(undefined),
     drainDue: jest.fn().mockResolvedValue(rows),
@@ -90,6 +90,7 @@ function build(rows: StagedIntentRow[] = []) {
     observeWalrusUpload: jest.fn(),
     recordWalStorageCost: jest.fn(),
     recordLzSend: jest.fn(),
+    recordDeadLetter: jest.fn(),
   };
   const lifecycle = {
     getCommitment: jest.fn().mockResolvedValue({
@@ -104,8 +105,18 @@ function build(rows: StagedIntentRow[] = []) {
   };
   const errorReporter = { captureException: jest.fn() };
   const suiCheckpoint = { setOnEventCallback: jest.fn(), startStreaming: jest.fn(), stop: jest.fn() };
+  const cfg: Record<string, number> = {
+    SOLANA_SRC_EID,
+    STORE_CONCURRENCY: 4,
+    MAX_STORE_ATTEMPTS: 8,
+    RETURN_MAX_ATTEMPTS: 20,
+    STORE_ATTEMPT_TIMEOUT_MS: 120_000,
+    STORE_BACKOFF_BASE_MS: 2000,
+    STORE_BACKOFF_CAP_MS: 300_000,
+    ...cfgOverrides,
+  };
   const config = {
-    get: jest.fn((k: string) => (k === 'SOLANA_SRC_EID' ? SOLANA_SRC_EID : undefined)),
+    get: jest.fn((k: string) => cfg[k]),
     getOrThrow: jest.fn((k: string) => {
       if (k === 'EVM_DST_EID') return 40161;
       throw new Error(`missing ${k}`);
@@ -246,6 +257,61 @@ describe('IntentProcessor durable queue', () => {
     expect(nextAt).toBeGreaterThanOrEqual(now + 16_000); // base 2000 * 2^3
     expect(err).toContain('walrus down');
     expect(staged.markDone).not.toHaveBeenCalled();
+  });
+
+  it('dead-letters a pre-store failure once attempts are exhausted', async () => {
+    const { proc, staged, metrics, walrus } = build([makeRow({ attempts: 2 })], {
+      MAX_STORE_ATTEMPTS: 3,
+    });
+    walrus.upload.mockRejectedValue(new Error('walrus down'));
+    await proc.tick();
+
+    expect(staged.markDead).toHaveBeenCalledWith('0xintent', expect.stringContaining('attempts exhausted'));
+    expect(metrics.recordDeadLetter).toHaveBeenCalledWith('pre_store');
+    expect(staged.reschedule).not.toHaveBeenCalled(); // dead, not rescheduled
+  });
+
+  it('retries a post-store (return-leg) failure without dead-lettering the storage', async () => {
+    const { proc, staged, metrics, suiLz, evm } = build([makeRow()]);
+    // Both the LZ send and the confirmExecution fallback fail -> return leg throws.
+    suiLz.lzSendProof.mockRejectedValue(new Error('lz down'));
+    evm.confirmExecution.mockRejectedValue(new Error('evm down'));
+    await proc.tick();
+
+    // Blob was stored (upload + execute persisted, bytes freed) before the failure.
+    expect(staged.persistStore).toHaveBeenCalled();
+    expect(staged.freeBytes).toHaveBeenCalledWith('0xintent');
+    // Return leg retries; storage is never dead-lettered.
+    expect(staged.reschedule).toHaveBeenCalledTimes(1);
+    expect(staged.markDead).not.toHaveBeenCalled();
+    expect(metrics.recordDeadLetter).not.toHaveBeenCalled();
+  });
+
+  it('alerts (but does not dead-letter) when the return leg exceeds its budget', async () => {
+    const { proc, staged, metrics, suiLz, evm } = build([makeRow({ attempts: 1 })], {
+      RETURN_MAX_ATTEMPTS: 2,
+    });
+    suiLz.lzSendProof.mockRejectedValue(new Error('lz down'));
+    evm.confirmExecution.mockRejectedValue(new Error('evm down'));
+    await proc.tick();
+
+    expect(metrics.recordDeadLetter).toHaveBeenCalledWith('return');
+    expect(staged.reschedule).toHaveBeenCalledTimes(1); // still retries
+    expect(staged.markDead).not.toHaveBeenCalled(); // storage stays safe
+  });
+
+  it('aborts a hung store at the attempt timeout and reschedules', async () => {
+    const { proc, staged, walrus } = build([makeRow()], { STORE_ATTEMPT_TIMEOUT_MS: 20 });
+    // Upload hangs well past the 20ms timeout.
+    walrus.upload.mockReturnValue(
+      new Promise((res) => setTimeout(() => res({ blobId: COMMITTED_B64URL, suiObjectId: '0xobj', endEpoch: 42, walCostMist: undefined }), 200)),
+    );
+    await proc.tick();
+
+    expect(staged.reschedule).toHaveBeenCalledTimes(1);
+    expect(staged.reschedule.mock.calls[0][3]).toContain('exceeded');
+    // Let the hung upload settle so it releases the in-process slot cleanly.
+    await new Promise((r) => setTimeout(r, 250));
   });
 
   it('routes a Solana-origin intent through confirm_execution, not the EVM leg', async () => {

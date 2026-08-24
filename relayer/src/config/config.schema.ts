@@ -104,6 +104,14 @@ export const configValidationSchema = Joi.object({
   // Exponential backoff for a failed store attempt: min(BASE * 2^attempts, CAP).
   STORE_BACKOFF_BASE_MS: Joi.number().integer().default(2000),
   STORE_BACKOFF_CAP_MS: Joi.number().integer().default(300000), // 5 min
+  // Pre-store attempts (blob not yet on Walrus+Sui) before dead-lettering.
+  MAX_STORE_ATTEMPTS: Joi.number().integer().min(1).default(8),
+  // Return-leg attempts (blob already stored) before alerting. The storage is
+  // safe, so this never dead-letters; it keeps retrying and raises a metric.
+  RETURN_MAX_ATTEMPTS: Joi.number().integer().min(1).default(20),
+  // Upper bound on one store attempt; a hung Walrus/Sui call is aborted and the
+  // row rescheduled instead of pinning the in-process slot forever.
+  STORE_ATTEMPT_TIMEOUT_MS: Joi.number().integer().default(120000), // 2 min
 
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),

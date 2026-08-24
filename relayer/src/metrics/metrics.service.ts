@@ -64,6 +64,18 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Dead-letter / undelivered events on the durable store queue. `pre_store`
+  // means the blob never stored (attempts exhausted or terminal) and is settled
+  // dead; `return` means the blob stored but its proof could not be delivered
+  // within the return-leg budget (storage is safe, alert to redeliver). The
+  // Grafana panel + alert for these land with the metrics slice.
+  private readonly storeDeadLetter = new Counter({
+    name: 'bosphor_relayer_store_dead_letter_total',
+    help: 'Durable-queue intents that dead-lettered or exceeded the return budget',
+    labelNames: ['phase'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -109,6 +121,11 @@ export class MetricsService {
    */
   recordWalStorageCost(costMist: number): void {
     if (Number.isFinite(costMist) && costMist >= 0) this.walStorageCost.inc(costMist);
+  }
+
+  /** Record a durable-queue dead-letter (pre-store) or return-budget exhaustion. */
+  recordDeadLetter(phase: 'pre_store' | 'return'): void {
+    this.storeDeadLetter.inc({ phase });
   }
 
   get contentType(): string {
