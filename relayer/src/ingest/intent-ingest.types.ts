@@ -8,7 +8,13 @@
  * the HTTP layer can map it to a precise status code.
  */
 export type IngestRejectReason =
-  'unknown' | 'already-executed' | 'expired' | 'oversized' | 'wrong-size' | 'wrong-blob-id';
+  | 'unknown'
+  | 'already-executed'
+  | 'expired'
+  | 'oversized'
+  | 'wrong-size'
+  | 'wrong-blob-id'
+  | 'backpressure';
 
 /** Accepted: the bytes match the commitment and are now buffered for storage. */
 export interface IngestAccepted {

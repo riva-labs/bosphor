@@ -90,6 +90,12 @@ export const configValidationSchema = Joi.object({
   // oversized upload with a distinct reason (413) rather than allocating it.
   MAX_INGEST_BLOB_BYTES: Joi.number().integer().default(10485760), // 10 MiB
 
+  // Aggregate backpressure ceiling for the durable store queue: total bytes held
+  // across all staged (not-yet-stored) intents. Over this, ingest sheds load with
+  // a 503 + Retry-After instead of buffering unbounded (the OOM guard). Only
+  // enforced when DATABASE_URL is set (the durable queue is active).
+  MAX_STAGED_BYTES: Joi.number().integer().default(268435456), // 256 MiB
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
