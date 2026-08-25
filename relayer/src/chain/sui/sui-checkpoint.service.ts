@@ -117,7 +117,7 @@ export class SuiCheckpointService {
       if (this.stopped) break;
       const { response } = await client.ledgerService.getCheckpoint({
         checkpointId: { oneofKind: 'sequenceNumber' as const, sequenceNumber: seq },
-        readMask: { paths: ['transactions.events'] },
+        readMask: { paths: ['transactions.digest', 'transactions.events'] },
       });
       if (response.checkpoint) {
         await this.processCheckpoint(response.checkpoint, seq);
@@ -133,6 +133,11 @@ export class SuiCheckpointService {
     for (const tx of Array.isArray(transactions) ? transactions : [transactions]) {
       const eventsContainer = tx.events;
       if (!eventsContainer) continue;
+
+      // The Sui digest of the delivery tx that emitted IntentReceived. This is
+      // the "Delivered to Sui" hop's on-chain proof; threaded through so the feed
+      // (and the dApp journey) can link it on Suiscan.
+      const deliveryDigest: string = tx.digest ?? '';
 
       const events = eventsContainer.events ?? [];
       for (const event of events) {
@@ -159,6 +164,7 @@ export class SuiCheckpointService {
 
         const lzEvent: SuiLzEvent = {
           intentId,
+          deliveryDigest,
           committedBlobId: strVal(structFields.committed_blob_id) ?? '0',
           size: numVal(structFields.size) ?? 0,
           encodingType: numVal(structFields.encoding_type) ?? 0,

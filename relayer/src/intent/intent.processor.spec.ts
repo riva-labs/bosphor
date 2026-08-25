@@ -145,6 +145,7 @@ describe('IntentProcessor durable queue', () => {
     const { proc, staged } = build();
     await proc.onReceived({
       intentId: '0xintent',
+      deliveryDigest: '0xdeliver',
       committedBlobId: BigInt(COMMITTED_HEX).toString(), // u256 decimal
       size: 5,
       encodingType: 0,
@@ -158,13 +159,22 @@ describe('IntentProcessor durable queue', () => {
       srcEid: 40161,
       committedBlobId: COMMITTED_HEX,
       deadline: 1_700_000_000_000, // ms
+      deliveryDigest: '0xdeliver',
     });
   });
 
   it('stores a ready row end to end: upload -> execute_store -> return -> done', async () => {
-    const { proc, staged, walrus, sui, suiLz } = build([makeRow()]);
+    const { proc, staged, walrus, sui, suiLz, lifecycle } = build([
+      makeRow({ deliveryDigest: '0xdeliver' }),
+    ]);
     await proc.tick();
 
+    // The "received" hop carries the Sui delivery digest so the feed can link it.
+    expect(lifecycle.recordHop).toHaveBeenCalledWith(
+      '0xintent',
+      'received',
+      expect.objectContaining({ txHash: '0xdeliver' }),
+    );
     expect(walrus.upload).toHaveBeenCalledTimes(1);
     expect(staged.persistUpload).toHaveBeenCalledWith('0xintent', {
       walrusObjectId: '0xobj',

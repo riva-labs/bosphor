@@ -16,7 +16,8 @@ class FakePool implements PgQueryable {
   async query(text: string, params: unknown[] = []): Promise<{ rows: Record<string, unknown>[] }> {
     const sql = text.toLowerCase();
 
-    if (sql.includes('create table') || sql.includes('create index')) return { rows: [] };
+    if (sql.includes('create table') || sql.includes('create index') || sql.includes('alter table'))
+      return { rows: [] };
 
     if (sql.startsWith('insert into')) return this.upsert(sql, params);
 
@@ -105,6 +106,9 @@ class FakePool implements PgQueryable {
         existing.committed_blob_id = params[2] as string;
         existing.deadline = params[3] as number;
         existing.updated_at = params[4] as number;
+        // COALESCE(EXCLUDED.delivery_digest, existing): a later event without a
+        // digest never clobbers one already captured.
+        existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
       }
       return { rows: [] };
     }
@@ -123,6 +127,7 @@ class FakePool implements PgQueryable {
       walrus_blob_id: null,
       end_epoch: null,
       store_digest: null,
+      delivery_digest: null,
       returned: false,
       state: 'active',
       attempts: 0,
@@ -140,6 +145,7 @@ class FakePool implements PgQueryable {
       base.src_eid = params[1] as number;
       base.committed_blob_id = params[2] as string;
       base.deadline = params[3] as number;
+      base.delivery_digest = (params[5] as string | null) ?? null;
     }
     this.rows.set(id, base);
     return { rows: [] };
@@ -242,6 +248,18 @@ describe('StagedIntentStore', () => {
     expect(row?.srcEid).toBe(RX.srcEid);
     expect(row?.deadline).toBe(RX.deadline);
     expect(row?.hasBytes).toBe(true); // bytes not wiped by the event
+  });
+
+  it('persists the Sui delivery digest and never clobbers it with a later digest-less event', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.markReceived('0xd', { ...RX, deliveryDigest: '0xdeliver' });
+    expect((await store.get('0xd'))?.deliveryDigest).toBe('0xdeliver');
+
+    // A backfilled re-observation without a digest must keep the captured one.
+    await store.markReceived('0xd', RX);
+    expect((await store.get('0xd'))?.deliveryDigest).toBe('0xdeliver');
   });
 
   it('is order-independent: received event before bytes still ends up ready-shaped', async () => {

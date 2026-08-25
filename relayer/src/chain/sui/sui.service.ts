@@ -34,6 +34,8 @@ export interface LzInfra {
 
 export interface SuiLzEvent {
   intentId: string;
+  /** Sui digest of the delivery tx that emitted IntentReceived (the "Delivered to Sui" proof). */
+  deliveryDigest: string;
   /**
    * Committed Walrus blob id as a big-endian u256 from the on-chain event,
    * carried as a decimal string (gRPC serializes u256 as a string).
