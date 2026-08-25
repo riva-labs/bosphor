@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 (2026-08-25)
+
+### Features
+
+- feat(relayer): self-heal missing bytes by re-fetching committed blob from Walrus
+
 ## 0.5.2 (2026-08-25)
 
 ### Bug Fixes
