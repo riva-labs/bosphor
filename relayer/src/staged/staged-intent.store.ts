@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  ByteRecoveryCandidate,
   ReceivedDetails,
   StagedBytes,
   StagedIntentRow,
@@ -72,6 +73,10 @@ export class StagedIntentStore {
     await this.pool.query(
       `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS delivery_digest TEXT`,
     );
+    // Additive migration: gate for the byte-recovery sweep (next allowed attempt).
+    await this.pool.query(
+      `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bytes_recovery_at BIGINT`,
+    );
     // Drives the claim/drain query: active rows that are due, oldest first.
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${TABLE}_drain_idx ON ${TABLE} (state, next_attempt_at, created_at)`,
@@ -121,6 +126,46 @@ export class StagedIntentStore {
          updated_at = EXCLUDED.updated_at
        WHERE ${TABLE}.state = 'active'`,
       [intentId, details.srcEid, details.committedBlobId, details.deadline, now, details.deliveryDigest ?? null],
+    );
+  }
+
+  /**
+   * Rows that are IntentReceived but still have no bytes, past the recovery grace
+   * and not yet expired, whose recovery gate is due. These are candidates to
+   * self-heal by re-fetching the committed blob from Walrus. The grace (measured
+   * from row creation) gives the client's normal delivery a head start; after each
+   * attempt the caller bumps `bytes_recovery_at` so a failing blob backs off.
+   */
+  async claimForByteRecovery(
+    now: number,
+    graceMs: number,
+    limit: number,
+  ): Promise<ByteRecoveryCandidate[]> {
+    const { rows } = await this.pool.query(
+      `SELECT intent_id, committed_blob_id
+         FROM ${TABLE}
+        WHERE state = 'active'
+          AND received = true
+          AND bytes IS NULL
+          AND committed_blob_id IS NOT NULL
+          AND (deadline IS NULL OR deadline > $1)
+          AND COALESCE(bytes_recovery_at, created_at + $2) <= $1
+        ORDER BY created_at
+        LIMIT $3`,
+      [now, graceMs, limit],
+    );
+    return rows.map((r) => ({
+      intentId: r.intent_id as string,
+      committedBlobId: r.committed_blob_id as string,
+    }));
+  }
+
+  /** Back off the next byte-recovery attempt for a row (blob not yet fetchable). */
+  async rescheduleByteRecovery(intentId: string, nextAt: number): Promise<void> {
+    await this.pool.query(
+      `UPDATE ${TABLE} SET bytes_recovery_at = $2, updated_at = $3
+        WHERE intent_id = $1 AND state = 'active'`,
+      [intentId, nextAt, Date.now()],
     );
   }
 

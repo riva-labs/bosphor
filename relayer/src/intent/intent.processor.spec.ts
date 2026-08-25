@@ -58,6 +58,8 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     markDone: jest.fn().mockResolvedValue(undefined),
     markDead: jest.fn().mockResolvedValue(undefined),
     reschedule: jest.fn().mockResolvedValue(undefined),
+    claimForByteRecovery: jest.fn().mockResolvedValue([]),
+    rescheduleByteRecovery: jest.fn().mockResolvedValue(undefined),
   };
   const walrus = {
     upload: jest.fn().mockResolvedValue({
@@ -68,7 +70,9 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
       endEpoch: 42,
       walCostMist: undefined,
     }),
+    fetchBlobFromAggregator: jest.fn().mockResolvedValue(Buffer.from('recovered-bytes')),
   };
+  const ingest = { ingest: jest.fn().mockResolvedValue({ ok: true, intentId: '0xintent' }) };
   const sui = {
     executeStore: jest.fn().mockResolvedValue('0xstore'),
     getClient: () => ({ core: { waitForTransaction: jest.fn().mockResolvedValue(undefined) } }),
@@ -136,8 +140,9 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     lifecycle as never,
     errorReporter as never,
     staged as never,
+    ingest as never,
   );
-  return { proc, staged, walrus, sui, suiLz, evm, solana, metrics, lifecycle };
+  return { proc, staged, walrus, sui, suiLz, evm, solana, metrics, lifecycle, ingest };
 }
 
 describe('IntentProcessor durable queue', () => {
@@ -161,6 +166,21 @@ describe('IntentProcessor durable queue', () => {
       deadline: 1_700_000_000_000, // ms
       deliveryDigest: '0xdeliver',
     });
+  });
+
+  it('recovers missing bytes by re-fetching the committed blob from Walrus', async () => {
+    const { proc, staged, walrus, ingest } = build();
+    staged.claimForByteRecovery.mockResolvedValueOnce([
+      { intentId: '0xintent', committedBlobId: COMMITTED_HEX },
+    ]);
+
+    await proc.recoverMissingBytes();
+
+    // Backs off first (so a persistent miss can't hot-loop), then fetches the
+    // committed blob straight from Walrus and feeds it through ingest.
+    expect(staged.rescheduleByteRecovery).toHaveBeenCalledWith('0xintent', expect.any(Number));
+    expect(walrus.fetchBlobFromAggregator).toHaveBeenCalledTimes(1);
+    expect(ingest.ingest).toHaveBeenCalledWith('0xintent', Buffer.from('recovered-bytes'));
   });
 
   it('stores a ready row end to end: upload -> execute_store -> return -> done', async () => {

@@ -25,6 +25,20 @@ export function walrusBlobIdToField(base64url: string): Buffer {
 }
 
 /**
+ * Inverse of {@link walrusBlobIdToField}: a canonical big-endian commitment field
+ * (0x hex bytes32) -> the base64url Walrus blob id the aggregator addresses. The
+ * field is big-endian and the blob id is little-endian, so the bytes are reversed.
+ * Used to re-fetch a committed blob straight from Walrus for byte recovery.
+ */
+export function fieldToWalrusBlobId(committedHex: string): string {
+  const be = Buffer.from(committedHex.replace(/^0x/i, ''), 'hex');
+  if (be.length !== 32) {
+    throw new Error(`expected a 32-byte commitment, got ${be.length} bytes from "${committedHex}"`);
+  }
+  return Buffer.from(be).reverse().toString('base64url');
+}
+
+/**
  * Compare a recomputed Walrus blob id (base64url) against an on-chain commitment
  * (0x hex bytes32). Both are reduced to the canonical big-endian field before
  * comparison, so this agrees with the on-chain `blob.blob_id()` check rather than

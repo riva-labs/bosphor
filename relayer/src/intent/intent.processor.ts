@@ -23,8 +23,13 @@ import { HopDetails, IntentHop } from '../lifecycle/intent-lifecycle.types';
 import { ErrorReporter } from '../observability/error-reporter';
 import { StagedIntentStore } from '../staged/staged-intent.store';
 import { StagedIntentRow } from '../staged/staged-intent.types';
-import { blobIdMatches, walrusBlobIdToField } from '../common/walrus-blob-id';
-import { CLAIM_INTERVAL_MS } from '../common/constants';
+import { IntentIngest } from '../ingest/intent-ingest.service';
+import {
+  blobIdMatches,
+  fieldToWalrusBlobId,
+  walrusBlobIdToField,
+} from '../common/walrus-blob-id';
+import { BYTES_RECOVERY_INTERVAL_MS, CLAIM_INTERVAL_MS } from '../common/constants';
 
 /**
  * Marker stored in store_digest when execute_store aborts with
@@ -68,6 +73,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly returnMaxAttempts: number;
   private readonly attemptTimeoutMs: number;
   private readonly shutdownDrainMs: number;
+  private readonly bytesRecoveryGraceMs: number;
+  private readonly bytesRecoveryBackoffMs: number;
+  private recovering = false;
   private stopped = false;
   private ticking = false;
 
@@ -86,6 +94,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // The durable queue. Null without DATABASE_URL; the loop then stays inert.
     // Explicit @Inject because the `| null` union erases DI type metadata.
     @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
+    @Optional() @Inject(IntentIngest) private readonly ingest: IntentIngest | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
@@ -97,6 +106,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.returnMaxAttempts = this.config.get<number>('RETURN_MAX_ATTEMPTS') ?? 20;
     this.attemptTimeoutMs = this.config.get<number>('STORE_ATTEMPT_TIMEOUT_MS') ?? 120000;
     this.shutdownDrainMs = this.config.get<number>('SHUTDOWN_DRAIN_MS') ?? 30000;
+    // Give the client's normal blob delivery a head start before self-healing.
+    this.bytesRecoveryGraceMs = this.config.get<number>('BYTES_RECOVERY_GRACE_MS') ?? 45000;
+    this.bytesRecoveryBackoffMs = this.config.get<number>('BYTES_RECOVERY_BACKOFF_MS') ?? 60000;
   }
 
   async onModuleInit(): Promise<void> {
@@ -194,6 +206,60 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.errorReporter.captureException(err);
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /**
+   * Byte-recovery sweep: self-heal rows that are IntentReceived but never got
+   * their bytes (the client crashed / reloaded before delivering). The committed
+   * blob is already on Walrus - the client uploaded it before submitting - so we
+   * re-fetch it by the commitment and feed it through the same ingest path, which
+   * re-verifies size + blob id against the commitment before staging. Once staged,
+   * the normal claim loop stores it. This removes the client from the critical
+   * path entirely: a store completes even if the browser is long gone.
+   */
+  @Interval(BYTES_RECOVERY_INTERVAL_MS)
+  async recoverMissingBytes(): Promise<void> {
+    if (this.stopped || !this.staged || !this.ingest || this.recovering) return;
+    this.recovering = true;
+    try {
+      const now = Date.now();
+      const candidates = await this.staged.claimForByteRecovery(
+        now,
+        this.bytesRecoveryGraceMs,
+        this.batchSize,
+      );
+      for (const c of candidates) {
+        // Back off first, so a persistent failure (blob genuinely absent) can't
+        // hot-loop and a concurrent client delivery still wins the row.
+        await this.staged.rescheduleByteRecovery(
+          c.intentId,
+          Date.now() + this.bytesRecoveryBackoffMs,
+        );
+        try {
+          const blobId = fieldToWalrusBlobId(c.committedBlobId);
+          const bytes = await this.walrus.fetchBlobFromAggregator(blobId);
+          const result = await this.ingest.ingest(c.intentId, bytes);
+          if (result.ok) {
+            this.logger.log(
+              `[${c.intentId}] Recovered ${bytes.length} bytes from Walrus (client never delivered); staged for store`,
+            );
+          } else {
+            this.logger.warn(
+              `[${c.intentId}] Byte recovery ingest rejected (${result.reason}): ${result.message}`,
+            );
+          }
+        } catch (err) {
+          // Blob not on the aggregator yet, or a transient fetch error - the
+          // backoff already set means we retry on a later sweep until the deadline.
+          this.logger.warn(`[${c.intentId}] Byte recovery attempt failed: ${err}`);
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Byte-recovery sweep failed: ${err}`);
+      this.errorReporter.captureException(err);
+    } finally {
+      this.recovering = false;
     }
   }
 

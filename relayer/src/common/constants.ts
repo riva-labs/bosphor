@@ -28,6 +28,15 @@ export const CLAIM_INTERVAL_MS = 2_000;
  */
 export const REAP_INTERVAL_MS = 10_000;
 
+/**
+ * Byte-recovery sweep cadence (ms). A maintenance loop that self-heals rows which
+ * are IntentReceived but never got their bytes (the client crashed / reloaded
+ * before delivering): it re-fetches the committed blob straight from Walrus and
+ * ingests it. Compile-time constant because @Interval needs one; the grace and
+ * backoff are config knobs (BYTES_RECOVERY_GRACE_MS / BYTES_RECOVERY_BACKOFF_MS).
+ */
+export const BYTES_RECOVERY_INTERVAL_MS = 15_000;
+
 /** WAL coin type (the token that pays for storage) per Sui network. */
 export const WAL_COIN_TYPE_BY_NETWORK: Record<'mainnet' | 'testnet', string> = {
   testnet: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',

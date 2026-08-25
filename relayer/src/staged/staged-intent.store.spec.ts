@@ -62,6 +62,27 @@ class FakePool implements PgQueryable {
       return { rows: [{ total }] };
     }
 
+    // Byte-recovery claim: received, no bytes, past grace, not expired, not gated.
+    if (sql.includes('committed_blob_id is not null')) {
+      const now = params[0] as number;
+      const grace = params[1] as number;
+      const limit = params[2] as number;
+      const due = [...this.rows.values()]
+        .filter(
+          (r) =>
+            r.state === 'active' &&
+            r.received === true &&
+            r.bytes === null &&
+            r.committed_blob_id != null &&
+            (r.deadline == null || (r.deadline as number) > now) &&
+            ((r.bytes_recovery_at as number | null) ?? (r.created_at as number) + grace) <= now,
+        )
+        .sort((a, b) => (a.created_at as number) - (b.created_at as number))
+        .slice(0, limit)
+        .map((r) => ({ intent_id: r.intent_id, committed_blob_id: r.committed_blob_id }));
+      return { rows: due };
+    }
+
     if (sql.includes('next_attempt_at <=')) {
       const now = params[0] as number;
       const limit = params[1] as number;
@@ -128,6 +149,7 @@ class FakePool implements PgQueryable {
       end_epoch: null,
       store_digest: null,
       delivery_digest: null,
+      bytes_recovery_at: null,
       returned: false,
       state: 'active',
       attempts: 0,
@@ -195,6 +217,9 @@ class FakePool implements PgQueryable {
       r.next_attempt_at = params[2] as number;
       r.last_error = params[3] as string;
       r.updated_at = params[4] as number;
+    } else if (sql.includes('bytes_recovery_at = $2')) {
+      r.bytes_recovery_at = params[1] as number;
+      r.updated_at = params[2] as number;
     } else if (sql.includes('bytes = null')) {
       r.bytes = null;
       r.updated_at = params[1] as number;
@@ -260,6 +285,33 @@ describe('StagedIntentStore', () => {
     // A backfilled re-observation without a digest must keep the captured one.
     await store.markReceived('0xd', RX);
     expect((await store.get('0xd'))?.deliveryDigest).toBe('0xdeliver');
+  });
+
+  it('claimForByteRecovery selects received-without-bytes past grace, and backs off', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+    const GRACE = 45_000;
+
+    await store.markReceived('0xr', RX); // received, no bytes
+    const t0 = (await store.get('0xr'))!.createdAt;
+
+    // Within the grace window: not yet eligible.
+    expect(await store.claimForByteRecovery(t0 + GRACE - 1, GRACE, 10)).toHaveLength(0);
+
+    // Past the grace: eligible, carrying the commitment to re-fetch.
+    const due = await store.claimForByteRecovery(t0 + GRACE + 1, GRACE, 10);
+    expect(due).toEqual([{ intentId: '0xr', committedBlobId: RX.committedBlobId }]);
+
+    // A row that already has bytes is never a candidate.
+    await store.upsertBytes('0xr', { bytes: bytes('data'), blobId: 'b', size: 4 });
+    expect(await store.claimForByteRecovery(t0 + GRACE + 1, GRACE, 10)).toHaveLength(0);
+
+    // Backoff gates the next attempt until its time.
+    await store.markReceived('0xr2', RX);
+    const t2 = (await store.get('0xr2'))!.createdAt;
+    await store.rescheduleByteRecovery('0xr2', t2 + 100_000);
+    expect(await store.claimForByteRecovery(t2 + GRACE + 1, GRACE, 10)).toHaveLength(0);
+    expect(await store.claimForByteRecovery(t2 + 100_001, GRACE, 10)).toHaveLength(1);
   });
 
   it('is order-independent: received event before bytes still ends up ready-shaped', async () => {

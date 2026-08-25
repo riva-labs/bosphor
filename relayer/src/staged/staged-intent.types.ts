@@ -62,6 +62,17 @@ export interface StagedIntentRow {
   updatedAt: number;
 }
 
+/**
+ * A row that is IntentReceived but still has no bytes, eligible for byte recovery
+ * (re-fetch the committed blob from Walrus). The commitment is enough to fetch and
+ * re-verify the blob without the client.
+ */
+export interface ByteRecoveryCandidate {
+  intentId: string;
+  /** Committed blob id (0x hex big-endian) - the Walrus blob to re-fetch. */
+  committedBlobId: string;
+}
+
 /** Accepted out-of-band bytes bound to a commitment, awaiting store. */
 export interface StagedBytes {
   bytes: Buffer;
