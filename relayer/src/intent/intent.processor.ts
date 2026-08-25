@@ -153,6 +153,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         srcEid: event.srcEid,
         committedBlobId: u256ToHex(event.committedBlobId),
         deadline: Number(event.deadline) * 1000, // seconds -> ms
+        deliveryDigest: event.deliveryDigest || undefined,
       });
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
     } catch (err) {
@@ -291,7 +292,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     // 0. Ensure the relayer holds enough WAL to pay for storage.
     await this.walTopUp.ensureWal();
-    await this.trackHop(intentId, 'received', { sender });
+    await this.trackHop(intentId, 'received', { sender, txHash: row.deliveryDigest });
 
     // 2. Upload to Walrus (idempotent: skip if a prior attempt already uploaded).
     let walrusBlobId: string;

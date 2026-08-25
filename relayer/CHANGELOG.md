@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 (2026-08-25)
+
+### Bug Fixes
+
+- fix(relayer): record Sui delivery digest on the received hop
+
 ## 0.5.1 (2026-08-24)
 
 ### Bug Fixes

@@ -52,6 +52,7 @@ export class StagedIntentStore {
         deadline          BIGINT,
         src_eid           INTEGER,
         received          BOOLEAN NOT NULL DEFAULT false,
+        delivery_digest   TEXT,
         bytes             BYTEA,
         blob_id           TEXT,
         walrus_object_id  TEXT,
@@ -67,6 +68,10 @@ export class StagedIntentStore {
         updated_at        BIGINT NOT NULL
       )
     `);
+    // Additive migration for deployments created before delivery_digest existed.
+    await this.pool.query(
+      `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS delivery_digest TEXT`,
+    );
     // Drives the claim/drain query: active rows that are due, oldest first.
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${TABLE}_drain_idx ON ${TABLE} (state, next_attempt_at, created_at)`,
@@ -104,17 +109,18 @@ export class StagedIntentStore {
     const now = Date.now();
     await this.pool.query(
       `INSERT INTO ${TABLE}
-         (intent_id, received, src_eid, committed_blob_id, deadline,
+         (intent_id, received, src_eid, committed_blob_id, deadline, delivery_digest,
           next_attempt_at, created_at, updated_at)
-       VALUES ($1, true, $2, $3, $4, $5, $5, $5)
+       VALUES ($1, true, $2, $3, $4, $6, $5, $5, $5)
        ON CONFLICT (intent_id) DO UPDATE SET
          received = true,
          src_eid = EXCLUDED.src_eid,
          committed_blob_id = EXCLUDED.committed_blob_id,
          deadline = EXCLUDED.deadline,
+         delivery_digest = COALESCE(EXCLUDED.delivery_digest, ${TABLE}.delivery_digest),
          updated_at = EXCLUDED.updated_at
        WHERE ${TABLE}.state = 'active'`,
-      [intentId, details.srcEid, details.committedBlobId, details.deadline, now],
+      [intentId, details.srcEid, details.committedBlobId, details.deadline, now, details.deliveryDigest ?? null],
     );
   }
 
@@ -125,9 +131,9 @@ export class StagedIntentStore {
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     const { rows } = await this.pool.query(
       `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
-              (bytes IS NOT NULL) AS has_bytes, blob_id, walrus_object_id,
-              walrus_blob_id, end_epoch, store_digest, returned, state, attempts,
-              next_attempt_at, last_error, created_at, updated_at
+              delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
+              walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
+              state, attempts, next_attempt_at, last_error, created_at, updated_at
          FROM ${TABLE}
         WHERE state = 'active' AND next_attempt_at <= $1
         ORDER BY created_at
@@ -277,9 +283,9 @@ export class StagedIntentStore {
   async get(intentId: string): Promise<StagedIntentRow | undefined> {
     const { rows } = await this.pool.query(
       `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
-              (bytes IS NOT NULL) AS has_bytes, blob_id, walrus_object_id,
-              walrus_blob_id, end_epoch, store_digest, returned, state, attempts,
-              next_attempt_at, last_error, created_at, updated_at
+              delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
+              walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
+              state, attempts, next_attempt_at, last_error, created_at, updated_at
          FROM ${TABLE} WHERE intent_id = $1`,
       [intentId],
     );
@@ -297,6 +303,7 @@ export class StagedIntentStore {
       deadline: num(row.deadline),
       srcEid: num(row.src_eid),
       received: Boolean(row.received),
+      deliveryDigest: str(row.delivery_digest),
       hasBytes: Boolean(row.has_bytes),
       blobId: str(row.blob_id),
       walrusObjectId: str(row.walrus_object_id),

@@ -39,6 +39,8 @@ export interface StagedIntentRow {
   srcEid?: number;
   /** Whether the Sui IntentReceived event has been seen. */
   received: boolean;
+  /** Sui digest of the delivery tx that emitted IntentReceived (the "Delivered to Sui" proof). */
+  deliveryDigest?: string;
   /** Whether bytes are present (bytes IS NOT NULL) without selecting the payload. */
   hasBytes: boolean;
   /** Recomputed Walrus blob id (base64url) from ingest. */
@@ -74,6 +76,8 @@ export interface ReceivedDetails {
   srcEid: number;
   committedBlobId: string;
   deadline: number;
+  /** Sui digest of the delivery tx that emitted the event. */
+  deliveryDigest?: string;
 }
 
 /** Result of a successful Walrus upload, persisted for idempotent retry. */

@@ -134,6 +134,8 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     expect(event.size).toBe(3);
     expect(event.deadline).toBe(1700000000n);
     expect(event.srcEid).toBe(40161);
+    // The delivery tx digest rides along as the "Delivered to Sui" proof.
+    expect(event.deliveryDigest).toBe('txdigest123');
   });
 
   it('should skip events with non-matching event type', async () => {
