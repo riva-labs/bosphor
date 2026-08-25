@@ -1,5 +1,5 @@
 import { blobIdToInt } from '@mysten/walrus';
-import { walrusBlobIdToField, blobIdMatches } from './walrus-blob-id';
+import { walrusBlobIdToField, fieldToWalrusBlobId, blobIdMatches } from './walrus-blob-id';
 
 // Real Walrus testnet blob ids. blobIdToInt is Walrus's own decode of the base64url
 // string into the u256 that on-chain `blob.blob_id()` returns.
@@ -21,6 +21,20 @@ describe('walrusBlobIdToField', () => {
 
   it('rejects ids that are not 32 bytes', () => {
     expect(() => walrusBlobIdToField('AAAA')).toThrow(/32-byte Walrus blob id/);
+  });
+});
+
+describe('fieldToWalrusBlobId', () => {
+  it('is the inverse of walrusBlobIdToField (round-trips the aggregator id)', () => {
+    for (const id of IDS) {
+      const committedHex = '0x' + walrusBlobIdToField(id).toString('hex');
+      // Recovering the aggregator id from the commitment must return the original.
+      expect(fieldToWalrusBlobId(committedHex)).toBe(id);
+    }
+  });
+
+  it('rejects a commitment that is not 32 bytes', () => {
+    expect(() => fieldToWalrusBlobId('0x1234')).toThrow(/32-byte commitment/);
   });
 });
 

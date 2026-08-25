@@ -20,6 +20,7 @@ export interface WalrusBlobInfo {
 export class WalrusService implements OnModuleInit {
   private readonly logger = new Logger(WalrusService.name);
   private storeEpochs!: number;
+  private aggregatorUrl!: string;
 
   constructor(
     private readonly config: ConfigService,
@@ -28,6 +29,23 @@ export class WalrusService implements OnModuleInit {
 
   onModuleInit() {
     this.storeEpochs = this.config.get<number>('WALRUS_STORE_EPOCHS', 5);
+    this.aggregatorUrl = this.config
+      .get<string>('WALRUS_AGGREGATOR_URL', 'https://aggregator.walrus-testnet.walrus.space')
+      .replace(/\/+$/, '');
+  }
+
+  /**
+   * Read a blob's bytes straight from the Walrus aggregator by its base64url id.
+   * Used for byte recovery (re-fetch a committed blob the client never delivered).
+   * Real data only: a non-2xx response throws so the caller retries or gives up,
+   * never treating a miss as empty bytes.
+   */
+  async fetchBlobFromAggregator(blobId: string): Promise<Buffer> {
+    const res = await fetch(`${this.aggregatorUrl}/v1/blobs/${blobId}`);
+    if (!res.ok) {
+      throw new Error(`Walrus aggregator returned ${res.status} for blob ${blobId}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
   }
 
   async upload(data: Buffer): Promise<WalrusBlobInfo> {
