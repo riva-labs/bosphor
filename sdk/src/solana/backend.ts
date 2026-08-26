@@ -54,6 +54,18 @@ export interface DefaultSolanaChainOptions {
    * specific and are validated on devnet; the SDK does not synthesize them.
    */
   endpointAccounts?: SolanaAccountMetaInput[];
+  /**
+   * Compute-unit limit prepended as a ComputeBudget instruction. `submit_intent`
+   * makes a CPI into the LayerZero endpoint `send`, which routinely exceeds the
+   * 200k-CU per-instruction default; a real devnet submit needs ~400k. Omit to
+   * leave the cluster default in place.
+   */
+  computeUnitLimit?: number;
+  /**
+   * Priority fee in micro-lamports per compute unit, prepended as a ComputeBudget
+   * instruction. Omit to send at the base fee.
+   */
+  priorityMicroLamports?: number;
 }
 
 function toHex(bytes: Uint8Array): Hex {
@@ -89,8 +101,14 @@ export async function createDefaultSolanaChain(
     );
   }
 
-  const { PublicKey, Transaction, TransactionInstruction, SystemProgram, sendAndConfirmTransaction } =
-    web3;
+  const {
+    PublicKey,
+    Transaction,
+    TransactionInstruction,
+    SystemProgram,
+    ComputeBudgetProgram,
+    sendAndConfirmTransaction,
+  } = web3;
   const programId = new PublicKey(opts.programId ?? BOSPHOR_PROGRAM_ID);
   const connection: any = opts.connection;
   const payer: any = opts.wallet;
@@ -166,11 +184,19 @@ export async function createDefaultSolanaChain(
       ];
 
       const ix = new TransactionInstruction({ programId, keys, data });
-      const signature: string = await sendAndConfirmTransaction(
-        connection,
-        new Transaction().add(ix),
-        [payer],
-      );
+
+      // Prepend ComputeBudget instructions when configured: the submit_intent CPI
+      // into the LayerZero endpoint routinely needs more than the 200k-CU default.
+      const tx = new Transaction();
+      if (opts.computeUnitLimit) {
+        tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: opts.computeUnitLimit }));
+      }
+      if (opts.priorityMicroLamports) {
+        tx.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: opts.priorityMicroLamports }));
+      }
+      tx.add(ix);
+
+      const signature: string = await sendAndConfirmTransaction(connection, tx, [payer]);
 
       // Cross-check the predicted id against the IntentSubmitted event.
       const txInfo = await connection.getTransaction(signature, {
