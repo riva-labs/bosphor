@@ -8,3 +8,8 @@ services:
     env_file:
       - .env
       - .env.canary-testnet
+    volumes:
+      # Solana devnet keypair the Solana probe submits with. Point
+      # SOLANA_CANARY_KEYPAIR at this path in .env.canary-testnet. Shared with the
+      # testnet relayer's keypair is fine on devnet (per-sender nonce PDA).
+      - /home/arb/.config/solana/bosphor-devnet.json:/home/arb/.config/solana/bosphor-devnet.json:ro

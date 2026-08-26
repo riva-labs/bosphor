@@ -1,0 +1,28 @@
+# Root-context .dockerignore. Only the canary image builds from the repo root
+# (it needs the sibling sdk/ for its file:../sdk dependency); every other service
+# builds from its own subdirectory and is unaffected by this file. Keep the root
+# build context down to sdk/ + canary/ sources by excluding everything heavy or
+# irrelevant, and never ship .env secrets into an image.
+**/node_modules
+**/dist
+**/.git
+.git
+**/out
+**/cache
+**/artifacts
+**/target
+**/.next
+**/*.log
+**/.env
+**/.env.*
+
+# Sibling packages the canary build does not need.
+contracts
+relayer
+website
+kener
+dapp-index
+waitlist-site
+monitoring
+docs
+sui

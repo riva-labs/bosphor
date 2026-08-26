@@ -30,7 +30,11 @@ services:
       retries: 3
 
   canary:
-    build: ./canary
+    # Root context: the canary depends on the sibling sdk/ via file:../sdk, so the
+    # build needs both packages (see canary/Dockerfile).
+    build:
+      context: .
+      dockerfile: canary/Dockerfile
     env_file: .env
     restart: unless-stopped
     depends_on:
