@@ -1,6 +1,7 @@
 import { ethers, EventLog } from 'ethers';
 import { createBosphorClient, defaultComputeBlob, type AdapterContract } from '@bosphor/sdk/evm';
 import { preflight, effectiveGasPriceWei } from '../preflight.ts';
+import { uploadWithRetry } from '../upload.ts';
 import type { ChainProbe, PreflightOutcome } from '../probe.ts';
 
 /**
@@ -103,7 +104,8 @@ export function createEvmProbe(cfg: EvmProbeConfig): ChainProbe {
       const encoded = await client.encode(data);
       const fee = await client.quote(encoded);
       const { intentId } = await client.submit(encoded, fee);
-      await client.upload(intentId, data);
+      // Retry past the relayer's IntentSubmitted watch lag (404 until registered).
+      await uploadWithRetry((id, d) => client.upload(id as `0x${string}`, d), intentId, data);
       return { intentId };
     },
 

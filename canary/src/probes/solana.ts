@@ -8,6 +8,7 @@ import {
   createDefaultSolanaChain,
   defaultComputeBlob,
 } from '@bosphor/sdk/solana';
+import { uploadWithRetry } from '../upload.ts';
 import type { ChainProbe, PreflightOutcome } from '../probe.ts';
 
 /**
@@ -132,7 +133,8 @@ export async function createSolanaProbe(cfg: SolanaProbeConfig): Promise<ChainPr
       const data = new TextEncoder().encode(`bosphor-canary-solana-${Date.now()}`);
       const encoded = await client.encode(data);
       const { intentId } = await client.submit(encoded);
-      await client.upload(intentId, data);
+      // Retry past the relayer's IntentSubmitted watch lag (404 until registered).
+      await uploadWithRetry((id, d) => client.upload(id as `0x${string}`, d), intentId, data);
       return { intentId };
     },
 
