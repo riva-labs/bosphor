@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 (2026-08-26)
+
+### Features
+
+- feat(sdk): add computeUnitLimit to default Solana backend
+
 ## 0.7.0 (2026-08-18)
 
 ### Features
