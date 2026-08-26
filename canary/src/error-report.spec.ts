@@ -18,11 +18,12 @@ test('reports a failed probe with intent id and stage tags', () => {
     intentId: '0xabc',
     failedStage: 'return',
     error: 'timeout',
+    chain: 'solana',
   });
 
   assert.equal(calls.length, 1);
   assert.match((calls[0].err as Error).message, /timeout/);
-  assert.deepEqual(calls[0].tags, { intentId: '0xabc', stage: 'return' });
+  assert.deepEqual(calls[0].tags, { intentId: '0xabc', stage: 'return', chain: 'solana' });
 });
 
 test('does not report a successful probe', () => {

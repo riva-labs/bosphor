@@ -11,7 +11,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bosphor/sdk": "file:../sdk",
+    "@layerzerolabs/lz-solana-sdk-v2": "^3.0.168",
+    "@layerzerolabs/lz-v2-utilities": "^3.0.168",
+    "@mysten/sui": "^2.17.0",
+    "@mysten/walrus": "^1.1.7",
+    "@noble/hashes": "^2.2.0",
     "@sentry/node": "^10.69.0",
+    "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.4.2",
     "ethers": "^6.13.0",
     "prom-client": "^15.1.3"

@@ -1,32 +1,40 @@
-import { ethers } from 'ethers';
+import type { CanaryChain } from './metrics.ts';
+import type { SkipReason } from './preflight.ts';
 
 /**
- * Everything the probe needs from the outside world. Network calls and the
- * clock are injected so the round-trip logic can be unit-tested without a chain.
+ * A synthetic round-trip against one origin chain, split into the two legs the
+ * canary times independently: `submit` (encode -> submit -> upload, the forward
+ * path) and `awaitProof` (the return proof landing back on the origin). Each
+ * chain implements this over its SDK client so `runProbe` stays chain-agnostic.
  */
-export interface ProbeDeps {
-  sender: string;
-  dstEid: number;
-  options: string;
-  deadlineSecondsFromNow: number;
-  pollIntervalMs: number;
-  maxWaitMs: number;
-  buildPayload(): Uint8Array;
-  getNonce(sender: string): Promise<bigint>;
-  quoteFee(dstEid: number, payload: Uint8Array, deadline: number, options: string): Promise<bigint>;
-  submitIntent(
-    dstEid: number,
-    payload: Uint8Array,
-    deadline: number,
-    options: string,
-    value: bigint,
-  ): Promise<void>;
-  isExecuted(intentId: string): Promise<boolean>;
-  now(): number;
-  sleep(ms: number): Promise<void>;
+export interface ChainProbe {
+  readonly chain: CanaryChain;
+  /** Human label for logs, e.g. `0xabc… -> Sui(40378)`. */
+  readonly label: string;
+  /** Read balance (and gas, on EVM) and decide whether to submit this tick. */
+  preflight(): Promise<PreflightOutcome>;
+  /**
+   * Encode + submit + upload one synthetic intent, returning its id. Runs the
+   * real SDK `store` forward legs so the probe exercises the integrator path.
+   * Throws on any forward-leg failure.
+   */
+  submit(): Promise<{ intentId: string }>;
+  /** Poll until the return proof lands on the origin chain; throws on timeout. */
+  awaitProof(intentId: string, maxWaitMs: number): Promise<void>;
+}
+
+/** What a probe's preflight reports up to the runner: safe-to-submit + gauges. */
+export interface PreflightOutcome {
+  ok: boolean;
+  reason?: SkipReason;
+  /** Sender balance in the chain's native token (ETH or SOL); NaN on a failed read. */
+  balanceNative: number;
+  /** Current gas price in gwei (EVM only); omitted on chains without a gas market. */
+  gasGwei?: number;
 }
 
 export interface ProbeResult {
+  chain: CanaryChain;
   success: boolean;
   intentId: string;
   roundtripSeconds?: number;
@@ -36,66 +44,57 @@ export interface ProbeResult {
   error?: string;
 }
 
-/**
- * Deterministic intent id, matching the EVM adapter's
- * keccak256(abi.encodePacked(sender, dstEid, payload, nonce, deadline)).
- */
-export function computeIntentId(
-  sender: string,
-  dstEid: number,
-  payload: Uint8Array,
-  nonce: bigint,
-  deadline: number,
-): string {
-  return ethers.keccak256(
-    ethers.solidityPacked(
-      ['address', 'uint64', 'bytes', 'uint256', 'uint256'],
-      [sender, dstEid, payload, nonce, deadline],
-    ),
-  );
+export interface RunProbeDeps {
+  maxWaitMs: number;
+  /** Injectable clock so the runner's timing can be unit-tested without real waits. */
+  now?: () => number;
 }
 
 /**
- * Submit one synthetic intent and track it to executed=true on EVM, timing the
- * submit leg and the return leg. Returns a structured result; never throws.
+ * Run one synthetic round-trip and time both legs. Never throws: a forward-leg
+ * error is reported as a `submit` failure, a missing return proof as a `return`
+ * timeout, so a single degraded probe cannot crash the canary loop.
  */
-export async function runProbe(deps: ProbeDeps): Promise<ProbeResult> {
-  const t0 = deps.now();
-  const payload = deps.buildPayload();
-  const deadline = Math.floor(t0 / 1000) + deps.deadlineSecondsFromNow;
+export async function runProbe(probe: ChainProbe, deps: RunProbeDeps): Promise<ProbeResult> {
+  const now = deps.now ?? (() => Date.now());
+  const t0 = now();
   let intentId = '';
   let submitSeconds = 0;
 
   try {
-    const nonce = await deps.getNonce(deps.sender);
-    intentId = computeIntentId(deps.sender, deps.dstEid, payload, nonce, deadline);
-    const fee = await deps.quoteFee(deps.dstEid, payload, deadline, deps.options);
-    const submitStart = deps.now();
-    await deps.submitIntent(deps.dstEid, payload, deadline, deps.options, fee);
-    submitSeconds = (deps.now() - submitStart) / 1000;
+    const submitted = await probe.submit();
+    intentId = submitted.intentId;
+    submitSeconds = (now() - t0) / 1000;
   } catch (err) {
-    return { success: false, intentId, failedStage: 'submit', error: String(err) };
+    return {
+      chain: probe.chain,
+      success: false,
+      intentId,
+      failedStage: 'submit',
+      error: String(err),
+    };
   }
 
-  const pollStart = deps.now();
-  while (deps.now() - pollStart < deps.maxWaitMs) {
-    let executed = false;
-    try {
-      executed = await deps.isExecuted(intentId);
-    } catch {
-      // transient RPC error, retry on the next cycle
-    }
-    if (executed) {
-      return {
-        success: true,
-        intentId,
-        roundtripSeconds: (deps.now() - t0) / 1000,
-        submitSeconds,
-        returnSeconds: (deps.now() - pollStart) / 1000,
-      };
-    }
-    await deps.sleep(deps.pollIntervalMs);
+  const returnStart = now();
+  try {
+    await probe.awaitProof(intentId, deps.maxWaitMs);
+  } catch (err) {
+    return {
+      chain: probe.chain,
+      success: false,
+      intentId,
+      failedStage: 'return',
+      error: String(err),
+      submitSeconds,
+    };
   }
 
-  return { success: false, intentId, failedStage: 'return', error: 'timeout', submitSeconds };
+  return {
+    chain: probe.chain,
+    success: true,
+    intentId,
+    roundtripSeconds: (now() - t0) / 1000,
+    submitSeconds,
+    returnSeconds: (now() - returnStart) / 1000,
+  };
 }
