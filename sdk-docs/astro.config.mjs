@@ -14,9 +14,27 @@ export default defineConfig({
       logo: { src: './src/assets/bosphor-mark.png', replacesTitle: false },
       favicon: '/bosphor-mark.png',
       customCss: ['./src/styles/brand.css'],
-      // Light-only, like the dApp: pin the code blocks to a light theme so they
-      // match the palette even when the visitor's system prefers dark.
-      expressiveCode: { themes: ['github-light'] },
+      // Light-only: pin the code blocks to a light theme, and neutralise
+      // expressive-code's dark "terminal" frame so bash and ts blocks look the
+      // same, clean light card (no macOS-style dark title bar).
+      expressiveCode: {
+        themes: ['github-light'],
+        styleOverrides: {
+          borderRadius: '0.5rem',
+          borderColor: '#e5e5e7',
+          frames: {
+            shadowColor: 'transparent',
+            editorTabBarBackground: '#f7f7f8',
+            editorActiveTabBackground: '#ffffff',
+            editorBackground: '#fbfbfc',
+            terminalBackground: '#fbfbfc',
+            terminalTitlebarBackground: '#f7f7f8',
+            terminalTitlebarBorderBottomColor: '#e5e5e7',
+            terminalTitlebarDotsForeground: '#c8c8ce',
+            terminalTitlebarForeground: '#787887',
+          },
+        },
+      },
       // Remove the dark/light toggle (the site is light only).
       components: { ThemeSelect: './src/components/EmptyThemeSelect.astro' },
       social: [
