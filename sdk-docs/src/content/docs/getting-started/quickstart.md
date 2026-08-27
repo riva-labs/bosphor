@@ -97,7 +97,7 @@ See [Handle errors](/guides/errors/) for the full model.
 
 ## Next steps
 
-- [Store from Solana](/guides/solana/) — the same one-line API from a Solana wallet.
-- [Resume after a crash](/guides/resume/) — pick a flow back up without double-spending.
-- [How routing works](/concepts/how-it-works/) — why the fee is flat and what the
+- [Store from Solana](/guides/solana/): the same one-line API from a Solana wallet.
+- [Resume after a crash](/guides/resume/): pick a flow back up without double-spending.
+- [How routing works](/concepts/how-it-works/): why the fee is flat and what the
   commitment contains.

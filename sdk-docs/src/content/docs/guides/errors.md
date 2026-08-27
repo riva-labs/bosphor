@@ -34,7 +34,7 @@ so any import path works.
 |-------|-----------|--------|---------|
 | `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload (e.g. no pending intent yet, or a blob-id mismatch). |
 | `ProofTimeoutError` | `awaitProof`, `store` | `intentId`, `timeoutMs` | The intent did not execute within the timeout. It may still execute; re-poll with `awaitProof(intentId)`. |
-| `BosphorError` | base class | — | Superclass of every SDK error. Catch this to handle any SDK failure. |
+| `BosphorError` | base class | `code`, `retryable` | Superclass of every SDK error. Catch this to handle any SDK failure. |
 
 ## No pending intent yet
 

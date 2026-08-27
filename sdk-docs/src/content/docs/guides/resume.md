@@ -27,14 +27,14 @@ const proof = await client.awaitProof(intentId);
 
 Given a saved `intentId`, resume from wherever you stopped, **without re-submitting**:
 
-- **Aborted while awaiting the proof** — the intent is on-chain and the bytes are
+- **Aborted while awaiting the proof**: the intent is on-chain and the bytes are
   uploaded. Just re-poll:
 
   ```ts
   const proof = await client.awaitProof(saved.intentId, { timeoutMs: 300_000 });
   ```
 
-- **Aborted during or before the upload** — the intent is on-chain but the relayer
+- **Aborted during or before the upload**: the intent is on-chain but the relayer
   may not have the bytes. Re-run the upload first, then poll:
 
   ```ts
@@ -42,7 +42,7 @@ Given a saved `intentId`, resume from wherever you stopped, **without re-submitt
   const proof = await client.awaitProof(saved.intentId);
   ```
 
-- **Aborted before submit** — nothing is on-chain yet. Start the flow again from
+- **Aborted before submit**: nothing is on-chain yet. Start the flow again from
   `encode`.
 
 ## Why not auto-retry
