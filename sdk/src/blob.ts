@@ -11,7 +11,9 @@
  * (b) unit tests can inject a stub `computeBlob` and never trigger the import.
  */
 
+import { bytesToHex } from "@noble/hashes/utils.js";
 import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
+import { base64UrlToBytes } from "./base64.js";
 
 /**
  * Convert a Walrus base64url blob id into the canonical 32-byte Bosphor commitment
@@ -29,15 +31,16 @@ import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
  * `@mysten/walrus` ground truth by `blob.test.ts`.
  */
 function base64UrlToBytes32Hex(base64url: string): Hex {
-  const bytes = Buffer.from(base64url, "base64url");
+  const bytes = base64UrlToBytes(base64url);
   if (bytes.length !== 32) {
     throw new Error(
       `expected a 32-byte Walrus blob id, decoded ${bytes.length} bytes from "${base64url}"`,
     );
   }
-  // Little-endian base64url bytes -> big-endian commitment field.
-  const be = Buffer.from(bytes).reverse();
-  return `0x${be.toString("hex")}`;
+  // Little-endian base64url bytes -> big-endian commitment field. reverse()
+  // mutates the freshly decoded array in place, which is fine here.
+  bytes.reverse();
+  return `0x${bytesToHex(bytes)}`;
 }
 
 /**

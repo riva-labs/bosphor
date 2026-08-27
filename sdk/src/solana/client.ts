@@ -202,7 +202,7 @@ export class BosphorSolanaClient {
   async upload(
     intentId: Hex,
     data: Uint8Array,
-    opts: { signal?: AbortSignal } = {},
+    opts: { signal?: AbortSignal | undefined } = {},
   ): Promise<void> {
     await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal);
   }

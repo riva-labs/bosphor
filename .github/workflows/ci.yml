@@ -113,6 +113,10 @@ jobs:
         run: npm run build
         working-directory: sdk
 
+      - name: Validate package (publint + attw)
+        run: npm run lint:package
+        working-directory: sdk
+
       - name: Run parity + unit tests
         run: npm test
         working-directory: sdk

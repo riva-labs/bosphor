@@ -13,6 +13,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex as toHex, hexToBytes as fromHex } from "@noble/hashes/utils.js";
 import type { Hex } from "../types.js";
+import { base64ToBytes } from "../base64.js";
 
 // --- discriminators (identical to Anchor) ---
 
@@ -246,7 +247,7 @@ export function findIntentSubmittedIntentId(logs: readonly string[]): Hex | null
     const b64 = line.slice(idx + PROGRAM_DATA_PREFIX.length).trim();
     let bytes: Uint8Array;
     try {
-      bytes = Uint8Array.from(Buffer.from(b64, "base64"));
+      bytes = base64ToBytes(b64);
     } catch {
       continue;
     }

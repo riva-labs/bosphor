@@ -16,7 +16,7 @@ export const DEFAULT_EPOCHS = 5;
 /** Default seconds added to `now` to derive an intent deadline. */
 export const DEFAULT_DEADLINE_SECONDS = 3600; // 1 hour
 /** Default `awaitProof` timeout budget, in milliseconds. */
-export const DEFAULT_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_TIMEOUT_MS: number = 5 * 60_000;
 /** Default `awaitProof` poll interval, in milliseconds. */
 export const DEFAULT_POLL_MS = 3_000;
 
@@ -62,7 +62,7 @@ export type FetchLike = (
     body: Uint8Array;
     headers: Record<string, string>;
     /** Optional cancellation signal, forwarded to the underlying `fetch`. */
-    signal?: AbortSignal;
+    signal?: AbortSignal | undefined;
   },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
@@ -93,13 +93,17 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 export function resolveFetch(injected?: FetchLike): FetchLike {
   if (injected) return injected;
   if (typeof globalThis.fetch === "function") {
-    return (url, init) =>
-      globalThis.fetch(url, {
+    return (url, init) => {
+      const requestInit: RequestInit = {
         method: init.method,
         body: init.body,
         headers: init.headers,
-        signal: init.signal,
-      });
+      };
+      // Only set signal when present: exactOptionalPropertyTypes rejects an
+      // explicit `undefined` for an optional property.
+      if (init.signal) requestInit.signal = init.signal;
+      return globalThis.fetch(url, requestInit);
+    };
   }
   throw new Error("no fetch available; pass a fetch implementation in options");
 }
