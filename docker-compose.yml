@@ -47,6 +47,10 @@ services:
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
     ports:
       - "9090:9090"
+    # Lets Prometheus scrape host-published services (e.g. the testnet relayer on
+    # :3399, which runs in a separate compose project) via host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   grafana:

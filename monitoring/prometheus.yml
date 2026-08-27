@@ -5,9 +5,23 @@ rule_files:
   - /etc/prometheus/alerts.yml
 
 scrape_configs:
+  # The mainnet relayer (bosphor-relayer-1), reachable over the compose network.
   - job_name: bosphor-relayer
     static_configs:
       - targets: ['relayer:3000']
+        labels:
+          deployment: mainnet
+    metrics_path: /metrics
+
+  # The testnet relayer (bosphor-relayer-testnet) is a separate compose project,
+  # published on the host at :3399. Reach it via the docker host gateway (the
+  # prometheus service declares host.docker.internal in docker-compose). This is
+  # the relayer that actually drives the canary + demo traffic.
+  - job_name: bosphor-relayer-testnet
+    static_configs:
+      - targets: ['host.docker.internal:3399']
+        labels:
+          deployment: testnet
     metrics_path: /metrics
 
   - job_name: bosphor-canary
