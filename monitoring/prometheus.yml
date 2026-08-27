@@ -14,3 +14,11 @@ scrape_configs:
     static_configs:
       - targets: ['canary:9300']
     metrics_path: /metrics
+
+  # Self-operated DVN workers. Only present when the DVN overlay
+  # (docker-compose.dvn.yml) is deployed; otherwise these targets show down,
+  # which is harmless. Each worker serves its own pathway on its own port.
+  - job_name: bosphor-dvn
+    static_configs:
+      - targets: ['dvn-evm:9301', 'dvn-solana:9302']
+    metrics_path: /metrics

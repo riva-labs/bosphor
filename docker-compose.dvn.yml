@@ -1,0 +1,34 @@
+# Self-operated DVN workers, brought into the bosphor stack so Prometheus can
+# scrape them by service name (dvn-evm:9301, dvn-solana:9302). The DVN lives in a
+# SEPARATE repo at ../bosphor-dvn (host-specific path + its own secrets), so this
+# overlay is only usable on a host that has it checked out, exactly like the
+# testnet-relayer overlay. One image, two entrypoints.
+#
+# Deploy alongside the rest of the stack so they share the network:
+#   docker compose -f docker-compose.yml -f docker-compose.hosting.yml \
+#     -f docker-compose.dvn.yml up -d --build dvn-evm dvn-solana
+#
+# IMPORTANT: stop any host-process DVN first. Two DVNs on one pathway race to
+# verify+commit the same nonce and collide on Sui object versions.
+services:
+  dvn-evm:
+    build: ../bosphor-dvn
+    container_name: bosphor-dvn-evm
+    command: ["npm", "run", "start"]
+    env_file: ../bosphor-dvn/.env
+    environment:
+      - DVN_METRICS_PORT=9301
+    ports:
+      - "9301:9301"
+    restart: unless-stopped
+
+  dvn-solana:
+    build: ../bosphor-dvn
+    container_name: bosphor-dvn-solana
+    command: ["npm", "run", "start-solana"]
+    env_file: ../bosphor-dvn/.env
+    environment:
+      - DVN_METRICS_PORT=9302
+    ports:
+      - "9302:9302"
+    restart: unless-stopped

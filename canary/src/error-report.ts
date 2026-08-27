@@ -11,6 +11,8 @@ export interface ProbeFailureLike {
   intentId: string;
   failedStage?: string;
   error?: string;
+  /** Origin chain the probe ran against, surfaced as a Sentry tag. */
+  chain?: string;
 }
 
 /**
@@ -30,6 +32,10 @@ export function initSentry(dsn: string | undefined, environment: string): boolea
 export function reportProbeFailure(capture: CaptureLike, res: ProbeFailureLike): void {
   if (res.success) return;
   capture.captureException(new Error(res.error ?? 'probe failed'), {
-    tags: { intentId: res.intentId, stage: res.failedStage ?? 'unknown' },
+    tags: {
+      intentId: res.intentId,
+      stage: res.failedStage ?? 'unknown',
+      chain: res.chain ?? 'unknown',
+    },
   });
 }

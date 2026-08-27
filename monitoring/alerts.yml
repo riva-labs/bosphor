@@ -124,6 +124,58 @@ groups:
             {{ $value | printf "%.0f" }}s ago. The EVM -> Sui -> EVM path is not
             completing. This is the primary end-to-end health signal.
 
+  - name: bosphor-dvn
+    rules:
+      # A DVN worker is gone or unscrapable. We run our own DVN on each pathway;
+      # if the sole DVN on a route dies, verify+commit stops and the whole route
+      # goes dark (the exact outage this DVN was built to fix). Per instance, so it
+      # names which pathway (evm_sui / solana_sui) is down.
+      - alert: BosphorDvnDown
+        expr: up{job="bosphor-dvn"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor DVN worker is down ({{ $labels.instance }})"
+          description: >-
+            Prometheus cannot scrape the DVN at {{ $labels.instance }} for 3m. No
+            packets are being verified+committed on this pathway, so cross-chain
+            delivery has stalled. Check the DVN worker container/process.
+
+      # Dead-man's switch: the DVN is up but has not delivered a packet in over
+      # 40m. With the canary heart-beating both legs every 15m, a healthy DVN
+      # commits well within that window; staleness means it is stuck (bad RPC,
+      # object-version conflict, exhausted gas). The second clause suppresses the
+      # first 40m of uptime so a cold start does not page.
+      - alert: BosphorDvnDeliveryStale
+        expr: >-
+          (time() - bosphor_dvn_last_success_timestamp_seconds > 2400)
+          and on(instance) (time() - process_start_time_seconds{job="bosphor-dvn"} > 2400)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor DVN has not delivered in over 40m ({{ $labels.pathway }})"
+          description: >-
+            The last verify+commit+execute on pathway {{ $labels.pathway }} was
+            {{ $value | printf "%.0f" }}s ago. The DVN is up but not making
+            progress; cross-chain messages on this route are not being delivered.
+
+      # Repeated delivery errors before staleness trips: the DVN is catching and
+      # retrying failures. A few in 20m means the pathway is degraded (RPC flaps,
+      # gas, or a persistent bad packet), not a one-off.
+      - alert: BosphorDvnDeliveryErrors
+        expr: increase(bosphor_dvn_errors_total[20m]) >= 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor DVN is hitting delivery errors ({{ $labels.pathway }})"
+          description: >-
+            {{ $value | printf "%.0f" }} verify+commit/execute errors on pathway
+            {{ $labels.pathway }} in the last 20m. Check the worker logs for the
+            failing stage (RPC, Sui object-version conflict, gas).
+
   - name: bosphor-relayer-queue
     rules:
       # A pre-store dead-letter means a blob exhausted its store attempts (or hit
