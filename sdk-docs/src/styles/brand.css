@@ -1,11 +1,171 @@
-/* Bosphor brand: deep navy + functional blue. No purple. */
-:root {
-  --sl-color-accent-low: #16233f;
-  --sl-color-accent: #2f6bff;
-  --sl-color-accent-high: #c3d5ff;
+/* Bosphor SDK docs — brand identity, matched to the demo dApp (demo.bosphor.xyz).
+   A clean, light SaaS UI: warm off-white ground, white cards, one refined blue
+   accent, Satoshi headings + Instrument Sans body + JetBrains Mono for code.
+   Light only, exactly like the dApp (no dark navy, no grain). */
+
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@900,700,500&display=swap");
+
+/* Force the demo's light palette regardless of the visitor's system theme:
+   apply the same values to the base, light, and dark selectors so the site is
+   always light (the code theme is pinned to a light one in astro.config). */
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  /* grayscale, mapped to the demo tokens */
+  --sl-color-white: #1a1c24; /* strongest text / headings */
+  --sl-color-gray-1: #1a1c24;
+  --sl-color-gray-2: #5c5f6e; /* body */
+  --sl-color-gray-3: #8a8d98; /* muted */
+  --sl-color-gray-4: #b7b4ab;
+  --sl-color-gray-5: #e5e3de; /* hairline / borders */
+  --sl-color-gray-6: #ffffff; /* nav / sidebar / card surface */
+  --sl-color-gray-7: #fbfaf8;
+  --sl-color-black: #f7f6f3; /* page ground (warm off-white) */
+
+  /* refined blue, the single accent */
+  --sl-color-accent-low: #dce7f1;
+  --sl-color-accent: #3a7aaf;
+  --sl-color-accent-high: #28577c;
+
+  /* explicit semantic surfaces + text */
+  --sl-color-text: #5c5f6e;
+  --sl-color-text-accent: #3a7aaf;
+  --sl-color-text-invert: #ffffff;
+  --sl-color-bg: #f7f6f3;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: #ededf0;
+  --sl-color-bg-accent: #3a7aaf;
+  --sl-color-hairline: #e5e3de;
+  --sl-color-hairline-light: #ecece8;
+  --sl-color-hairline-shade: #efeee9;
+
+  /* semantic (asides): green / amber / red, from the brand */
+  --sl-color-green: #3d8b6b;
+  --sl-color-green-high: #3d8b6b;
+  --sl-color-orange: #9e8540;
+  --sl-color-orange-high: #9e8540;
+  --sl-color-red: #a84d4a;
+  --sl-color-red-high: #a84d4a;
+
+  /* fonts */
+  --sl-font: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --sl-font-mono: "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+
+  color-scheme: light;
 }
-:root[data-theme='light'] {
-  --sl-color-accent-low: #d6e2ff;
-  --sl-color-accent: #1d4ed8;
-  --sl-color-accent-high: #0a1633;
+
+/* Headings in Satoshi (display), tight tracking, like the dApp. */
+:is(h1, h2, h3, h4, h5, h6),
+.site-title,
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  font-family: "Satoshi", var(--sl-font);
+  color: var(--sl-color-white);
+  letter-spacing: -0.012em;
+}
+h1,
+.sl-markdown-content h1 {
+  font-weight: 900;
+}
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 700;
+}
+
+/* Top bar: white with a hairline, like the dApp's sticky top bar. */
+.header {
+  background: var(--sl-color-bg-nav);
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+.site-title {
+  font-family: "Satoshi", var(--sl-font);
+  font-weight: 700;
+  color: var(--sl-color-white);
+}
+
+/* Sidebars framed by hairlines, calm and structured. */
+.sidebar {
+  background: var(--sl-color-bg-sidebar);
+  border-inline-end: 1px solid var(--sl-color-hairline);
+}
+.right-sidebar {
+  border-inline-start: 1px solid var(--sl-color-hairline);
+}
+
+/* Sidebar links: rounded, blue active state on a soft inset. */
+.sidebar a[aria-current="page"],
+.sidebar a[aria-current="page"]:hover {
+  background: #eef4f9;
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+  border-radius: 0.4rem;
+}
+.sidebar a:hover {
+  border-radius: 0.4rem;
+}
+
+/* Body links: blue, underline on hover only (SaaS feel). */
+.sl-markdown-content a {
+  color: var(--sl-color-text-accent);
+  text-decoration-color: color-mix(in srgb, var(--sl-color-accent) 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* Cards (landing CardGrid): white, hairline, soft layered shadow, rounded. */
+.card {
+  background: var(--sl-color-bg-nav);
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.625rem;
+  box-shadow:
+    0 1px 2px -1px rgba(16, 24, 40, 0.05),
+    0 2px 4px -1px rgba(16, 24, 40, 0.05);
+}
+.card .icon {
+  color: var(--sl-color-accent);
+}
+
+/* Code: rounded frames with a hairline; inline code as a chip. */
+.expressive-code .frame,
+.sl-markdown-content pre {
+  border-radius: 0.625rem;
+}
+.expressive-code .frame pre {
+  border: 1px solid var(--sl-color-hairline);
+}
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.375rem;
+  padding: 0.15em 0.4em;
+}
+
+/* Tables: hairline grid, white with a faint zebra, rounded container. */
+.sl-markdown-content table {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.625rem;
+  overflow: hidden;
+}
+.sl-markdown-content th {
+  background: #f4f2ee;
+  font-family: "Satoshi", var(--sl-font);
+}
+.sl-markdown-content tr:nth-child(2n) td {
+  background: #fbfaf8;
+}
+
+/* Hero: primary action in the brand blue; keep the mascot airy. */
+.hero .actions a[data-variant="primary"] {
+  background: var(--sl-color-accent);
+  border-color: var(--sl-color-accent);
+  color: #fff;
+}
+.hero .actions a[data-variant="primary"]:hover {
+  background: var(--sl-color-accent-high);
+  border-color: var(--sl-color-accent-high);
+}
+.hero img {
+  filter: drop-shadow(0 12px 28px rgba(16, 24, 40, 0.12));
 }
