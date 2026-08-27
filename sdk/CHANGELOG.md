@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 (2026-08-27)
+
+### Features
+
+- feat(sdk): add stable code and retryable to the error hierarchy
+
+### Bug Fixes
+
+- fix(sdk): make blob-id and event decoding Buffer-free
+
 ## 0.8.0 (2026-08-26)
 
 ### Features
