@@ -196,7 +196,7 @@ machine-readable `code` string (the message may change; the code will not) and a
 | Error | `code` | Thrown by | Fields | `retryable` |
 |-------|--------|-----------|--------|-------------|
 | `RelayerUploadError` | `RELAYER_UPLOAD_FAILED` | `upload`, `store` | `status`, `reason`, `intentId` | `true` for a 404 (watch-lag race) or 5xx; `false` for a terminal 4xx (already executed, expired, bad blob). |
-| `ProofTimeoutError` | `PROOF_TIMEOUT` | `awaitProof`, `store` | `intentId`, `timeoutMs` | `true` — the intent may still execute; re-poll with `awaitProof(intentId)`. |
+| `ProofTimeoutError` | `PROOF_TIMEOUT` | `awaitProof`, `store` | `intentId`, `timeoutMs` | `true`. The intent may still execute; re-poll with `awaitProof(intentId)`. |
 | `BosphorError` | `BOSPHOR_ERROR` | base class | `code`, `retryable` | `false` by default. Superclass of every SDK error. |
 
 The errors are exported from the core `@bosphor/sdk` and from both chain subpaths.
