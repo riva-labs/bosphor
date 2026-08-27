@@ -1,0 +1,11 @@
+/* Bosphor brand: deep navy + functional blue. No purple. */
+:root {
+  --sl-color-accent-low: #16233f;
+  --sl-color-accent: #2f6bff;
+  --sl-color-accent-high: #c3d5ff;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d6e2ff;
+  --sl-color-accent: #1d4ed8;
+  --sl-color-accent-high: #0a1633;
+}

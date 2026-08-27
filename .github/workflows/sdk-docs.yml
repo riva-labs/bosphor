@@ -1,0 +1,44 @@
+# Builds and deploys the SDK docs site (sdk.bosphor.xyz) to Cloudflare Workers.
+#
+# The API reference is generated from sdk/src with TypeDoc at build time, so the
+# site is rebuilt when either the docs or the SDK source changes.
+#
+# One-time setup (repo Settings -> Secrets and variables -> Actions):
+#   - CLOUDFLARE_API_TOKEN  (a token with Workers Scripts:Edit on the account)
+#   - CLOUDFLARE_ACCOUNT_ID (the account that owns the bosphor.xyz zone)
+# The custom domain sdk.bosphor.xyz is declared in sdk-docs/wrangler.jsonc and is
+# bound on the first deploy; no dashboard step is needed once the secrets exist.
+name: Deploy SDK Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk-docs/**'
+      - 'sdk/src/**'
+      - 'sdk/package.json'
+      - 'sdk/tsconfig.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Build and deploy sdk.bosphor.xyz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install SDK deps (TypeDoc resolves sdk/src imports)
+        run: cd sdk && npm ci
+      - name: Install and build docs
+        run: |
+          cd sdk-docs
+          npm ci
+          npm run build
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: sdk-docs

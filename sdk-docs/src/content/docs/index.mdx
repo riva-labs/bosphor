@@ -1,0 +1,67 @@
+---
+title: Bosphor SDK
+description: Submit cross-chain storage intents from EVM or Solana and route them to Walrus, with a verifiable proof back on the origin chain.
+template: splash
+hero:
+  tagline: Store a file on Walrus from an EVM or Solana wallet, over LayerZero, and get a verifiable proof back on the origin chain. One package, one call.
+  actions:
+    - text: Quickstart
+      link: /getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/riva-labs/bosphor
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Install
+
+```bash
+# EVM path
+npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+
+# Solana path
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+
+<CardGrid stagger>
+  <Card title="One call" icon="rocket">
+    `await client.store(bytes, { epochs })` runs the whole cross-chain flow and
+    returns `{ intentId, blobId, endEpoch }`, verified against on-chain state.
+  </Card>
+  <Card title="Flat cross-chain cost" icon="setting">
+    The blob id is committed on-chain and the bytes travel out-of-band, so the
+    LayerZero fee is the same for a 1&nbsp;KB file and a 1&nbsp;GB file.
+  </Card>
+  <Card title="Same API on every chain" icon="approve-check">
+    The EVM and Solana clients are identical where they overlap; the intent id is
+    the same keccak digest across EVM, Sui, and Solana.
+  </Card>
+  <Card title="Lean by default" icon="puzzle">
+    Chain SDKs are optional peer dependencies loaded lazily, so a codec-only or
+    single-chain consumer never pulls them.
+  </Card>
+</CardGrid>
+
+## Where to go next
+
+<CardGrid>
+  <Card title="Learn" icon="open-book">
+    New here? The [Quickstart](/getting-started/quickstart/) takes you from
+    install to a verified round-trip.
+  </Card>
+  <Card title="Do a task" icon="pencil">
+    The guides cover [EVM](/guides/evm/), [Solana](/guides/solana/),
+    [error handling](/guides/errors/), and [resuming after a crash](/guides/resume/).
+  </Card>
+  <Card title="Understand" icon="information">
+    [How routing works](/concepts/how-it-works/) explains the commitment model and
+    the cross-chain flow.
+  </Card>
+  <Card title="Look it up" icon="list-format">
+    The [API reference](/reference/) is generated from the SDK source.
+  </Card>
+</CardGrid>
