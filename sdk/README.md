@@ -189,11 +189,15 @@ try {
 }
 ```
 
-| Error | Thrown by | Fields | Meaning |
-|-------|-----------|--------|---------|
-| `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload (e.g. no pending intent, blob-id mismatch). |
-| `ProofTimeoutError` | `awaitProof`, `store` | `intentId`, `timeoutMs` | The intent did not execute within the timeout. It may still execute; re-poll with `awaitProof(intentId)`. |
-| `BosphorError` | base class | (none) | Superclass of every SDK error. |
+Every error carries two fields that are part of the stable API, not the message: a
+machine-readable `code` string (the message may change; the code will not) and a
+`retryable` boolean saying whether retrying the same call could succeed.
+
+| Error | `code` | Thrown by | Fields | `retryable` |
+|-------|--------|-----------|--------|-------------|
+| `RelayerUploadError` | `RELAYER_UPLOAD_FAILED` | `upload`, `store` | `status`, `reason`, `intentId` | `true` for a 404 (watch-lag race) or 5xx; `false` for a terminal 4xx (already executed, expired, bad blob). |
+| `ProofTimeoutError` | `PROOF_TIMEOUT` | `awaitProof`, `store` | `intentId`, `timeoutMs` | `true` — the intent may still execute; re-poll with `awaitProof(intentId)`. |
+| `BosphorError` | `BOSPHOR_ERROR` | base class | `code`, `retryable` | `false` by default. Superclass of every SDK error. |
 
 The errors are exported from the core `@bosphor/sdk` and from both chain subpaths.
 
