@@ -11,9 +11,14 @@ export default defineConfig({
       title: 'Bosphor SDK',
       description:
         'TypeScript SDK for Bosphor: submit cross-chain storage intents from EVM or Solana and route them to Walrus.',
-      logo: { src: './src/assets/logo.svg', replacesTitle: false },
-      favicon: '/favicon.svg',
+      logo: { src: './src/assets/bosphor-mark.png', replacesTitle: false },
+      favicon: '/bosphor-mark.png',
       customCss: ['./src/styles/brand.css'],
+      // Light-only, like the dApp: pin the code blocks to a light theme so they
+      // match the palette even when the visitor's system prefers dark.
+      expressiveCode: { themes: ['github-light'] },
+      // Remove the dark/light toggle (the site is light only).
+      components: { ThemeSelect: './src/components/EmptyThemeSelect.astro' },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/riva-labs/bosphor' },
       ],
