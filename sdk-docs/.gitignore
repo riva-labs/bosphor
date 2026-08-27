@@ -1,0 +1,12 @@
+# build output
+dist/
+# generated content (TypeDoc API reference, regenerated on every build)
+src/content/docs/reference/
+# astro
+.astro/
+# deps
+node_modules/
+# misc
+.DS_Store
+npm-debug.log*
+.wrangler/

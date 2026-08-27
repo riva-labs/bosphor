@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bosphor-sdk-docs",
+  "compatibility_date": "2026-06-09",
+  // Serves the SDK docs at sdk.bosphor.xyz. The zone bosphor.xyz must be on the
+  // same Cloudflare account; wrangler binds the custom domain on deploy.
+  "routes": [
+    {
+      "pattern": "sdk.bosphor.xyz",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "404-page"
+  },
+  "compatibility_flags": ["nodejs_compat"]
+}
