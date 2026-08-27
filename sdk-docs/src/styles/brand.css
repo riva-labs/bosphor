@@ -89,7 +89,7 @@ h1,
   font-size: 1.15rem;
 }
 /* Starlight sizes heading wrappers to the heading font, then adds a 1.5em top
-   margin (anchor-links.css) — ~52px above an h2, which reads as dead air on
+   margin (anchor-links.css), ~52px above an h2, which reads as dead air on
    dense TypeDoc reference pages. Pin the wrapper font-size to our heading sizes
    and use a fixed, tighter section gap. */
 .sl-markdown-content .sl-heading-wrapper.level-h2 {
