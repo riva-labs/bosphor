@@ -64,44 +64,57 @@
   --sl-text-code: 0.875em;
 }
 
-/* Headings: Inter, semibold, tight tracking. Restrained sizes (no display
-   black), matching the Mysten/Fumadocs hierarchy. */
+/* Headings: Inter, semibold, no display weight and no negative tracking, so
+   they read light and clean. Sizes match sdk.mystenlabs.com exactly:
+   h1 28px, h2 24px, h3 20px, all weight 600. */
 :is(h1, h2, h3, h4, h5, h6),
 .site-title,
 .sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--sl-font);
   color: var(--sl-color-white);
-  letter-spacing: -0.014em;
+  letter-spacing: normal;
   font-weight: 600;
 }
 h1,
 .content-panel h1,
 .sl-markdown-content h1 {
-  font-weight: 700;
-  font-size: 1.85rem;
-  line-height: 1.2;
+  font-weight: 600;
+  font-size: 1.75rem;
+  line-height: 1.3;
 }
 .sl-markdown-content h2 {
-  font-size: 1.4rem;
+  font-size: 1.5rem;
   padding-top: 0;
 }
 .sl-markdown-content h3 {
-  font-size: 1.15rem;
+  font-size: 1.25rem;
 }
 /* Starlight sizes heading wrappers to the heading font, then adds a 1.5em top
    margin (anchor-links.css), ~52px above an h2, which reads as dead air on
    dense TypeDoc reference pages. Pin the wrapper font-size to our heading sizes
    and use a fixed, tighter section gap. */
 .sl-markdown-content .sl-heading-wrapper.level-h2 {
-  font-size: 1.4rem;
+  font-size: 1.5rem;
 }
 .sl-markdown-content .sl-heading-wrapper.level-h3 {
-  font-size: 1.15rem;
+  font-size: 1.25rem;
 }
 .sl-markdown-content
   :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper)
   + .sl-heading-wrapper {
-  margin-top: 1.6rem;
+  margin-top: 2rem;
+}
+
+/* TypeDoc emits <hr> between every member (property, method), which reads as
+   arbitrary lines that sdk.mystenlabs.com does not have. Drop them and lean on
+   heading spacing to separate members instead. */
+.sl-markdown-content hr {
+  display: none;
+}
+/* With the rules gone, give each member heading room to breathe so the blocks
+   stay visually distinct. */
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+  margin-top: 2rem;
 }
 /* Tighten the title-to-content gap: Starlight's two stacked content panels
    add ~48px of combined padding, which reads as dead air on sparse (TypeDoc
@@ -198,6 +211,21 @@ starlight-toc nav ul {
   border-radius: 0.3rem;
   padding: 0.15em 0.38em;
   font-weight: 500;
+}
+
+/* TypeDoc renders each member's type signature as a <blockquote>, which
+   Starlight gives a left accent bar. That reads as another stray line, so
+   present the signature as a subtle filled chip instead (no bar, no quote). */
+.sl-markdown-content blockquote {
+  border-left: none;
+  background: var(--sl-color-bg-sidebar);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  margin-inline-start: 0;
+  font-style: normal;
+}
+.sl-markdown-content blockquote > * {
+  margin-top: 0;
 }
 
 /* Cards (landing CardGrid): white, hairline, flat with the faintest lift.
