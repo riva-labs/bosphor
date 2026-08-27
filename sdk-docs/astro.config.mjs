@@ -13,7 +13,16 @@ export default defineConfig({
         'TypeScript SDK for Bosphor: submit cross-chain storage intents from EVM or Solana and route them to Walrus.',
       logo: { src: './src/assets/bosphor-mark.png', replacesTitle: false },
       favicon: '/bosphor-mark.png',
-      customCss: ['./src/styles/brand.css'],
+      // Self-host the fonts (bundled by Astro, served same-origin) instead of a
+      // render-blocking Google Fonts @import. That import stalls text rendering
+      // when fonts.googleapis.com is slow or blocked on the visitor's network.
+      customCss: [
+        '@fontsource-variable/inter',
+        '@fontsource/jetbrains-mono/400.css',
+        '@fontsource/jetbrains-mono/500.css',
+        '@fontsource/jetbrains-mono/600.css',
+        './src/styles/brand.css',
+      ],
       // Light-only: pin the code blocks to a light theme, and neutralise
       // expressive-code's dark "terminal" frame so bash and ts blocks look the
       // same, clean light card (no macOS-style dark title bar).
