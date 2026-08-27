@@ -1,27 +1,19 @@
 ---
 title: Bosphor SDK
 description: Submit cross-chain storage intents from EVM or Solana and route them to Walrus, with a verifiable proof back on the origin chain.
-template: splash
-hero:
-  title: Making permanence portable
-  tagline: Store a file on Walrus from an EVM or Solana wallet, over LayerZero, and get a verifiable proof back on the origin chain. One package, one call.
-  image:
-    file: ../../assets/mascot-peek.png
-    alt: The Bosphor mascot peeking over a block
-  actions:
-    - text: Quickstart
-      link: /getting-started/quickstart/
-      icon: right-arrow
-      variant: primary
-    - text: View on GitHub
-      link: https://github.com/riva-labs/bosphor
-      icon: external
-      variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Install
+TypeScript SDK for building on Bosphor. Store a file on Walrus from an EVM or
+Solana wallet, over LayerZero, and get a verifiable proof back on the origin
+chain. One package, one call.
+
+## Installation
+
+The SDK ships as ESM. Install it alongside the peer packages for the chain you
+target. Chain SDKs are optional peer dependencies, loaded lazily, so a
+codec-only or single-chain consumer never pulls the ones it does not use.
 
 ```bash
 # EVM path
@@ -31,7 +23,23 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
 ```
 
-<CardGrid stagger>
+## Quick start
+
+Point the client at the relayer and a wallet, then call `store`. The whole
+cross-chain flow runs in one call and returns a result verified against
+on-chain state.
+
+```ts
+const result = await client.store(bytes, { epochs: 5 });
+// { intentId, blobId, endEpoch }
+```
+
+The [Quickstart](/getting-started/quickstart/) takes you from install to a
+verified round-trip.
+
+## Why the SDK
+
+<CardGrid>
   <Card title="One call" icon="rocket">
     `await client.store(bytes, { epochs })` runs the whole cross-chain flow and
     returns `{ intentId, blobId, endEpoch }`, verified against on-chain state.
