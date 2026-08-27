@@ -238,14 +238,3 @@ site-search button {
   border-radius: 0.5rem;
   color: var(--sl-color-gray-3);
 }
-
-/* Announcement banner: subtle gray strip, like Mysten's top bar. */
-.sl-banner {
-  background: var(--sl-color-bg-sidebar);
-  border-bottom: 1px solid var(--sl-color-hairline);
-  color: var(--sl-color-gray-2);
-  font-size: 0.8125rem;
-  font-weight: 450;
-  padding: 0.55rem 1rem;
-  --sl-color-text-accent: var(--sl-color-accent-high);
-}
