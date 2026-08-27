@@ -3,9 +3,9 @@
    white content ground, a cool light-gray sidebar, Inter throughout, restrained
    semibold headings (no display black), thin hairlines, and one blue accent
    (Bosphor's brand blue) for links, active state, and inline code.
-   Light only, by design. */
-
-@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..600&family=JetBrains+Mono:wght@400;500;600&display=swap");
+   Light only, by design. Fonts are self-hosted via @fontsource (wired in
+   astro.config customCss), so there is no external, render-blocking font
+   request that could leave text unrendered on a slow or restricted network. */
 
 /* Force the light palette regardless of the visitor's system theme: apply the
    same tokens to base, light, and dark so the site is always light (the code
@@ -52,7 +52,7 @@
   --sl-color-red-high: #a5423f;
 
   /* Fonts: Inter for text (like Mysten), JetBrains Mono for code. */
-  --sl-font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sl-font: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   color-scheme: light;
@@ -118,10 +118,12 @@ h1,
 }
 /* Tighten the title-to-content gap: Starlight's two stacked content panels
    add ~48px of combined padding, which reads as dead air on sparse (TypeDoc
-   reference) pages. */
+   reference) pages. Also drop the divider Starlight draws between the title
+   panel and the content panel, a stray line sdk.mystenlabs.com does not have. */
 .content-panel {
   padding-top: 1.25rem;
   padding-bottom: 1.25rem;
+  border-top: none;
 }
 /* Page subtitle / lead paragraph under the H1, muted like Mysten's. */
 .content-panel .sl-markdown-content > p:first-of-type,
@@ -272,10 +274,58 @@ starlight-toc nav ul {
    overrides in astro.config). Inline scrollbars stay subtle. */
 .expressive-code .frame {
   border-radius: 0.5rem;
+  /* The frame's own `position: relative` is lost to Expressive Code's reset in
+     this build; without it the absolutely-positioned copy button escapes to the
+     viewport edge. Re-anchor it here. */
+  position: relative;
 }
 .expressive-code .frame pre {
   border: 1px solid var(--sl-color-hairline);
   background: var(--sl-color-gray-7);
+}
+
+/* Copy button: in this Starlight + Expressive Code build the button's own CSS
+   (size, background, and the --ec-frm-copyIcon that draws the clipboard glyph)
+   never applies, so it collapses to ~6px with no icon and is invisible. Rebuild
+   it self-contained here (unlayered rules win): a bordered chip with our own
+   clipboard SVG, so it does not depend on any --ec-frm-* variable. */
+.expressive-code .copy {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-end: 0.5rem;
+  display: flex;
+}
+.expressive-code .copy button {
+  position: relative;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.4rem;
+  background: var(--sl-color-bg);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.expressive-code .frame:hover .copy button,
+.expressive-code .copy button:focus-visible {
+  opacity: 1;
+}
+.expressive-code .copy button:hover {
+  border-color: var(--sl-color-accent);
+  background: var(--sl-color-accent-low);
+}
+.expressive-code .copy button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: 0.5rem;
+  background-color: var(--sl-color-gray-3);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.expressive-code .copy button:hover::after {
+  background-color: var(--sl-color-accent-high);
 }
 
 /* Tables: hairline grid, cool-gray header, faint zebra, rounded container. */
