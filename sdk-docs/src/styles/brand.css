@@ -83,11 +83,32 @@ h1,
 }
 .sl-markdown-content h2 {
   font-size: 1.4rem;
-  margin-top: 2.2rem;
   padding-top: 0;
 }
 .sl-markdown-content h3 {
   font-size: 1.15rem;
+}
+/* Starlight sizes heading wrappers to the heading font, then adds a 1.5em top
+   margin (anchor-links.css), ~52px above an h2, which reads as dead air on
+   dense TypeDoc reference pages. Pin the wrapper font-size to our heading sizes
+   and use a fixed, tighter section gap. */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  font-size: 1.4rem;
+}
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+  font-size: 1.15rem;
+}
+.sl-markdown-content
+  :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper)
+  + .sl-heading-wrapper {
+  margin-top: 1.6rem;
+}
+/* Tighten the title-to-content gap: Starlight's two stacked content panels
+   add ~48px of combined padding, which reads as dead air on sparse (TypeDoc
+   reference) pages. */
+.content-panel {
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
 }
 /* Page subtitle / lead paragraph under the H1, muted like Mysten's. */
 .content-panel .sl-markdown-content > p:first-of-type,
