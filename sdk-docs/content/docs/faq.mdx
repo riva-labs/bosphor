@@ -24,7 +24,7 @@ The relayer only accepts bytes once its watcher has seen your on-chain intent, a
 short lag after you submit. `store()` retries past that window internally. If you
 drive the steps yourself, retry the upload rather than failing the flow.
 
-## `ProofTimeoutError` — is my file lost?
+## `ProofTimeoutError`, is my file lost?
 
 No. It means the proof had not landed **yet**, not that the intent failed. The
 intent is on-chain and the bytes are with the relayer, so re-poll:
