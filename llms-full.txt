@@ -1455,6 +1455,23 @@ Consecutive Sui transactions that modify the same shared object (like `ExecutorC
 
 Once an intent is submitted on EVM, there is no mechanism for the sender to cancel it. The intent will either be fulfilled (if the relayer processes it before the deadline) or expire silently.
 
+## Return proof uses a trusted confirmation on testnet
+
+The Sui→origin proof leg has two paths: the pure LayerZero return
+(`lz_send_proof`) and an owner-gated fallback (`confirmExecution` on EVM,
+`confirm_execution` on Solana) that delivers the identical proof bytes. On the
+current Sui testnet the pure-LZ path aborts inside the ULN send flow with
+`EUnauthorized` ([#272](https://github.com/riva-labs/bosphor/issues/272)). The
+LayerZero-v2 Sui source we build against is already at the latest revision, so
+this is a drift between that source and the on-chain testnet ULN/endpoint that
+LayerZero upgraded independently, not a version we can re-pin.
+
+The relayer detects the abort and falls back to the trusted confirmation, so the
+round-trip still completes with the same `IntentExecuted` proof. The forward leg
+remains fully DVN-verified. The trust-minimized return path is expected to be
+restored once the testnet LZ infra and its published source realign; the
+fallback is confined to the relayer and requires no contract change to remove.
+
 ## Testnet vs. mainnet differences
 
 - Bosphor operates its own LayerZero DVN for the cross-chain path, so verification no longer depends on a single third-party DVN. Mainnet deployments may use different DVN configurations.
