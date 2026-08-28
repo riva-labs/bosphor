@@ -265,6 +265,28 @@ describe('IntentProcessor durable queue', () => {
     expect(walrus.upload).not.toHaveBeenCalled();
   });
 
+  // #271: an upload accepted AFTER IntentReceived must still get stored. In the
+  // durable queue this is inherent - the received-but-no-bytes row stays due
+  // (its next_attempt_at is never advanced), so the tick keeps polling it and
+  // stores it the moment the late bytes land. This locks that ordering in.
+  it('stores an intent whose bytes arrive after IntentReceived (late ingest)', async () => {
+    const { proc, staged, walrus, sui } = build();
+
+    // Tick 1: IntentReceived has fired but the out-of-band upload has not landed.
+    staged.drainDue.mockResolvedValueOnce([makeRow({ hasBytes: false })]);
+    await proc.tick();
+    expect(walrus.upload).not.toHaveBeenCalled(); // nothing to store yet
+
+    // The late upload lands (ingest -> upsertBytes); the same row is now ready.
+    staged.drainDue.mockResolvedValueOnce([makeRow({ hasBytes: true })]);
+    await proc.tick();
+
+    // Tick 2 stores it end to end, no stall.
+    expect(walrus.upload).toHaveBeenCalledTimes(1);
+    expect(sui.executeStore).toHaveBeenCalledTimes(1);
+    expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
   it('bounds concurrency to STORE_CONCURRENCY per tick', async () => {
     const rows = Array.from({ length: 7 }, (_, i) => makeRow({ intentId: `0x${i}` }));
     const { proc, staged, walrus } = build(rows);
