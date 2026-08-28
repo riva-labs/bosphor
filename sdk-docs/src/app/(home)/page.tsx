@@ -15,6 +15,8 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+      {/* No-JS / crawler fallback: React 19 hoists this into <head>. */}
+      <meta httpEquiv="refresh" content="1; url=/docs" />
       <p className="text-fd-muted-foreground text-sm">Redirecting to the docs…</p>
       <Link href="/docs" className="text-fd-primary font-medium underline">
         Open the Bosphor SDK docs

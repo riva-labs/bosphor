@@ -13,13 +13,49 @@ The SDK ships as ESM. Install it alongside the peer packages for the chain you
 target. Chain SDKs are optional peer dependencies, loaded lazily, so a
 codec-only or single-chain consumer never pulls the ones it does not use.
 
+<Tabs groupId="package-manager" persist items={['npm', 'pnpm', 'yarn', 'bun']}>
+
+<Tab value="npm">
 ```bash
 # EVM path
 npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
-
 # Solana path
 npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
 ```
+</Tab>
+
+<Tab value="pnpm">
+```bash
+# EVM path
+pnpm add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+pnpm add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="yarn">
+```bash
+# EVM path
+yarn add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+yarn add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="bun">
+```bash
+# EVM path
+bun add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+bun add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+</Tabs>
+
+<Callout title="Node 22+">
+The SDK is ESM-only and targets Node.js 22 or newer.
+</Callout>
 
 ## Quick start
 
