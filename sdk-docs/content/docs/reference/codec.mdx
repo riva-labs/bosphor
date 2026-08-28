@@ -1,0 +1,26 @@
+---
+title: Commitment codec
+description: The 49-byte commitment shape, its encode/decode functions, and the intent-id derivation.
+---
+
+The commitment is the fixed 49-byte payload that travels over LayerZero. See
+[How routing works](/docs/how-it-works) for the model. The table below is
+generated from the SDK source.
+
+## Commitment
+
+<AutoTypeTable path="sdk/src/commitment-codec.ts" name="Commitment" />
+
+## Functions
+
+- `encodeCommitment(c)`: packs a `Commitment` into its 49-byte wire form.
+- `decodeCommitment(bytes)`: parses the 49-byte wire form back into a `Commitment`.
+- `deriveIntentId(c, sender, nonce)`: the canonical keccak256 intent id, identical across EVM, Solana, and Sui.
+
+## Constants
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `COMMITMENT_BYTES` | `49` | Total commitment length on the wire. |
+| `BLOB_ID_BYTES` | `32` | Walrus blob-id length inside the commitment. |
+| `SENDER_BYTES` | `32` | Sender-address length used in the intent-id hash. |

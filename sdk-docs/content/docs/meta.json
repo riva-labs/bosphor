@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "---Start here---",
+    "index",
+    "quickstart",
+    "---Guides---",
+    "evm",
+    "solana",
+    "errors",
+    "resume",
+    "---Concepts---",
+    "how-it-works",
+    "---Reference---",
+    "reference"
+  ]
+}

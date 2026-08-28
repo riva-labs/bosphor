@@ -1,0 +1,49 @@
+---
+title: Core
+description: Types and errors exported from the @bosphor/sdk entry point.
+---
+
+These types and errors are exported from the package root and re-exported from
+both chain subpaths, so any import path works. The tables below are generated
+from the SDK source.
+
+## StoreResult
+
+The value `store()` resolves to, verified against on-chain state.
+
+<AutoTypeTable path="sdk/src/types.ts" name="StoreResult" />
+
+## EncodeOptions
+
+Options for `encode()` and the one-call `store()`.
+
+<AutoTypeTable path="sdk/src/store-flow.ts" name="EncodeOptions" />
+
+## AwaitProofOptions
+
+Polling controls for `awaitProof()`.
+
+<AutoTypeTable path="sdk/src/store-flow.ts" name="AwaitProofOptions" />
+
+## EncodedIntent
+
+The commitment produced by `encode()`, consumed by `quote()` and `submit()`.
+
+<AutoTypeTable path="sdk/src/store-flow.ts" name="EncodedIntent" />
+
+## BlobEncoding
+
+The locally computed Walrus blob descriptor.
+
+<AutoTypeTable path="sdk/src/types.ts" name="BlobEncoding" />
+
+## Errors
+
+Every failure extends `BosphorError`. See [Handle errors](/docs/errors) for the
+catch-and-narrow pattern.
+
+| Error | Fields | Meaning |
+|-------|--------|---------|
+| `RelayerUploadError` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload. |
+| `ProofTimeoutError` | `intentId`, `timeoutMs` | The intent did not execute within the timeout; re-poll `awaitProof`. |
+| `BosphorError` | `code`, `retryable` | Base class of every SDK error. |

@@ -1,0 +1,36 @@
+---
+title: EVM
+description: The EVM client, its options, and the adapter contract shape, from @bosphor/sdk/evm.
+---
+
+The EVM client wraps an `ethers` contract bound to a signer. See the
+[EVM guide](/docs/evm) for usage. The tables below are generated from the SDK
+source.
+
+## BosphorEvmClient
+
+`new BosphorEvmClient(options)` exposes `store`, and the individual steps
+`encode`, `quote`, `submit`, `upload`, and `awaitProof`. It is constructed from:
+
+## BosphorEvmClientOptions
+
+<AutoTypeTable path="sdk/src/evm/client.ts" name="BosphorEvmClientOptions" />
+
+## AdapterContract
+
+The minimal `ethers` contract surface the client calls.
+
+<AutoTypeTable path="sdk/src/evm/client.ts" name="AdapterContract" />
+
+## MessagingFee
+
+The LayerZero fee returned by `quote()`.
+
+<AutoTypeTable path="sdk/src/evm/client.ts" name="MessagingFee" />
+
+## Functions
+
+- `createBosphorClient(options)`: factory that mirrors `new BosphorEvmClient(options)`.
+- `defaultComputeBlob(data)`: the default testnet blob-id computation (lazily loads `@mysten/walrus`).
+- `base64UrlToBytes32Hex(id)`: converts a base64url Walrus blob id to a `0x` hex string.
+- `decodeProofEndEpoch(data)`: reads the end epoch from a returned proof payload.

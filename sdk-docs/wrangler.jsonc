@@ -13,8 +13,9 @@
   "observability": {
     "enabled": true
   },
+  // Next.js static export (`next build` with output: 'export') emits to `out/`.
   "assets": {
-    "directory": "dist",
+    "directory": "out",
     "not_found_handling": "404-page"
   },
   "compatibility_flags": ["nodejs_compat"]

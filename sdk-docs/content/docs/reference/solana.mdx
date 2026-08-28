@@ -1,0 +1,42 @@
+---
+title: Solana
+description: The Solana client, its options, and the chain seam, from @bosphor/sdk/solana.
+---
+
+The Solana client has the same one-line API as EVM and talks to the chain through
+a minimal `SolanaChain` seam. See the [Solana guide](/docs/solana) for usage. The
+tables below are generated from the SDK source.
+
+## BosphorSolanaClientOptions
+
+Constructor options for `new BosphorSolanaClient(options)`.
+
+<AutoTypeTable path="sdk/src/solana/client.ts" name="BosphorSolanaClientOptions" />
+
+## SolanaChain
+
+The structural seam the client submits and reads through. The default backend is
+built by `createDefaultSolanaChain`.
+
+<AutoTypeTable path="sdk/src/solana/client.ts" name="SolanaChain" />
+
+## SubmitOptions
+
+<AutoTypeTable path="sdk/src/solana/client.ts" name="SubmitOptions" />
+
+## DecodedIntentState
+
+The decoded `IntentState` PDA, the on-chain proof of record.
+
+<AutoTypeTable path="sdk/src/solana/proof.ts" name="DecodedIntentState" />
+
+## DefaultSolanaChainOptions
+
+<AutoTypeTable path="sdk/src/solana/backend.ts" name="DefaultSolanaChainOptions" />
+
+## Functions
+
+- `createBosphorSolanaClient(options)`: factory that mirrors `new BosphorSolanaClient(options)`.
+- `createDefaultSolanaChain(options)`: builds the default `SolanaChain` backend (lazily loads `@solana/web3.js`).
+- `decodeIntentState(data)` / `readSolanaProof(data)`: decode the `IntentState` account bytes.
+- `BOSPHOR_PROGRAM_ID`, `INTENT_STATE_LEN`: the program id and account length constants.
