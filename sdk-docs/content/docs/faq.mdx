@@ -1,0 +1,62 @@
+---
+title: Troubleshooting & FAQ
+description: The failures you will actually hit with the Bosphor SDK, and how to resolve each one.
+---
+
+<FaqStructuredData
+  items={[
+    { q: 'Why does upload fail with a 404 right after submit?', a: 'The relayer only accepts bytes once its watcher has seen your on-chain intent, a short lag after you submit. store() retries past that window internally; if you drive the steps yourself, retry the upload rather than failing the flow.' },
+    { q: 'Does a ProofTimeoutError mean my file was lost?', a: 'No. It means the proof had not landed yet, not that the intent failed. The intent is on-chain and the bytes are with the relayer, so re-poll awaitProof(intentId) with a longer timeout.' },
+    { q: 'Does the SDK ever see my private key?', a: 'No. The EVM client takes an ethers contract bound to a signer; the Solana client takes a wallet. Signing stays in your wallet, so browser and sponsored-transaction flows work unchanged.' },
+    { q: 'Why do I get a blob-id mismatch?', a: 'The blob id the SDK commits to on-chain must equal the id the relayer recomputes from the uploaded bytes. This happens if the bytes uploaded differ from the bytes encoded, or if a custom computeBlob returns a different id. Use the same bytes and the same computeBlob.' },
+    { q: 'Can I use the SDK on mainnet?', a: 'There is no mainnet deployment yet. The default computeBlob is fixed to testnet Walrus parameters; for mainnet, inject your own computeBlob and point the client at your own adapter.' },
+    { q: 'Which Node version do I need?', a: 'Node.js 22 or newer. The SDK is ESM-only.' },
+  ]}
+/>
+
+The failures you will actually hit, and what to do about each. See
+[Handle errors](/docs/errors) for the typed-error model and
+[Resume after a crash](/docs/resume) for recovery.
+
+## `upload` fails with a 404 right after `submit`
+
+The relayer only accepts bytes once its watcher has seen your on-chain intent, a
+short lag after you submit. `store()` retries past that window internally. If you
+drive the steps yourself, retry the upload rather than failing the flow.
+
+## `ProofTimeoutError`, is my file lost?
+
+No. It means the proof had not landed **yet**, not that the intent failed. The
+intent is on-chain and the bytes are with the relayer, so re-poll:
+
+```ts
+const { blobId, endEpoch } = await client.awaitProof(intentId, { timeoutMs: 300_000 });
+```
+
+## Does the SDK ever see my private key?
+
+No. The EVM client takes an `ethers` contract bound to a **signer**; the Solana
+client takes a wallet. Signing stays in your wallet, so browser wallet
+integrations and sponsored (gasless) transactions work unchanged.
+
+## Blob-id mismatch
+
+The blob id the SDK commits to on-chain must equal the id the relayer recomputes
+from the uploaded bytes. A mismatch means the uploaded bytes differ from the
+encoded bytes, or a custom `computeBlob` returned a different id. Use the same
+bytes and the same `computeBlob` end to end.
+
+## Can I use the SDK on mainnet?
+
+Not yet. There is no mainnet deployment. The default `computeBlob` is fixed to
+testnet Walrus parameters; for mainnet, inject your own `computeBlob` and point
+the client at your own adapter. See [Store from EVM](/docs/evm#blob-id-computation).
+
+## Which Node version do I need?
+
+Node.js **22 or newer**. The SDK is ESM-only.
+
+## `ERR_REQUIRE_ESM` / import errors
+
+`@bosphor/sdk` is ESM-only. Use ESM (`import`), Node 22+, and `"type": "module"`
+(or `.mjs`). It cannot be `require()`-d from CommonJS.

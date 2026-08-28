@@ -7,6 +7,8 @@ const docs = defineDocs({
   dir: 'content/docs',
   docs: {
     schema: pageSchema,
+    // Git-based last-modified time, surfaced as a "Last updated" line per page.
+    lastModified: true,
     postprocess: {
       includeProcessedMarkdown: true,
     },
