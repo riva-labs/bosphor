@@ -6,31 +6,41 @@
 
 > Cross-chain storage intent routing for [Walrus](https://walrus.xyz).
 
-Bosphor routes storage intents from any EVM chain to Walrus on Sui via
-LayerZero v2, returning verifiable proof of execution to the origin chain.
+Bosphor routes storage intents from any EVM chain or Solana to Walrus on Sui via
+LayerZero v2, returning verifiable proof of execution to the origin chain. The
+cross-chain message carries only a compact commitment (the Walrus blob id, size,
+encoding, and storage duration); the file itself travels out-of-band over HTTP,
+so the cross-chain fee is flat regardless of file size.
+
+The developer-facing entry point is the TypeScript SDK, `@bosphor/sdk`, with one
+`store()` call for both EVM and Solana. Its guides and API reference live at
+**[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
 
 ## How It Works (Two-Step Verification)
 
 ```mermaid
 flowchart LR
-    subgraph step1 ["Step 1: Intent Delivery (EVM → Sui)"]
-        EVM1["EVM"] -- "submitIntent" --> LZ1["LayerZero v2\n(DVN)"] -- "lz_receive" --> Sui1["Sui"]
+    subgraph step1 ["Step 1: Intent Delivery (EVM / Solana → Sui)"]
+        EVM1["EVM / Solana"] -- "submit commitment" --> LZ1["LayerZero v2\n(DVN)"] -- "lz_receive" --> Sui1["Sui"]
     end
-    subgraph step2 ["Step 2: Proof Verification (Sui → EVM)"]
-        Sui2["Sui"] -- "lz_send_proof" --> LZ2["LayerZero v2\n(DVN)"] -- "_lzReceive" --> EVM2["EVM"]
+    subgraph step2 ["Step 2: Proof Verification (Sui → origin)"]
+        Sui2["Sui"] -- "lz_send_proof" --> LZ2["LayerZero v2\n(DVN)"] -- "_lzReceive" --> EVM2["EVM / Solana"]
         Walrus[("Walrus\n(deletable blob)")] --> Sui2
     end
 ```
 
-1. **Step 1 (Intent Delivery):** User calls `submitIntent(payload, deadline)` on EVM. LayerZero DVN verifies and delivers the message to Sui.
-2. **Step 2 (Proof Verification):** Relayer uploads the payload to Walrus, calls `execute_store` on Sui, then sends DVN-verified proof back to EVM via LayerZero (`lz_send_proof`).
+1. **Step 1 (Intent Delivery):** The SDK computes the Walrus blob id locally, and the origin contract submits a compact **commitment** (blob id, size, encoding, storage duration, deadline). LayerZero DVN verifies and delivers it to Sui. The file bytes reach the relayer **out-of-band** over HTTP, never through the bridge.
+2. **Step 2 (Proof Verification):** The relayer stores the bytes on Walrus; `execute_store` on Sui asserts the stored blob id and end epoch match the commitment; then a DVN-verified proof returns to the origin chain (`lz_send_proof`), which verifies the returned blob id equals the committed one.
 
 ## Status
 
 | Component | Status |
 |-----------|--------|
-| EVM Adapter (Sepolia) | Deployed |
+| EVM Adapter (Sepolia) | Deployed (reference-commitment) |
+| Solana Adapter (Devnet) | Deployed (round-trip live) |
 | Sui LZ OApp (Testnet) | Deployed |
+| TypeScript SDK (`@bosphor/sdk`) | Published (EVM + Solana, `store()`) |
+| SDK docs (sdk.bosphor.xyz) | Live (Fumadocs) |
 | Relayer | Running (NestJS) |
 | LZ Executor | Verified (DELIVERED) |
 | Monitoring stack | Live (Prometheus + Grafana) |
@@ -57,6 +67,23 @@ npm run new-deployment
 
 See [website/docs/deployment.md](website/docs/deployment.md) for detailed setup instructions.
 
+## Using the SDK
+
+To integrate Bosphor into an app, use `@bosphor/sdk` rather than the raw
+contracts. One `store()` call runs the whole cross-chain flow and returns a
+result verified against on-chain state.
+
+```bash
+npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+
+```ts
+const { intentId, blobId, endEpoch } = await client.store(bytes, { epochs: 5 });
+```
+
+Full guides, the Solana path, and the API reference are at
+**[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
+
 ## Architecture
 
 - `contracts/evm/src/BosphorAdapter.sol`: EVM OApp (LayerZero v2)
@@ -68,6 +95,7 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 
 ## Documentation
 
+- [SDK docs (sdk.bosphor.xyz)](https://sdk.bosphor.xyz): the TypeScript SDK, guides for EVM and Solana, and the generated API reference
 - [Architecture](https://docs.bosphor.xyz/architecture): system design and message flow
 - [Contract Interface](https://docs.bosphor.xyz/contract-interface): EVM and Sui function reference
 - [Deployment](https://docs.bosphor.xyz/deployment): setup and deployment guide
