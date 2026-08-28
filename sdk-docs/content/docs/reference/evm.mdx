@@ -10,7 +10,21 @@ source.
 ## BosphorEvmClient
 
 `new BosphorEvmClient(options)` exposes `store`, and the individual steps
-`encode`, `quote`, `submit`, `upload`, and `awaitProof`. It is constructed from:
+`encode`, `quote`, `submit`, `upload`, and `awaitProof`.
+
+### Methods
+
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `store` | `store(data: Uint8Array, opts?: EncodeOptions & AwaitProofOptions)` | `Promise<StoreResult>` |
+| `encode` | `encode(data: Uint8Array, opts?: EncodeOptions)` | `Promise<EncodedIntent>` |
+| `quote` | `quote(encoded: EncodedIntent)` | `Promise<MessagingFee>` |
+| `submit` | `submit(encoded: EncodedIntent, fee: MessagingFee)` | `Promise<{ intentId: Hex }>` |
+| `upload` | `upload(intentId: Hex, data: Uint8Array, opts?: { signal?: AbortSignal })` | `Promise<void>` |
+| `awaitProof` | `awaitProof(intentId: Hex, opts?: AwaitProofOptions)` | `Promise<{ blobId: Hex; endEpoch: bigint }>` |
+
+`store()` runs `encode → quote → submit → upload → awaitProof` and only resolves
+once the result is verified on-chain. It is constructed from:
 
 ## BosphorEvmClientOptions
 

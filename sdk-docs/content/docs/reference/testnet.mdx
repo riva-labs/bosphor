@@ -1,0 +1,45 @@
+---
+title: Testnet reference
+description: The deployed testnet addresses, LayerZero endpoint IDs, and relayer URL, ready to paste.
+---
+
+Everything you need to run against testnet. These values are fixed for the
+current deployment.
+
+<Callout type="info" title="Testnet only">
+These are Sepolia and Sui testnet addresses. There is no mainnet deployment yet;
+for mainnet, inject your own `computeBlob` and point the client at your own
+adapter. See [Store from EVM](/docs/evm#blob-id-computation).
+</Callout>
+
+## EVM (Sepolia)
+
+| Value | |
+|-------|--|
+| Bosphor adapter | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
+| LayerZero endpoint | `0x6EDCE65403992e310A62460808c4b910D972f10f` |
+| Sepolia EID | `40161` |
+| Destination EID (`dstEid`) | `40378` (Sui testnet) |
+
+## Sui (testnet)
+
+| Value | |
+|-------|--|
+| Package | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |
+| Sui testnet EID | `40378` |
+
+## Relayer
+
+| Value | |
+|-------|--|
+| Testnet relayer URL | `https://api.bosphor.xyz/testnet` |
+
+## Client config, filled in
+
+```ts title="testnet.ts"
+const client = new BosphorEvmClient({
+  adapter, // ethers.Contract at 0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10
+  relayerUrl: 'https://api.bosphor.xyz/testnet',
+  dstEid: 40378,
+});
+```

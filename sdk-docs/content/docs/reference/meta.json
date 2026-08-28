@@ -1,4 +1,4 @@
 {
   "title": "API reference",
-  "pages": ["core", "evm", "solana", "codec"]
+  "pages": ["testnet", "core", "evm", "solana", "codec"]
 }

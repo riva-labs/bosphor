@@ -16,13 +16,41 @@ You need:
 
 - **Node.js 22+** (the SDK is ESM-only).
 - A funded **Sepolia** wallet (testnet ETH from any faucet).
-- The deployed testnet adapter address and the relayer URL (below).
+- Your own Sepolia **RPC URL** (Alchemy, Infura, or a public endpoint).
+
+The deployed testnet addresses are fixed and listed on the
+[Testnet reference](/docs/reference/testnet); the values below are ready to
+paste.
 
 ## 1. Install
 
+<Tabs groupId="package-manager" persist items={['npm', 'pnpm', 'yarn', 'bun']}>
+
+<Tab value="npm">
 ```bash
 npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 ```
+</Tab>
+
+<Tab value="pnpm">
+```bash
+pnpm add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="yarn">
+```bash
+yarn add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="bun">
+```bash
+bun add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+</Tab>
+
+</Tabs>
 
 `@bosphor/sdk` is the only hard dependency. `ethers` and the `@mysten/*` packages
 are optional peers: `ethers` signs the intent and the `@mysten/*` pair computes the
@@ -30,12 +58,18 @@ Walrus blob id locally. Install only what your path needs.
 
 ## 2. Construct the client
 
-```ts
+The adapter address and destination EID below are the live Sepolia testnet
+values. Supply your own `RPC_URL` and key.
+
+```ts title="client.ts"
 import { ethers } from 'ethers';
 import { BosphorEvmClient, type AdapterContract } from '@bosphor/sdk/evm';
 
-const provider = new ethers.JsonRpcProvider(RPC_URL);
-const signer = new ethers.Wallet(PRIVATE_KEY, provider);
+// Live Sepolia testnet deployment.
+const ADAPTER_ADDRESS = '0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10';
+
+const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 const contract = new ethers.Contract(ADAPTER_ADDRESS, ADAPTER_ABI, signer);
 
 const client = new BosphorEvmClient({
@@ -45,8 +79,13 @@ const client = new BosphorEvmClient({
 });
 ```
 
-The SDK never takes a private key. It takes an `ethers` contract bound to a
-**signer**, so wallet integrations and sponsored transactions work unchanged.
+`ADAPTER_ABI` is the adapter's `submitIntent` / `confirmExecution` ABI, exported
+from the contracts package (or copy it from the verified contract on Etherscan).
+
+<Callout type="info" title="The SDK never sees your private key">
+It takes an `ethers` contract bound to a **signer**, so browser wallet
+integrations and sponsored (gasless) transactions work unchanged.
+</Callout>
 
 ## 3. Store a file in one call
 
@@ -95,9 +134,23 @@ try {
 
 See [Handle errors](/docs/errors) for the full model.
 
+<Callout type="warn" title="A timeout is not a loss">
+`ProofTimeoutError` means the proof had not landed yet, not that the intent
+failed. The intent is on-chain and the bytes are with the relayer, so re-poll
+`awaitProof(intentId)`. See [Resume after a crash](/docs/resume).
+</Callout>
+
+## Run the full example
+
+A runnable end-to-end script lives in the repo:
+[`sdk/examples/store-file.evm.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file.evm.ts)
+(and [`store-file.solana.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file.solana.ts)
+for the Solana path).
+
 ## Next steps
 
 - [Store from Solana](/docs/solana): the same one-line API from a Solana wallet.
 - [Resume after a crash](/docs/resume): pick a flow back up without double-spending.
 - [How routing works](/docs/how-it-works): why the fee is flat and what the
   commitment contains.
+- [Testnet reference](/docs/reference/testnet): the deployed addresses, EIDs, and endpoints.
