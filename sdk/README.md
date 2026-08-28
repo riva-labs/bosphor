@@ -266,13 +266,11 @@ nothing is fabricated on failure.
 
 ## API reference
 
-Full type signatures ship with the package as `.d.ts`, so your editor shows every
-parameter, return type, and doc comment inline. To generate browsable HTML API docs
-from the TSDoc:
+The full docs, guides for the EVM and Solana paths, and the generated API
+reference live at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
 
-```bash
-npx typedoc   # config in typedoc.json, output to docs/api
-```
+Full type signatures also ship with the package as `.d.ts`, so your editor shows
+every parameter, return type, and doc comment inline.
 
 ## Building from source
 
