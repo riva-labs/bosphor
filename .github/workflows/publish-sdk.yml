@@ -61,3 +61,22 @@ jobs:
           fi
           echo "Publishing @bosphor/sdk@${VERSION}..."
           npm publish --access public
+
+      - name: Reconcile the `latest` dist-tag to this version
+        # npm sets `latest` to whatever was published most recently, so
+        # publishing an older patch after a newer one would hijack `latest`.
+        # Pin `latest` to the version in package.json (the intended release on
+        # this ref), idempotently, so `npm install @bosphor/sdk` always resolves
+        # to it.
+        working-directory: sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          CURRENT=$(npm view "@bosphor/sdk" dist-tags.latest 2>/dev/null || echo "")
+          if [ "$CURRENT" = "$VERSION" ]; then
+            echo "latest already points to ${VERSION}; nothing to do."
+          else
+            echo "Repointing latest: ${CURRENT:-none} -> ${VERSION}"
+            npm dist-tag add "@bosphor/sdk@${VERSION}" latest
+          fi
