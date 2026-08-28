@@ -29,35 +29,33 @@ cross-chain message is a fixed 49 bytes whether the file is 1 KB or 1 GB.
 
 ```
 origin chain            LayerZero            Sui / Walrus
-──────────────          ─────────            ────────────
-submit(commitment)  ──────────────────▶  IntentReceived
-   │                                          │
-upload(bytes) ─▶ relayer ────────────────▶ store on Walrus
-   │                                          │
-   ◀────────────────────────────────────  execute_store
+--------------          ---------            ------------
+submit(commitment)  ------------------>  IntentReceived
+   |                                          |
+upload(bytes) -> relayer ----------------> store on Walrus
+   |                                          |
+   <------------------------------------  execute_store
 awaitProof: executed=true                  (proof: blobId, endEpoch)
 ```
 
 1. **submit** puts the commitment on the origin adapter and emits `IntentSubmitted`.
-2. LayerZero delivers the message to Sui, where it becomes an `IntentReceived`.
+2. LayerZero delivers the message to Sui, where it becomes an `IntentReceived` event.
 3. **upload** hands the raw bytes to the relayer out-of-band.
-4. The relayer stores the blob on Walrus and records it on Sui. The Sui side
-   verifies the stored blob's id equals the committed id, so a wrong or swapped
-   file is rejected on-chain.
-5. A proof (`blobId`, `endEpoch`) is sent back to the origin chain, where the
-   adapter marks the intent `executed`.
+4. The relayer stores the blob on Walrus and records it on Sui. The Sui side verifies
+   the stored blob's id against the committed id, so a wrong or swapped file is rejected.
+5. A proof (`blobId`, `endEpoch`) is sent back to the origin chain, where the adapter
+   marks the intent `executed`.
 6. **awaitProof** sees `executed=true` and returns the verified result.
 
 ## Why every result is verified
 
-The SDK never trusts a value it did not check. `store()` only resolves after the
-origin chain reports the intent executed and exposes the committed blob id and end
-epoch. A relayer that returns the wrong blob id cannot pass the on-chain reference
-check, so the SDK cannot hand you a fabricated result.
+The SDK never trusts a value it did not check. `store()` only returns once the origin
+chain reports the intent executed and carries the proof. A relayer that returns the
+wrong blob id cannot pass the on-chain reference check, so the SDK never exposes a
+fabricated value.
 
 ## Where the SDK fits
 
-The SDK owns the origin-chain half: computing the blob id, building and submitting
-the commitment, uploading the bytes, and polling for the proof. The relayer and the
-DVN (the LayerZero verifier) own the middle. The [API reference](/reference/)
-documents every method the SDK exposes for this.
+The SDK owns the origin-chain half: computing the blob id, building and submitting the
+commitment, uploading the bytes for the proof. The relayer and the Sui side verify
+the middle. The [API reference](/docs/quickstart) documents the surface the SDK exposes.

@@ -1,9 +1,7 @@
 ---
 title: Bosphor SDK
-description: Submit cross-chain storage intents from EVM or Solana and route them to Walrus, with a verifiable proof back on the origin chain.
+description: TypeScript SDK for Bosphor. Store a file on Walrus from an EVM or Solana wallet, over LayerZero, and get a verifiable proof back on the origin chain. One package, one call.
 ---
-
-import { Card, CardGrid } from '@astrojs/starlight/components';
 
 TypeScript SDK for building on Bosphor. Store a file on Walrus from an EVM or
 Solana wallet, over LayerZero, and get a verifiable proof back on the origin
@@ -34,46 +32,33 @@ const result = await client.store(bytes, { epochs: 5 });
 // { intentId, blobId, endEpoch }
 ```
 
-The [Quickstart](/getting-started/quickstart/) takes you from install to a
-verified round-trip.
+The [Quickstart](/docs/quickstart) takes you from install to a verified
+round-trip.
 
 ## Why the SDK
 
-<CardGrid>
-  <Card title="One call" icon="rocket">
+<Cards>
+  <Card title="One call" href="/docs/quickstart">
     `await client.store(bytes, { epochs })` runs the whole cross-chain flow and
     returns `{ intentId, blobId, endEpoch }`, verified against on-chain state.
   </Card>
-  <Card title="Flat cross-chain cost" icon="setting">
+  <Card title="Flat cross-chain cost" href="/docs/how-it-works">
     The blob id is committed on-chain and the bytes travel out-of-band, so the
-    LayerZero fee is the same for a 1&nbsp;KB file and a 1&nbsp;GB file.
+    LayerZero fee is the same for a 1 KB file and a 1 GB file.
   </Card>
-  <Card title="Same API on every chain" icon="approve-check">
+  <Card title="Same API on every chain" href="/docs/solana">
     The EVM and Solana clients are identical where they overlap; the intent id is
     the same keccak digest across EVM, Sui, and Solana.
   </Card>
-  <Card title="Lean by default" icon="puzzle">
+  <Card title="Lean by default" href="/docs/evm">
     Chain SDKs are optional peer dependencies loaded lazily, so a codec-only or
     single-chain consumer never pulls them.
   </Card>
-</CardGrid>
+</Cards>
 
 ## Where to go next
 
-<CardGrid>
-  <Card title="Learn" icon="open-book">
-    New here? The [Quickstart](/getting-started/quickstart/) takes you from
-    install to a verified round-trip.
-  </Card>
-  <Card title="Do a task" icon="pencil">
-    The guides cover [EVM](/guides/evm/), [Solana](/guides/solana/),
-    [error handling](/guides/errors/), and [resuming after a crash](/guides/resume/).
-  </Card>
-  <Card title="Understand" icon="information">
-    [How routing works](/concepts/how-it-works/) explains the commitment model and
-    the cross-chain flow.
-  </Card>
-  <Card title="Look it up" icon="list-format">
-    The [API reference](/reference/) is generated from the SDK source.
-  </Card>
-</CardGrid>
+- [Quickstart](/docs/quickstart): from install to a verified round-trip.
+- [Store from EVM](/docs/evm) and [Store from Solana](/docs/solana): the one-line API per chain.
+- [Handle errors](/docs/errors) and [Resume after a crash](/docs/resume): the failure model.
+- [How routing works](/docs/how-it-works): the commitment model and the cross-chain flow.

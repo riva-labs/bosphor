@@ -4,8 +4,8 @@ description: Submit a storage intent from an EVM wallet and drive the flow step 
 ---
 
 The EVM client wraps an `ethers` contract bound to a signer. The one-call path is
-in the [Quickstart](/getting-started/quickstart/); this guide covers the pieces you
-reach for when you need more control.
+in the [Quickstart](/docs/quickstart); this guide covers the pieces you reach for
+when you need more control.
 
 ## One call
 
@@ -71,6 +71,6 @@ setTimeout(() => ac.abort(new Error('took too long')), 30_000);
 await client.store(fileBytes, { epochs: 5, signal: ac.signal });
 ```
 
-The on-chain intent is not rolled back. See [Resume after a crash](/guides/resume/).
+The on-chain intent is not rolled back. See [Resume after a crash](/docs/resume).
 
 A runnable end-to-end script lives at `sdk/examples/store-file.evm.ts`.

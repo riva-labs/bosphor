@@ -1,12 +1,26 @@
-# build output
-dist/
-# generated content (TypeDoc API reference, regenerated on every build)
-src/content/docs/reference/
-# astro
-.astro/
 # deps
-node_modules/
+/node_modules
+
+# generated content
+.source
+
+# test & build
+/coverage
+/.next/
+/out/
+/build
+*.tsbuildinfo
+
 # misc
 .DS_Store
+*.pem
+/.pnp
+.pnp.js
 npm-debug.log*
-.wrangler/
+yarn-debug.log*
+yarn-error.log*
+
+# others
+.env*.local
+.vercel
+next-env.d.ts
