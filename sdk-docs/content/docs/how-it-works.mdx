@@ -27,16 +27,21 @@ cross-chain message is a fixed 49 bytes whether the file is 1 KB or 1 GB.
 
 ## The round-trip
 
-```
-origin chain            LayerZero            Sui / Walrus
---------------          ---------            ------------
-submit(commitment)  ------------------>  IntentReceived
-   |                                          |
-upload(bytes) -> relayer ----------------> store on Walrus
-   |                                          |
-   <------------------------------------  execute_store
-awaitProof: executed=true                  (proof: blobId, endEpoch)
-```
+<Mermaid
+  chart={`sequenceDiagram
+    autonumber
+    participant O as Origin chain
+    participant LZ as LayerZero
+    participant R as Relayer
+    participant S as Sui / Walrus
+    O->>LZ: submit(commitment)
+    LZ->>S: IntentReceived
+    O->>R: upload(bytes), out-of-band
+    R->>S: store on Walrus
+    S->>S: execute_store (verify blob id)
+    S-->>O: proof (blobId, endEpoch)
+    Note over O: awaitProof: executed = true`}
+/>
 
 1. **submit** puts the commitment on the origin adapter and emits `IntentSubmitted`.
 2. LayerZero delivers the message to Sui, where it becomes an `IntentReceived` event.

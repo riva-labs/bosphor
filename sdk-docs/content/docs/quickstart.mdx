@@ -100,9 +100,12 @@ console.log({ intentId, blobId, endEpoch });
 `store()` runs the whole path and only resolves once every step is verified
 against on-chain state:
 
-```
-encode -> quote -> submit -> upload -> awaitProof
-```
+<Mermaid
+  chart={`flowchart LR
+    A(encode) --> B(quote) --> C(submit) --> D(upload) --> E(awaitProof)
+    C -. wallet signs .-> C
+    E -. verified on-chain .-> E`}
+/>
 
 - **encode** derives the Walrus blob id locally from the bytes (no SUI, no WAL).
 - **quote** asks the adapter for the LayerZero fee.

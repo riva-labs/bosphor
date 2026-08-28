@@ -5,6 +5,7 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Step, Steps } from 'fumadocs-ui/components/steps';
 import { SdkTypeTable } from '@/lib/type-table';
 import { FaqStructuredData } from '@/components/structured-data';
+import { Mermaid } from '@/components/mermaid';
 import type { MDXComponents } from 'mdx/types';
 
 export function getMDXComponents(components?: MDXComponents) {
@@ -21,6 +22,8 @@ export function getMDXComponents(components?: MDXComponents) {
     AutoTypeTable: SdkTypeTable,
     // FAQ pages emit FAQPage JSON-LD via this component.
     FaqStructuredData,
+    // Client-rendered Mermaid diagrams.
+    Mermaid,
     ...components,
   } satisfies MDXComponents;
 }
