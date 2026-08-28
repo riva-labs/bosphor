@@ -1,0 +1,40 @@
+---
+title: Changelog
+description: Notable changes to @bosphor/sdk, newest first.
+---
+
+The current release is **`@bosphor/sdk` 0.9.0**. The full, authoritative
+changelog lives in the repo:
+[CHANGELOG.md](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md),
+and each release is tagged
+[`sdk-v*`](https://github.com/riva-labs/bosphor/tags). Highlights below.
+
+<Callout type="info" title="Pre-1.0">
+The SDK is pre-1.0. `feat` bumps the minor version and `fix` bumps the patch;
+breaking changes bump the minor while pre-1.0. Pin a version in production.
+</Callout>
+
+## 0.9.0
+
+- **feat:** stable `code` and `retryable` on the error hierarchy.
+- **fix:** Buffer-free blob-id and event decoding (works in the browser).
+
+## 0.8.0
+
+- **feat:** `computeUnitLimit` on the default Solana backend.
+
+## 0.7.0
+
+- **feat:** `AbortSignal` cancellation for `store` / `awaitProof` / `upload`.
+- **feat:** typed `BosphorError` hierarchy and shared store-flow helpers.
+- Publishable ESM build (`dist`), the error hierarchy exported from the core, and
+  a DRY store-flow shared across chains.
+
+## 0.6.0
+
+- **feat:** encode `confirm_execution` for the Solana adapter.
+
+## Earlier
+
+See the [full changelog](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md)
+for 0.5.x and earlier.

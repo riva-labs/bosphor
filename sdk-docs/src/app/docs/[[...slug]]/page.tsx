@@ -12,6 +12,7 @@ import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { gitConfig } from '@/lib/shared';
+import { PageStructuredData } from '@/components/structured-data';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   const params = await props.params;
@@ -20,9 +21,25 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
 
   const MDX = page.data.body;
   const markdownUrl = getPageMarkdownUrl(page).url;
+  const lastModified = page.data.lastModified;
+
+  // Breadcrumb trail from the page slugs (Docs → …section… → page).
+  const breadcrumb = [
+    { name: 'Docs', url: '/docs' },
+    ...page.slugs.map((_, i) => ({
+      name: page.slugs[i],
+      url: `/docs/${page.slugs.slice(0, i + 1).join('/')}`,
+    })),
+  ];
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
+      <PageStructuredData
+        title={page.data.title}
+        description={page.data.description}
+        url={page.url}
+        breadcrumb={breadcrumb}
+      />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pb-6">
@@ -40,6 +57,18 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
           })}
         />
       </DocsBody>
+      {lastModified ? (
+        <p className="text-fd-muted-foreground mt-8 border-t pt-4 text-sm">
+          Last updated{' '}
+          <time dateTime={new Date(lastModified).toISOString()}>
+            {new Date(lastModified).toLocaleDateString('en-US', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })}
+          </time>
+        </p>
+      ) : null}
     </DocsPage>
   );
 }
@@ -56,7 +85,20 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   return {
     title: page.data.title,
     description: page.data.description,
+    alternates: {
+      canonical: page.url,
+    },
     openGraph: {
+      type: 'article',
+      title: page.data.title,
+      description: page.data.description,
+      url: page.url,
+      images: getPageImageUrl(page).url,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: page.data.title,
+      description: page.data.description,
       images: getPageImageUrl(page).url,
     },
   };
