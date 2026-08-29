@@ -1157,7 +1157,7 @@
     {
       "id": 21,
       "type": "stat",
-      "title": "WAL spent on storage (MIST)",
+      "title": "Intents fulfilled (total)",
       "gridPos": {
         "h": 4,
         "w": 4,
@@ -1179,7 +1179,8 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "short",
+          "noValue": "0"
         },
         "overrides": []
       },
@@ -1193,7 +1194,7 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "justifyMode": "auto"
       },
       "targets": [
@@ -1203,7 +1204,7 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "sum by(job)(bosphor_relayer_wal_storage_cost_mist_total)",
+          "expr": "sum by(job)(bosphor_relayer_intents_processed_total{result=\"success\"})",
           "legendFormat": "{{job}}",
           "instant": true
         }
