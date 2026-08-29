@@ -108,7 +108,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -171,7 +175,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -244,7 +252,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -317,7 +329,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -390,7 +406,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -463,7 +483,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -540,7 +564,11 @@
         "colorMode": "value",
         "graphMode": "area",
         "textMode": "value_and_name",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -883,7 +911,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -947,7 +979,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1011,7 +1047,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1075,7 +1115,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1139,7 +1183,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1195,7 +1243,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "value_and_name",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1272,7 +1324,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1328,7 +1384,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
@@ -1388,7 +1448,11 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto",
-        "justifyMode": "auto"
+        "justifyMode": "auto",
+        "text": {
+          "titleSize": 15,
+          "valueSize": 30
+        }
       },
       "targets": [
         {
