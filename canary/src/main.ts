@@ -5,8 +5,8 @@ config({ path: resolve(import.meta.dirname, '../../.env') });
 import { createServer } from 'http';
 import { ethers } from 'ethers';
 import * as Sentry from '@sentry/node';
-import { CanaryMetrics } from './metrics.ts';
-import { runProbe, type ChainProbe } from './probe.ts';
+import { CanaryMetrics, type CanaryChain } from './metrics.ts';
+import { runProbe, type ChainProbe, type PreflightOutcome } from './probe.ts';
 import { createEvmProbe } from './probes/evm.ts';
 import { initSentry, reportProbeFailure } from './error-report.ts';
 
@@ -27,6 +27,10 @@ const DST_EID = Number(process.env.SUI_EID) || 40378;
 const STORAGE_EPOCHS = Number(process.env.WALRUS_STORE_EPOCHS) || 5;
 const LZ_OPTIONS = process.env.LZ_OPTIONS || '0x00030100110100000000000000000000000000030d40';
 const RELAYER_URL = process.env.RELAYER_URL || 'http://relayer:3000';
+// Wallet balances are refreshed on this fast cadence, decoupled from the probe
+// interval, so Grafana shows near-live balances instead of a value that only
+// moves once per round-trip (every CANARY_INTERVAL_MS).
+const BALANCE_REFRESH_MS = Number(process.env.CANARY_BALANCE_REFRESH_MS) || 60 * 1000;
 
 if (MAX_WAIT_MS >= INTERVAL_MS) {
   console.warn(
@@ -42,14 +46,22 @@ const metrics = new CanaryMetrics();
  * Prometheus. Never throws: a probe failure is recorded and reported, not
  * propagated, so one degraded chain cannot halt the loop.
  */
-async function runCycle(probe: ChainProbe): Promise<void> {
-  const pre = await probe.preflight();
-  if (probe.chain === 'evm') {
+/**
+ * Publish the wallet-balance (and EVM gas) gauges from a preflight result. Shared
+ * by the probe cycle and the fast balance refresher so both keep the same gauges.
+ */
+function publishBalanceGauges(chain: CanaryChain, pre: PreflightOutcome): void {
+  if (chain === 'evm') {
     metrics.setWalletBalanceEth(pre.balanceNative);
     if (pre.gasGwei !== undefined) metrics.setGasPrice(pre.gasGwei);
   } else {
     metrics.setWalletBalanceSol(pre.balanceNative);
   }
+}
+
+async function runCycle(probe: ChainProbe): Promise<void> {
+  const pre = await probe.preflight();
+  publishBalanceGauges(probe.chain, pre);
   if (!pre.ok && pre.reason) {
     metrics.recordSkip(probe.chain, pre.reason);
     console.warn(
@@ -97,6 +109,29 @@ function scheduleChain(probe: ChainProbe, intervalMs: number): void {
       metrics.recordFailure(probe.chain);
       Sentry.captureException(err);
       console.error(`[canary:${probe.chain}] unexpected error: ${err}`);
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  setInterval(() => void tick(), intervalMs);
+}
+
+/**
+ * Refresh only the balance/gas gauges on a fast cadence, independent of the probe
+ * interval, so Grafana shows near-live balances. A single-flight guard prevents
+ * overlap; a failed read is swallowed (the next tick, or the probe cycle, updates
+ * the gauge). Read-only: preflight never submits a transaction.
+ */
+function scheduleBalanceRefresh(probe: ChainProbe, intervalMs: number): void {
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      publishBalanceGauges(probe.chain, await probe.preflight());
+    } catch (err) {
+      console.warn(`[canary:${probe.chain}] balance refresh failed: ${err}`);
     } finally {
       running = false;
     }
@@ -196,6 +231,8 @@ async function main(): Promise<void> {
   });
 
   for (const probe of probes) scheduleChain(probe, INTERVAL_MS);
+  // Keep wallet balances fresh between round-trips (near-live in Grafana).
+  for (const probe of probes) scheduleBalanceRefresh(probe, BALANCE_REFRESH_MS);
 }
 
 main().catch((err) => {
