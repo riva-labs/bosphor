@@ -148,7 +148,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_checkpoint_cursor_lag"
+          "expr": "bosphor_relayer_checkpoint_cursor_lag",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -213,7 +214,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_wal_balance_wal"
+          "expr": "bosphor_relayer_wal_balance_wal",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -278,7 +280,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_sui_balance_sui"
+          "expr": "bosphor_relayer_sui_balance_sui",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -570,7 +573,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_staged_intent_active"
+          "expr": "bosphor_relayer_staged_intent_active",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -634,7 +638,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_staged_bytes"
+          "expr": "bosphor_relayer_staged_bytes",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -667,7 +672,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
@@ -694,7 +700,8 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "bosphor_relayer_staged_dead"
+          "expr": "bosphor_relayer_staged_dead",
+          "legendFormat": "{{deployment}}"
         }
       ]
     },
@@ -727,7 +734,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },

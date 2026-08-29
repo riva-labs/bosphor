@@ -97,7 +97,7 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "up{job=\"bosphor-dvn\"}",
+          "expr": "label_replace(up{job=\"bosphor-dvn\"}, \"pathway\", \"${1}_sui\", \"instance\", \"dvn-([a-z]+):.*\")",
           "legendFormat": "{{pathway}}"
         }
       ]
@@ -253,7 +253,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
