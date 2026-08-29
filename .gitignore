@@ -64,6 +64,14 @@ docker-compose.hosting.yml
 # host-specific compose override (Docker auto-merges it; local topology only)
 docker-compose.override.yml
 
+# host-specific deployment stacks (testnet relayer + dapp index). The live
+# containers reference these by path; they stay on the host, like the overlays
+# above, and out of the public repo.
+docker-compose.testnet-relayer.yml
+docker-compose.dapp-index.yml
+relayer-testnet-nginx.conf
+dapp-index/
+
 # cloudflared tunnel config (real tunnel UUID + host topology; see config.example.yml)
 cloudflared/config.yml
 
