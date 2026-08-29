@@ -10,11 +10,11 @@ All targets are scraped from `prometheus.yml`; dashboards are provisioned from
 **Bosphor Mission Control**) is the single at-a-glance page and is set as the
 Grafana home dashboard. Top to bottom:
 
-- **Service health** — canary (EVM, Solana), both relayers, both DVNs. Green = up.
-- **Canary** — synthetic round-trip success rate (24h) and p50/p95 latency.
-- **Relayers** — intents processed, Sui checkpoint cursor lag, LZ proof sends.
-- **Funding & balances** — canary wallets (ETH/SOL), relayer WAL/SUI, gas price.
-- **Durable store queue** — active intents, queued bytes, dead-letters.
+- **Service health** - canary (EVM, Solana), both relayers, both DVNs. Green = up.
+- **Canary** - synthetic round-trip success rate (24h) and p50/p95 latency.
+- **Relayers** - intents processed, Sui checkpoint cursor lag, LZ proof sends.
+- **Funding & balances** - canary wallets (ETH/SOL), relayer WAL/SUI, gas price.
+- **Durable store queue** - active intents, queued bytes, dead-letters.
 
 Component detail dashboards (`bosphor-canary`, `bosphor-relayer`, `bosphor-dvn`,
 `bosphor-testnet-history`) are linked from the overview's top-right menu.
@@ -56,4 +56,4 @@ docker compose -f docker-compose.yml -f docker-compose.hosting.yml up -d
 ```
 
 Never run `docker compose up -d grafana|prometheus` without `-f
-docker-compose.hosting.yml` — it will try the base ports and fail.
+docker-compose.hosting.yml` - it will try the base ports and fail.
