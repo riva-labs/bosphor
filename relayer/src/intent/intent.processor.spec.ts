@@ -397,11 +397,19 @@ describe('IntentProcessor durable queue', () => {
   });
 
   it('routes a Solana-origin intent through confirm_execution, not the EVM leg', async () => {
-    const { proc, solana, suiLz } = build([makeRow({ srcEid: SOLANA_SRC_EID })]);
+    const { proc, solana, suiLz, lifecycle } = build([makeRow({ srcEid: SOLANA_SRC_EID })]);
     await proc.tick();
 
     expect(solana.confirmExecution).toHaveBeenCalledTimes(1);
     expect(suiLz.lzSendProof).not.toHaveBeenCalled();
+    // Solana has no on-chain confirmation watcher, so the confirm_execution tx
+    // records both proof_sent and confirmed; otherwise the feed would hang at
+    // proof_sent for a fulfilled intent.
+    expect(lifecycle.recordHop).toHaveBeenCalledWith(
+      '0xintent',
+      'confirmed',
+      expect.objectContaining({ txHash: 'solsig' }),
+    );
   });
 
   it('reuses a persisted upload after a crash (retry runs execute_store, no re-spend)', async () => {

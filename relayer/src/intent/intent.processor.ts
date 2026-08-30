@@ -519,7 +519,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     const sig = await this.solana.confirmExecution(intentId, canonicalBlobIdHex, BigInt(endEpoch));
     this.metrics.recordLzSend('success');
     this.logger.log(`[${intentId}] Solana return confirmed: ${sig}`);
+    // On Solana a single confirm_execution tx both delivers the return proof and
+    // marks the intent executed on the origin program, so it is `confirmed` right
+    // away. The EVM path gets `confirmed` from evm-lifecycle.watcher (the on-chain
+    // IntentExecuted event); Solana has no such watcher, so record both hops here
+    // or the public feed would stay stuck at `proof_sent` for a fulfilled intent.
     await this.trackHop(intentId, 'proof_sent', { txHash: sig });
+    await this.trackHop(intentId, 'confirmed', { txHash: sig });
   }
 
   /**
