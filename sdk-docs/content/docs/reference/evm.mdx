@@ -19,7 +19,7 @@ source.
 | `store` | `store(data: Uint8Array, opts?: EncodeOptions & AwaitProofOptions)` | `Promise<StoreResult>` |
 | `encode` | `encode(data: Uint8Array, opts?: EncodeOptions)` | `Promise<EncodedIntent>` |
 | `quote` | `quote(encoded: EncodedIntent)` | `Promise<MessagingFee>` |
-| `submit` | `submit(encoded: EncodedIntent, fee: MessagingFee)` | `Promise<{ intentId: Hex }>` |
+| `submit` | `submit(encoded: EncodedIntent, fee: MessagingFee)` | `Promise<{ intentId: Hex; txHash: string }>` |
 | `upload` | `upload(intentId: Hex, data: Uint8Array, opts?: { signal?: AbortSignal })` | `Promise<void>` |
 | `awaitProof` | `awaitProof(intentId: Hex, opts?: AwaitProofOptions)` | `Promise<{ blobId: Hex; endEpoch: bigint }>` |
 
@@ -45,6 +45,8 @@ The LayerZero fee returned by `quote()`.
 ## Functions
 
 - `createBosphorClient(options)`: factory that mirrors `new BosphorEvmClient(options)`.
+- `fromEthersContract(contract, opts?)`: build the full `AdapterContract` (including the `queryProof` reader) from an `ethers.Contract`, so no cast or hand-written proof-log parsing is needed.
+- `createDefaultComputeBlob(network)`: build the blob-id computation bound to `"testnet"` or `"mainnet"`.
 - `defaultComputeBlob(data)`: the default testnet blob-id computation (lazily loads `@mysten/walrus`).
 - `base64UrlToBytes32Hex(id)`: converts a base64url Walrus blob id to a `0x` hex string.
 - `decodeProofEndEpoch(data)`: reads the end epoch from a returned proof payload.
