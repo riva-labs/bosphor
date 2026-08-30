@@ -7,6 +7,8 @@
  */
 
 export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./client.js";
+export { fromEthersContract } from "./adapter.js";
+export type { EthersContractLike, FromEthersContractOptions } from "./adapter.js";
 export type {
   AdapterContract,
   BosphorEvmClientOptions,
@@ -22,7 +24,8 @@ export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.j
 // Shared store-flow types (identical on every chain).
 export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
 
-export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
+export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
+export type { WalrusNetwork } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/evm` is self-sufficient.
 export {

@@ -41,4 +41,6 @@ export interface StoreResult {
   blobId: Hex;
   /** Walrus epoch at which the stored blob expires. */
   endEpoch: bigint;
+  /** Origin-chain transaction hash (EVM) or signature (Solana) of the submit. */
+  txHash?: string;
 }

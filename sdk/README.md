@@ -65,23 +65,26 @@ encode -> quote -> submit -> upload -> awaitProof
 
 ```ts
 import { ethers } from "ethers";
-import { BosphorEvmClient, type AdapterContract } from "@bosphor/sdk/evm";
+import { createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
 
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 const contract = new ethers.Contract(ADAPTER_ADDRESS, ADAPTER_ABI, signer);
 
-const client = new BosphorEvmClient({
-  adapter: contract as unknown as AdapterContract,
-  relayerUrl: "https://relayer.bosphor.xyz",
+const client = createBosphorClient({
+  adapter: fromEthersContract(contract),
+  relayerUrl: "https://api.bosphor.xyz/testnet",
   dstEid: 40378, // Sui testnet
 });
 
-const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
+const { intentId, blobId, endEpoch, txHash } = await client.store(fileBytes, { epochs: 5 });
 ```
 
-Every step is verified against on-chain state before `store()` resolves. Nothing
-is fabricated: a relayer rejection throws `RelayerUploadError` with the relayer's
-reason, and an intent that never executes throws `ProofTimeoutError`.
+`fromEthersContract(contract)` builds the whole adapter surface, including the
+`queryProof` reader the client needs to resolve `endEpoch`, so there is no cast
+and no boilerplate. `store()` returns the origin `txHash` alongside the verified
+result. Every step is verified against on-chain state before `store()` resolves.
+Nothing is fabricated: a relayer rejection throws `RelayerUploadError` with the
+relayer's reason, and an intent that never executes throws `ProofTimeoutError`.
 
 ### Lower-level escape hatches
 
@@ -90,7 +93,7 @@ The steps `store()` orchestrates are all public:
 ```ts
 const encoded = await client.encode(fileBytes, { epochs: 5 });
 const fee = await client.quote(encoded);
-const { intentId } = await client.submit(encoded, fee);
+const { intentId, txHash } = await client.submit(encoded, fee);
 await client.upload(intentId, fileBytes);
 const { blobId, endEpoch } = await client.awaitProof(intentId, {
   timeoutMs: 300_000,
@@ -103,7 +106,10 @@ const { blobId, endEpoch } = await client.awaitProof(intentId, {
 The Walrus blob id is derived locally from the bytes (no SUI, no WAL, no Sui RPC),
 so the id the SDK commits to matches what the relayer recomputes on ingest. The
 computation is injectable via `computeBlob` in the client options; the default
-lazily loads `@mysten/walrus`. Tests pass a stub and never load the Walrus SDK.
+lazily loads `@mysten/walrus`. Because the RedStuff encoding depends on the
+network, set `network: "mainnet"` on the client for a mainnet adapter (the default
+is `"testnet"`), or pass a custom `computeBlob`. Tests pass a stub and never load
+the Walrus SDK.
 
 See `examples/store-file.evm.ts` for a runnable end-to-end script.
 
@@ -207,7 +213,7 @@ The errors are exported from the core `@bosphor/sdk` and from both chain subpath
 |--------|---------|
 | `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `Hex` |
 | `@bosphor/sdk/commitment` | The commitment codec on its own. |
-| `@bosphor/sdk/evm` | `BosphorEvmClient`, `createBosphorClient`, `decodeProofEndEpoch`, `defaultComputeBlob`; the errors + core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee` |
+| `@bosphor/sdk/evm` | `BosphorEvmClient`, `createBosphorClient`, `fromEthersContract`, `decodeProofEndEpoch`, `defaultComputeBlob`, `createDefaultComputeBlob`; the errors + core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee`, `EthersContractLike` |
 | `@bosphor/sdk/solana` | `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the errors + core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions` |
 
 ## For Solidity integrators
