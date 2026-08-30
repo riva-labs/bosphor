@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0 (2026-08-30)
+
+### Features
+
+- feat(sdk): fromEthersContract factory, submit tx hash, and network-aware blob id
+
 ## 0.9.0 (2026-08-27)
 
 ### Features
