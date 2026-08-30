@@ -18,7 +18,22 @@ npm install
 cp .env.example .env
 ```
 
+This is not an npm workspace yet: the root `npm install` only installs the root
+tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`, `sdk-docs/`)
+has its own `package.json`, so install the ones you work on, e.g.
+`(cd relayer && npm install)` or `(cd sdk && npm install)`.
+
+Optional: install the opt-in pre-push hook so the Release Guard check runs
+locally before you push:
+
+```bash
+npm run hooks:install
+```
+
 ### Running Tests
+
+From the repo root, `npm test` runs the Solidity, Move, relayer, and SDK unit
+tests. To run them individually:
 
 ```bash
 # Solidity (Foundry)
@@ -29,7 +44,13 @@ cd contracts/sui/lz-receiver && sui move test --build-env testnet
 
 # Relayer
 cd relayer && npm test
+
+# SDK (incl. cross-chain parity vectors)
+cd sdk && npm test
 ```
+
+The full cross-chain gate (`npm run test:e2e`) needs a running relayer and a
+funded testnet wallet; it is a manual pre-merge step, not part of CI.
 
 ## Commit Messages
 
@@ -46,13 +67,30 @@ refactor(scope): code refactoring
 
 Scope examples: `contracts`, `sui`, `relayer`, `scripts`, `ci`, `docs`.
 
+## Versioning (before you open a PR)
+
+Components (`contracts-evm`, `sui`, `relayer`, `sdk`) are versioned independently
+and deterministically. If your change touches a versioned component, bump it
+before opening the PR:
+
+```bash
+npm run version:bump   # reads your branch commits, writes the version files + changelog
+```
+
+The Release Guard CI check fails the PR if a component changed without a matching
+bump (`npm run version:check` runs the same check locally). Only `feat` and `fix`
+commits trigger a bump; `chore`/`docs`/`refactor`/`test`/`ci` do not. Tags are
+created automatically on merge, so there is no release PR.
+
 ## Pull Request Process
 
-1. Fork the repository and create a feature branch from `main`.
-2. Ensure all tests pass locally before opening a PR.
-3. Update documentation if your changes affect the public API.
-4. Fill out the PR template completely.
-5. Request review from a maintainer.
+1. Create a feature branch from `main` (`<type>/<short-description>`). Direct
+   pushes to `main` are reserved for hotfixes.
+2. Ensure the test gate passes locally before opening a PR.
+3. Run `npm run version:bump` if a versioned component changed, and commit it.
+4. Update documentation if your changes affect the public API.
+5. Fill out the PR template completely and reference the issue with `Closes #N`.
+6. Request review from a maintainer. Squash-merge to keep `main` clean.
 
 ## Code Style
 
