@@ -55,6 +55,21 @@ export class IngestController {
 
   constructor(private readonly ingest: IntentIngest) {}
 
+  /**
+   * Encode-only: derive the Walrus blob id from the raw bytes without storing
+   * anything. A client uses this to compute the id it must commit to on-chain
+   * without depending on a public Walrus publisher. Declared before the
+   * `:intentId` route so `/blob/encode` is not captured as an intent id.
+   */
+  @Post('encode')
+  async encodeBlob(@Req() req: RawBodyRequest): Promise<{ blobId: string; size: number }> {
+    const bytes = req.body;
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+      throw new BadRequestException('request body must be the raw blob bytes');
+    }
+    return this.ingest.encode(bytes);
+  }
+
   @Post(':intentId')
   async ingestBlob(
     @Param('intentId') intentId: string,

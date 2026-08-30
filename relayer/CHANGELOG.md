@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0 (2026-08-30)
+
+### Features
+
+- feat(relayer): add POST /blob/encode to derive a blob id without storing
+
 ## 0.6.0 (2026-08-25)
 
 ### Features

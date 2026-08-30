@@ -233,4 +233,13 @@ describe('IntentIngest with the durable staged queue', () => {
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'wrong-size' }));
     expect(staged.stagedBytesTotal).not.toHaveBeenCalled();
   });
+
+  it('encode() derives the blob id from bytes without storing or checking a commitment', async () => {
+    const result = await ingest.encode(Buffer.from('hello world')); // length 11
+
+    expect(result).toEqual({ blobId: COMMITTED_BLOB_ID_B64URL, size: 11 });
+    expect(encodeBlob).toHaveBeenCalledTimes(1);
+    // No commitment lookup: pure offline encode, nothing stored.
+    expect(mockStore.getCommitment).not.toHaveBeenCalled();
+  });
 });

@@ -117,6 +117,19 @@ export class IntentIngest {
     return { ok: true, intentId, blobId, size: bytes.length };
   }
 
+  /**
+   * Derive the Walrus blob id from raw bytes without storing anything. This is
+   * the same offline encoder the ingest path uses to verify the commitment,
+   * exposed so a client can compute the blob id it must commit to on-chain
+   * without depending on a public Walrus publisher. No WAL is spent and nothing
+   * is written to Walrus or the queue.
+   */
+  async encode(bytes: Buffer): Promise<{ blobId: string; size: number }> {
+    const walrusClient = this.sui.getWalrusClient();
+    const { blobId } = await walrusClient.walrus.encodeBlob(new Uint8Array(bytes));
+    return { blobId, size: bytes.length };
+  }
+
   private isExecuted(status: string): boolean {
     // Any hop at or past stored_walrus means WAL was already spent for this id.
     return (
