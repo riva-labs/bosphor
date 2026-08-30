@@ -63,7 +63,7 @@ values. Supply your own `RPC_URL` and key.
 
 ```ts title="client.ts"
 import { ethers } from 'ethers';
-import { BosphorEvmClient, type AdapterContract } from '@bosphor/sdk/evm';
+import { createBosphorClient, fromEthersContract } from '@bosphor/sdk/evm';
 
 // Live Sepolia testnet deployment.
 const ADAPTER_ADDRESS = '0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10';
@@ -72,8 +72,8 @@ const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 const contract = new ethers.Contract(ADAPTER_ADDRESS, ADAPTER_ABI, signer);
 
-const client = new BosphorEvmClient({
-  adapter: contract as unknown as AdapterContract,
+const client = createBosphorClient({
+  adapter: fromEthersContract(contract),
   relayerUrl: 'https://api.bosphor.xyz/testnet',
   dstEid: 40378, // Sui testnet
 });
@@ -92,9 +92,9 @@ integrations and sponsored (gasless) transactions work unchanged.
 ```ts
 const fileBytes = new TextEncoder().encode('hello, permanence');
 
-const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
+const { intentId, blobId, endEpoch, txHash } = await client.store(fileBytes, { epochs: 5 });
 
-console.log({ intentId, blobId, endEpoch });
+console.log({ intentId, blobId, endEpoch, txHash });
 ```
 
 `store()` runs the whole path and only resolves once every step is verified

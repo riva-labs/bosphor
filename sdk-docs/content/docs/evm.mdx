@@ -10,16 +10,21 @@ when you need more control.
 ## One call
 
 ```ts
-import { BosphorEvmClient, type AdapterContract } from '@bosphor/sdk/evm';
+import { createBosphorClient, fromEthersContract } from '@bosphor/sdk/evm';
 
-const client = new BosphorEvmClient({
-  adapter: contract as unknown as AdapterContract,
+const client = createBosphorClient({
+  adapter: fromEthersContract(contract),
   relayerUrl: 'https://api.bosphor.xyz/testnet',
   dstEid: 40378,
 });
 
-const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
+const { intentId, blobId, endEpoch, txHash } = await client.store(fileBytes, { epochs: 5 });
 ```
+
+`fromEthersContract(contract)` builds the full adapter surface from an
+`ethers.Contract` (including the `queryProof` reader used to resolve `endEpoch`),
+so you never cast with `as unknown as AdapterContract` or hand-write proof-log
+parsing. `store()` returns the origin `txHash` alongside the verified result.
 
 ## Drive the steps yourself
 
@@ -29,7 +34,7 @@ separate user interactions (for wallet popups) or persist between steps:
 ```ts
 const encoded = await client.encode(fileBytes, { epochs: 5 });
 const fee = await client.quote(encoded);
-const { intentId } = await client.submit(encoded, fee); // wallet signs here
+const { intentId, txHash } = await client.submit(encoded, fee); // wallet signs here
 await client.upload(intentId, fileBytes);
 const { blobId, endEpoch } = await client.awaitProof(intentId, {
   timeoutMs: 300_000,
@@ -45,12 +50,18 @@ event handler.
 
 The Walrus blob id is derived locally from the bytes, so the id the SDK commits to
 on-chain matches what the relayer recomputes on ingest. The default lazily loads
-`@mysten/walrus` and is fixed to **testnet** shard parameters.
+`@mysten/walrus`. Because the RedStuff encoding depends on the network, the blob id
+differs between testnet and mainnet.
 
-For **mainnet**, or to avoid the Walrus dependency, inject your own `computeBlob`:
+For **mainnet**, set `network: 'mainnet'` on the client (the default is
+`'testnet'`), or inject your own `computeBlob` to avoid the Walrus dependency:
 
 ```ts
-const client = new BosphorEvmClient({
+// Simplest: let the SDK build the mainnet-bound default.
+const client = createBosphorClient({ adapter, relayerUrl, dstEid, network: 'mainnet' });
+
+// Or inject your own (must return the same id the relayer computes for the bytes).
+const custom = createBosphorClient({
   adapter,
   relayerUrl,
   dstEid,
