@@ -30,14 +30,14 @@ flowchart LR
 
 ### Message Flow
 
-1. **EVM -> Sui** (LayerZero): `submitIntent` encodes `(intentId, sender, payload, deadline)` via `abi.encode` and sends through LayerZero v2 OApp messaging.
+1. **EVM -> Sui** (LayerZero): `submitIntent` sends `intentId(32) ++ commitment(49)` = 81 bytes (`abi.encodePacked`) through LayerZero v2 OApp messaging. The commitment holds the Walrus blob id, size, encoding, storage duration, and deadline; no raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 2. **Sui lz_receive**: LZ executor builds a PTB using `ptb_builder::build_lz_receive_ptb`, calls `lz_receiver::lz_receive` which validates peer + endpoint and emits `IntentReceived`.
-3. **Relayer**: Polls `IntentReceived` events on Sui, uploads payload to Walrus, calls `execute_store`.
+3. **Relayer**: Polls `IntentReceived` events on Sui, receives the file bytes out-of-band over HTTP (`POST /blob/{intentId}`), uploads them to Walrus, and calls `execute_store`. The bytes never cross the bridge.
 4. **Sui -> EVM** (LayerZero): Relayer calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero back to EVM. The EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks the intent as executed.
 
 ## EVM Adapter Contract (BosphorAdapter.sol)
 
-The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (emergency fallback). Intent IDs are deterministic hashes of sender, chain, payload, nonce, and deadline.
+The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (trusted-relayer fallback). Intent IDs are derived as `keccak256(commitment(49) ++ sender(32) ++ nonce(u64))`; see [Commitment Format](commitment-format.md). On proof receipt the adapter asserts the returned blob id equals the committed one (`BlobIdMismatch` otherwise).
 
 For the complete interface reference, function signatures, events, errors, and code examples, see [Contract Interface](contract-interface.md).
 
@@ -47,9 +47,14 @@ For the complete interface reference, function signatures, events, errors, and c
 
 Receives cross-chain messages from EVM via LayerZero v2 executor.
 
-- `lz_receive(config, oapp, call, ctx)`: Validates LZ Call hot-potato, extracts intent ID from ABI-encoded message (first 32 bytes), records in `received_intents` table, emits `IntentReceived`.
+- `lz_receive(config, oapp, call, ctx)`: Validates the LZ Call hot-potato, splits the 81-byte message into `intentId(32)` and `commitment(49)`, decodes the commitment (blob id, size, encoding, storage epochs, deadline), records the committed blob id and storage epochs in the `received_intents` table, and emits `IntentReceived`.
 - `register_oapp(config, oapp, endpoint, info, ctx)`: Entry function that registers the OApp with the LZ endpoint using the internal CallCap.
+- `committed_blob_id(config, intent_id)` / `committed_storage_epochs(config, intent_id)`: View functions returning the committed reference, read by `execute_store`.
 - `is_received(config, intent_id)`: View function to check if an intent was received.
+
+### commitment_codec.move
+
+Encodes and decodes the 49-byte reference commitment (`blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian). It is the Move half of the single cross-chain `CommitmentCodec`, pinned byte-for-byte against shared parity vectors alongside the Solidity, TypeScript, and Rust implementations. See [Commitment Format](commitment-format.md).
 
 ### codec.move
 
@@ -64,7 +69,7 @@ Wire format: `bytes1(0x01) ++ intentId(32) ++ blobId(32) ++ endEpoch(32)`
 
 Executes storage operations on Walrus.
 
-- `execute_store(config, intent_id, blob, deadline_ms, clock, sender, ctx)`: Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, transfers blob and receipt to original sender.
+- `execute_store(config, lz_config, system, intent_id, blob, deadline_ms, clock, original_sender, ctx)`: Accepts a certified Walrus `Blob`, verifies certification and deadline, asserts the certified blob matches the committed reference recorded by `lz_receive` (blob id and storage epochs, read from `LzReceiverConfig`), records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender.
 - All blobs are stored as **deletable** per project policy.
 
 ### ptb_builder.move
@@ -80,7 +85,7 @@ Generates PTB metadata for the LZ executor.
 
 ### Step 1: Intent Delivery (EVM -> Sui)
 
-1. `submitIntent` calls `_lzSend` with 4-field ABI-encoded message
+1. `submitIntent` calls `_lzSend` with the 81-byte `intentId(32) ++ commitment(49)` message
 2. LayerZero DVN (LayerZero Labs) verifies the message on Sui endpoint
 3. Confirmation depth: 2 blocks
 4. LZ executor reads `OAppInfoV1` from endpoint registry, builds PTB, executes `lz_receive`
@@ -89,7 +94,7 @@ Generates PTB metadata for the LZ executor.
 
 DVN-verified proof delivery:
 1. Relayer observes `IntentReceived` event on Sui
-2. Uploads payload to Walrus (deletable blob)
+2. Uploads the out-of-band bytes to Walrus (deletable blob)
 3. Calls `execute_store` on Sui
 4. Calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero
 5. EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks intent as executed
@@ -412,6 +417,10 @@ intentId = 0x70286217803b49a342aa1ad3de24977ea30ff17ab3654e2aa8957e1a9cf799c9
 ## Contract Interface Reference
 
 
+:::tip Recommended path
+Most integrators should use `@bosphor/sdk` rather than hand-rolling contract calls. The SDK computes the Walrus blob id locally, submits the commitment, uploads the bytes out-of-band, and returns a verified result from one `store()` call. Guides and API reference live at [sdk.bosphor.xyz](https://sdk.bosphor.xyz). Use the raw contract interface below when you need lower-level control.
+:::
+
 ## IBosphorAdapter (Interface)
 
 Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfaces/` rather than the full `BosphorAdapter.sol`. The interface includes all external function signatures, events, errors, and structs needed for integration.
@@ -420,19 +429,24 @@ Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfac
 import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
 ```
 
+Bosphor moves data off the messaging layer. An intent carries a compact, fixed-size **commitment** (blob id, size, encoding, storage duration, deadline) rather than the file bytes. See [Commitment Format](commitment-format.md) for the canonical 49-byte layout and the `intentId` derivation. The file bytes are uploaded to the relayer out-of-band, never through the bridge (see [Blob ingest](public-api.md#blob-ingest-out-of-band)).
+
 ## BosphorAdapter.sol (EVM)
 
 `BosphorAdapter` implements `IBosphorAdapter` and extends the LayerZero `OApp`.
 
 ### submitIntent
 
-Submit a storage intent to be routed to Walrus via LayerZero.
+Submit a storage intent to be routed to Walrus via LayerZero. The caller commits to a Walrus blob id and its storage terms; the bytes themselves are uploaded to the relayer out-of-band.
 
 ```solidity
 function submitIntent(
     uint32 _dstEid,
-    bytes calldata _payload,
-    uint256 _deadline,
+    bytes32 _blobId,
+    uint32 _size,
+    uint8 _encodingType,
+    uint32 _storageEpochs,
+    uint64 _deadline,
     bytes calldata _options
 ) external payable returns (bytes32 intentId);
 ```
@@ -440,32 +454,38 @@ function submitIntent(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `_dstEid` | uint32 | Destination chain EID. Sui testnet: `40378` |
-| `_payload` | bytes | Arbitrary data to store on Walrus |
-| `_deadline` | uint256 | Unix timestamp after which the intent expires |
+| `_blobId` | bytes32 | Walrus blob id, computed client-side from the data |
+| `_size` | uint32 | Blob size in bytes |
+| `_encodingType` | uint8 | Walrus encoding type discriminant |
+| `_storageEpochs` | uint32 | Storage duration in Walrus epochs |
+| `_deadline` | uint64 | Unix timestamp (seconds) after which the intent expires |
 | `_options` | bytes | LayerZero execution options (gas limit, etc.) |
 
-**Returns**: `intentId`, a deterministic hash of `(sender, dstEid, payload, nonce, deadline)`.
+**Returns**: `intentId`, derived as `keccak256(commitment(49) ++ sender(32) ++ nonce(u64))`. See [Commitment Format](commitment-format.md).
 
-**Emits**: `IntentSubmitted(intentId, sender, targetChainId, payload, nonce, deadline)`
+**Emits**: `IntentSubmitted(intentId, sender, targetChainId, blobId, size, encodingType, storageEpochs, nonce, deadline)`
 
 ### quote
 
-Estimate the LayerZero fee for submitting an intent.
+Estimate the LayerZero fee for submitting an intent. Takes the same commitment fields as `submitIntent`.
 
 ```solidity
 function quote(
     uint32 _dstEid,
-    bytes calldata _payload,
-    uint256 _deadline,
+    bytes32 _blobId,
+    uint32 _size,
+    uint8 _encodingType,
+    uint32 _storageEpochs,
+    uint64 _deadline,
     bytes calldata _options
 ) external view returns (MessagingFee memory);
 ```
 
-**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`.
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`. Because only the 49-byte commitment crosses the bridge, the fee is flat regardless of file size.
 
 ### confirmExecution
 
-Emergency fallback to manually confirm intent execution. Owner-only, for disaster recovery.
+Trusted-relayer / disaster-recovery fallback to manually confirm intent execution. Owner-only.
 The primary proof path is `_lzReceive` with a type 1 message from Sui.
 
 ```solidity
@@ -481,7 +501,7 @@ function confirmExecution(
 
 Handles incoming LayerZero messages from the remote chain. The first byte is a message type discriminator.
 
-**Type 1 (execution proof):** Remaining bytes are ABI-encoded as `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The intent is marked as executed and `IntentExecuted` is emitted with `abi.encode(blobId, endEpoch)` as proof.
+**Type 1 (execution proof):** Remaining bytes are ABI-encoded as `(bytes32 intentId, bytes32 blobId, uint256 endEpoch)`. The adapter checks `blobId == committedBlobId[intentId]` and reverts `BlobIdMismatch` if it differs. On success the intent is marked as executed and `IntentExecuted` is emitted with `abi.encode(blobId, endEpoch)` as proof.
 
 Wire format: `bytes1(0x01) ++ abi.encode(intentId, blobId, endEpoch)`
 
@@ -497,27 +517,34 @@ function setRelayer(address _relayer) external; // onlyOwner
 
 ### getIntentId
 
-Compute the deterministic intent ID for a given set of parameters.
+Compute the deterministic intent ID for a given commitment, sender, and nonce.
 
 ```solidity
 function getIntentId(
     address _sender,
-    uint64 _targetChainId,
-    bytes calldata _payload,
-    uint256 _nonce,
-    uint256 _deadline
+    bytes32 _blobId,
+    uint32 _size,
+    uint8 _encodingType,
+    uint32 _storageEpochs,
+    uint64 _deadline,
+    uint64 _nonce
 ) external pure returns (bytes32);
 ```
+
+The id is `keccak256(commitment(49) ++ sender(32, left-padded) ++ nonce(u64 big-endian))`. See [Commitment Format](commitment-format.md).
 
 ### View Functions
 
 ```solidity
 function trustedRelayer() external view returns (address);
-function intents(bytes32 intentId) external view returns (bool);
-function executed(bytes32 intentId) external view returns (bool);
+function intents(bytes32 intentId) external view returns (bool);          // intent recorded
+function executed(bytes32 intentId) external view returns (bool);         // proof landed
+function committedBlobId(bytes32 intentId) external view returns (bytes32); // committed Walrus blob id
 function intentDeadlines(bytes32 intentId) external view returns (uint256);
 function nonces(address sender) external view returns (uint256);
 ```
+
+`committedBlobId` returns the blob id the adapter committed for an intent. On proof receipt the adapter checks the returned blob id equals this value and reverts `BlobIdMismatch` otherwise.
 
 ### Errors
 
@@ -528,6 +555,7 @@ error IntentNotFound();
 error AlreadyExecuted();
 error ZeroAddress();
 error UnknownMessageType();
+error BlobIdMismatch();
 ```
 
 ## Events
@@ -537,9 +565,12 @@ event IntentSubmitted(
     bytes32 indexed intentId,
     address indexed sender,
     uint64 targetChainId,
-    bytes payload,
-    uint256 nonce,
-    uint256 deadline
+    bytes32 blobId,
+    uint32 size,
+    uint8 encodingType,
+    uint32 storageEpochs,
+    uint64 nonce,
+    uint64 deadline
 );
 
 event IntentExecuted(bytes32 indexed intentId, bytes proof);
@@ -549,10 +580,14 @@ event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 
 ## Usage Examples (ethers.js)
 
+The raw path below computes the commitment fields, submits the intent, then uploads the bytes out-of-band. Most integrators should prefer `@bosphor/sdk`, which does all of this in a single `store()` call; see [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+
 ### Submit an intent
 
 ```typescript
 import { ethers } from "ethers";
+// The SDK exposes the Walrus blob-id derivation used to build the commitment.
+import { defaultComputeBlob } from "@bosphor/sdk/evm";
 
 const provider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL);
 const signer = new ethers.Wallet(process.env.EVM_RELAYER_KEY, provider);
@@ -560,39 +595,62 @@ const signer = new ethers.Wallet(process.env.EVM_RELAYER_KEY, provider);
 const adapter = new ethers.Contract(
   ADAPTER_ADDRESS,
   [
-    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
-    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
   ],
   signer
 );
 
+const RELAYER_BASE_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
 const dstEid = 40378; // Sui testnet
-const payload = ethers.toUtf8Bytes("Hello Walrus");
-const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour
+const data = new TextEncoder().encode("Hello Walrus");
+
+// Derive the Walrus blob id, size, and encoding client-side.
+const { blobId, size, encodingType } = await defaultComputeBlob(data);
+const storageEpochs = 5;
+const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
 // LZ execution options: type 3 (lzReceive), gas limit 200,000 (see "LZ Options" below)
 const options = "0x00030100110100000000000000000000000000030d40";
 
 // Get fee estimate
-const fee = await adapter.quote(dstEid, payload, deadline, options);
+const fee = await adapter.quote(dstEid, blobId, size, encodingType, storageEpochs, deadline, options);
 
 // Submit intent
-const tx = await adapter.submitIntent(dstEid, payload, deadline, options, {
-  value: fee.nativeFee,
-});
+const tx = await adapter.submitIntent(
+  dstEid, blobId, size, encodingType, storageEpochs, deadline, options,
+  { value: fee.nativeFee }
+);
 const receipt = await tx.wait();
-console.log("Intent submitted:", receipt.hash);
+
+// Read the intentId from the IntentSubmitted event.
+const submitted = receipt.logs
+  .map((log) => { try { return adapter.interface.parseLog(log); } catch { return null; } })
+  .find((e) => e?.name === "IntentSubmitted");
+const intentId = submitted.args.intentId;
+console.log("Intent submitted:", intentId);
+
+// Upload the bytes out-of-band to the relayer (see Blob ingest).
+const res = await fetch(`${RELAYER_BASE_URL}/blob/${intentId}`, {
+  method: "POST",
+  headers: { "content-type": "application/octet-stream" },
+  body: data,
+});
+if (!res.ok) throw new Error(`blob upload rejected: ${res.status}`);
 ```
 
 ### Listen for events
 
 ```typescript
 // Listen for new intents
-adapter.on("IntentSubmitted", (intentId, sender, targetChainId, payload, nonce, deadline) => {
-  console.log("New intent:", intentId);
-  console.log("Sender:", sender);
-  console.log("Payload:", ethers.toUtf8String(payload));
-});
+adapter.on(
+  "IntentSubmitted",
+  (intentId, sender, targetChainId, blobId, size, encodingType, storageEpochs, nonce, deadline) => {
+    console.log("New intent:", intentId);
+    console.log("Sender:", sender);
+    console.log("Committed blob id:", blobId);
+  }
+);
 
 // Listen for execution confirmations
 adapter.on("IntentExecuted", (intentId, proof) => {
@@ -610,7 +668,7 @@ adapter.on("IntentExecuted", (intentId, proof) => {
 
 ### Call execute_store
 
-The relayer calls `execute_store` after uploading the payload to Walrus and receiving a certified blob.
+The relayer calls `execute_store` after uploading the bytes to Walrus and receiving a certified blob. The executor reads the committed blob id and storage epochs back from `LzReceiverConfig` and asserts the certified blob matches; relayer arguments are never trusted for the commitment.
 
 ```typescript
 import { SuiClient } from "@mysten/sui/client";
@@ -625,7 +683,9 @@ const tx = new Transaction();
 tx.moveCall({
   target: `${PACKAGE_ID}::walrus_executor::execute_store`,
   arguments: [
-    tx.object(EXECUTOR_CONFIG_ID),
+    tx.object(EXECUTOR_CONFIG_ID),         // ExecutorConfig (relayer auth + dedup)
+    tx.object(LZ_RECEIVER_CONFIG_ID),      // LzReceiverConfig (holds the committed reference)
+    tx.object(WALRUS_SYSTEM_ID),           // Walrus System object (current epoch)
     tx.pure.vector("u8", intentIdBytes),   // 32-byte intent ID
     tx.object(certifiedBlobId),            // Walrus Blob object
     tx.pure.u64(deadlineMs),               // deadline in milliseconds
@@ -658,12 +718,17 @@ const events = await client.queryEvents({
 });
 
 for (const event of events.data) {
-  const { intent_id, src_eid, nonce } = event.parsedJson as {
-    intent_id: number[];
-    src_eid: number;
-    nonce: string;
-  };
+  const { intent_id, committed_blob_id, size, storage_epochs, src_eid, nonce } =
+    event.parsedJson as {
+      intent_id: number[];
+      committed_blob_id: string;
+      size: number;
+      storage_epochs: number;
+      src_eid: number;
+      nonce: string;
+    };
   console.log("Intent:", Buffer.from(intent_id).toString("hex"));
+  console.log("Committed blob id:", committed_blob_id, "size:", size);
   console.log("Source EID:", src_eid, "Nonce:", nonce);
 }
 ```
@@ -687,18 +752,16 @@ public fun lz_receive(
 )
 ```
 
-Message format from EVM (`abi.encode`):
+Message format from EVM (M3 reference commitment, big-endian, exactly 81 bytes):
 
 | Offset | Length | Field |
 |--------|--------|-------|
 | 0:32 | 32 | intentId (bytes32) |
-| 32:64 | 32 | sender (address, left-padded) |
-| 64:96 | 32 | offset to payload data |
-| 96:128 | 32 | deadline (uint256) |
-| 128:160 | 32 | payload length |
-| 160:... | variable | payload data |
+| 32:81 | 49 | commitment: `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)` |
 
-**Aborts**: `EInvalidMessageLength` (1) if message < 32 bytes, `EIntentAlreadyReceived` (0) if duplicate.
+The commitment is decoded into the `IntentRecord`, which stores the committed blob id and storage epochs for `execute_store` to verify against. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
+
+**Aborts**: `EInvalidMessageLength` (1) if the message is not exactly 81 bytes, `EIntentAlreadyReceived` (0) if duplicate.
 
 #### lz_send_proof
 
@@ -718,7 +781,7 @@ public fun lz_send_proof(
 ): Call<SendParam, MessagingReceipt>
 ```
 
-**Aborts**: `EUnauthorizedRelayer` (2) if caller is not the relayer, `EIntentNotReceived` (6) if intent not recorded.
+**Aborts**: `EUnauthorizedRelayer` (2) if caller is not the relayer, `EIntentNotReceived` (4) if intent not recorded.
 
 #### confirm_lz_send_proof
 
@@ -775,7 +838,7 @@ entry fun set_relayer(
 )
 ```
 
-**Aborts**: `EZeroAddress` (5) if `new_relayer` is `@0x0`.
+**Aborts**: `EZeroAddress` (3) if `new_relayer` is `@0x0`.
 
 #### is_received
 
@@ -794,7 +857,11 @@ Emitted when `lz_receive` processes an incoming LZ message.
 ```move
 public struct IntentReceived has copy, drop {
     intent_id: vector<u8>,   // 32 bytes, matches EVM intentId
-    payload: vector<u8>,     // Full ABI-encoded message
+    committed_blob_id: u256, // committed Walrus blob id (big-endian u256)
+    size: u32,               // committed blob size in bytes
+    encoding_type: u8,       // committed Walrus encoding type
+    storage_epochs: u32,     // committed storage duration in epochs
+    deadline: u64,           // committed deadline (unix timestamp)
     src_eid: u32,            // Source chain EID (40161 for Sepolia)
     nonce: u64,              // LZ message nonce
     guid: Bytes32,           // LZ message GUID
@@ -821,32 +888,32 @@ public struct ProofSent has copy, drop {
 | Code | Name | Description |
 |------|------|-------------|
 | 0 | `EIntentAlreadyReceived` | Intent with this ID was already received |
-| 1 | `EInvalidMessageLength` | Message payload shorter than 32 bytes |
+| 1 | `EInvalidMessageLength` | Message is not exactly 81 bytes (intentId(32) ++ commitment(49)) |
 | 2 | `EUnauthorizedRelayer` | Caller is not the authorized relayer |
-| 3 | `EInvalidIntentIdLength` | intent_id must be exactly 32 bytes |
-| 4 | `EInvalidBlobIdLength` | blob_id must be exactly 32 bytes |
-| 5 | `EZeroAddress` | Relayer address must not be zero |
-| 6 | `EIntentNotReceived` | Intent must exist before sending proof |
+| 3 | `EZeroAddress` | Relayer address must not be zero |
+| 4 | `EIntentNotReceived` | Intent must exist before sending proof |
 
 ### walrus_executor
 
 #### execute_store
 
-Accepts a certified Walrus `Blob` object, verifies certification, checks deadline, records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
+Accepts a certified Walrus `Blob` object, verifies certification and deadline, asserts the certified blob matches the committed reference recorded by `lz_receive` (blob id and storage epochs, read from `LzReceiverConfig`, not from relayer arguments), records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
 
 ```move
-entry fun execute_store(
+public fun execute_store(
     config: &mut ExecutorConfig,
+    lz_config: &LzReceiverConfig,
+    system: &System,
     intent_id: vector<u8>,
     blob: Blob,
     deadline_ms: u64,
     clock: &Clock,
-    sender: address,
+    original_sender: address,
     ctx: &mut TxContext,
 )
 ```
 
-**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3).
+**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3), `EBlobIdMismatch` (4) if the certified blob id differs from the commitment, `EInsufficientStorageEpochs` (5) if the blob does not cover the committed epochs.
 
 #### StorageExecuted
 
@@ -865,7 +932,7 @@ public struct StorageExecuted has copy, drop {
 
 ### Step 1: Intent Delivery (EVM to Sui)
 
-`abi.encode(intentId, sender, payload, deadline)` sent via `_lzSend`.
+`abi.encodePacked(intentId, CommitmentCodec.encode(commitment))` sent via `_lzSend`: `intentId(32) ++ commitment(49)` = 81 bytes. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
 ### Step 2: Proof Verification (Sui to EVM)
 
@@ -898,58 +965,120 @@ The 200,000 gas limit is sufficient for Bosphor's `_lzReceive` handler. Increase
 ## dApp Integration Tutorial
 
 
-Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and listen for execution confirmations.
+Practical examples for integrating Bosphor into a frontend application. Bosphor stores your bytes on Walrus and returns a verified proof to your origin chain. In Milestone 3 the cross-chain fee is flat regardless of file size: only a compact commitment (blob id, size, encoding, storage duration, deadline) crosses the bridge, and the bytes are uploaded to the relayer out-of-band.
+
+The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples below use the testnet path.
 
 import AgentPrompt from '@site/src/components/AgentPrompt';
 
-## ethers.js v6
+## Recommended: @bosphor/sdk
 
-### Setup
+The SDK is the recommended path. One `store()` call runs the whole flow: derive the blob id, quote, submit, upload the bytes out-of-band, and wait for the verified proof. Full guides and API reference live at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+
+```bash
+npm install @bosphor/sdk ethers
+```
 
 ```typescript
 import { ethers } from "ethers";
+import { createBosphorClient } from "@bosphor/sdk/evm";
 
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner();
 
 const ADAPTER_ADDRESS = "0x..."; // Your deployed BosphorAdapter address
+const RELAYER_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
+
+// Minimal ABI the client needs: quote, submitIntent, and the IntentSubmitted event.
+const adapter = new ethers.Contract(
+  ADAPTER_ADDRESS,
+  [
+    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
+  ],
+  signer
+);
+
+const client = createBosphorClient({
+  adapter,
+  relayerUrl: RELAYER_URL,
+  dstEid: 40378, // Sui testnet
+  // LZ execution options: type 3 (lzReceive), 200k gas limit.
+  options: "0x00030100110100000000000000000000000000030d40",
+});
+
+// One call: derive blobId, submit the commitment, upload bytes out-of-band, wait for the proof.
+const data = new TextEncoder().encode("data to store on Walrus");
+const { intentId, blobId, endEpoch } = await client.store(data, { epochs: 5 });
+
+console.log("Stored:", intentId, blobId, "expires at epoch", endEpoch.toString());
+```
+
+### Escape hatches
+
+`store()` is the happy path. The client also exposes each step so you can drive them yourself: `encode(data)`, `quote(encoded)`, `submit(encoded, fee)`, `upload(intentId, data)`, and `awaitProof(intentId)`. This is useful when you want to show progress in the UI or retry a single step. If a `store()` call is interrupted after submit, re-run `client.upload(intentId, data)` (the relayer needs the bytes) and then `client.awaitProof(intentId)`.
+
+## Raw path (ethers.js v6)
+
+If you cannot use the SDK, here is the same flow against the contract directly. There are four steps: derive the commitment fields, quote, submit, and upload the bytes out-of-band.
+
+### Setup
+
+```typescript
+import { ethers } from "ethers";
+// The SDK's blob-id derivation is reusable on its own.
+import { defaultComputeBlob } from "@bosphor/sdk/evm";
+
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+
+const ADAPTER_ADDRESS = "0x..."; // Your deployed BosphorAdapter address
+const RELAYER_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
 const DST_EID = 40378; // Sui testnet
+const OPTIONS = "0x00030100110100000000000000000000000000030d40"; // type 3, 200k gas
 
 const adapter = new ethers.Contract(
   ADAPTER_ADDRESS,
   [
-    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
-    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
+    "function executed(bytes32) view returns (bool)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
     "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
   ],
   signer
 );
 ```
 
-### Estimate fees
+### Derive the commitment and estimate fees
 
-Always call `quote` before submitting to get the exact LayerZero fee:
+Compute the Walrus blob id, size, and encoding from your bytes, then quote. Always call `quote` before submitting to get the exact LayerZero fee.
 
 ```typescript
-const payload = ethers.toUtf8Bytes("data to store on Walrus");
-const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-// LZ execution options: type 3 (lzReceive), 200k gas limit. See Contract Interface > LZ Options.
-const options = "0x00030100110100000000000000000000000000030d40";
+const data = new TextEncoder().encode("data to store on Walrus");
 
-const fee = await adapter.quote(DST_EID, payload, deadline, options);
+// Derive the commitment fields client-side.
+const { blobId, size, encodingType } = await defaultComputeBlob(data);
+const storageEpochs = 5;
+const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+
+const fee = await adapter.quote(
+  DST_EID, blobId, size, encodingType, storageEpochs, deadline, OPTIONS
+);
 console.log("LZ fee:", ethers.formatEther(fee.nativeFee), "ETH");
 ```
 
-### Submit an intent
+### Submit the intent
 
 ```typescript
-const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
-  value: fee.nativeFee,
-});
+const tx = await adapter.submitIntent(
+  DST_EID, blobId, size, encodingType, storageEpochs, deadline, OPTIONS,
+  { value: fee.nativeFee }
+);
 const receipt = await tx.wait();
 
-// Extract intentId from the event
+// Extract intentId from the IntentSubmitted event.
 const event = receipt.logs
   .map((log) => {
     try { return adapter.interface.parseLog(log); } catch { return null; }
@@ -961,163 +1090,80 @@ const intentId = event.args.intentId;
 console.log("Intent submitted:", intentId);
 ```
 
-### Listen for execution confirmation
+### Upload the bytes out-of-band
+
+The bytes never cross the bridge. POST them to the relayer, which recomputes the blob id and binds it to the on-chain commitment. See [Blob ingest](public-api.md#blob-ingest-out-of-band) for the full status-code contract.
 
 ```typescript
-adapter.on("IntentExecuted", (intentId, proof) => {
-  const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
-    ["bytes32", "uint256"],
-    proof
-  );
-  console.log("Intent executed:", intentId);
-  console.log("Walrus blob ID:", blobId);
-  console.log("Storage expires at epoch:", endEpoch.toString());
-});
+async function uploadBlob(intentId: string, data: Uint8Array) {
+  // A 404 right after submit is usually a timing race (the relayer has not seen
+  // the IntentSubmitted event yet). Retry with backoff.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const res = await fetch(`${RELAYER_URL}/blob/${intentId}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: data,
+    });
+    if (res.ok) return (await res.json()) as { intentId: string; blobId: string; size: number };
+    if (res.status === 404 || res.status === 503) {
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+    throw new Error(`blob upload rejected: ${res.status} ${await res.text()}`);
+  }
+  throw new Error("blob upload timed out waiting for the relayer to see the intent");
+}
+
+await uploadBlob(intentId, data);
 ```
 
-### Full example: submit and wait
+### Wait for the execution proof
+
+Confirmation arrives as the `IntentExecuted` event, or you can poll `executed(intentId)`. The proof is `abi.encode(blobId, endEpoch)`.
 
 ```typescript
-async function submitAndWait(data: string, deadlineSeconds: number = 3600) {
-  const payload = ethers.toUtf8Bytes(data);
-  const deadline = Math.floor(Date.now() / 1000) + deadlineSeconds;
-  const options = "0x00030100110100000000000000000000000000030d40";
-
-  // 1. Estimate fee
-  const fee = await adapter.quote(DST_EID, payload, deadline, options);
-
-  // 2. Submit intent
-  const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
-    value: fee.nativeFee,
-  });
-  const receipt = await tx.wait();
-
-  const event = receipt.logs
-    .map((log) => {
-      try { return adapter.interface.parseLog(log); } catch { return null; }
-    })
-    .find((e) => e?.name === "IntentSubmitted");
-
-  if (!event) throw new Error("IntentSubmitted event not found in receipt");
-  const intentId = event.args.intentId;
-
-  // 3. Wait for execution confirmation (with timeout)
-  return new Promise((resolve, reject) => {
+function waitForProof(intentId: string, timeoutMs = 5 * 60_000) {
+  return new Promise<{ blobId: string; endEpoch: string }>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      adapter.removeAllListeners("IntentExecuted");
+      adapter.off(filter, onExecuted);
       reject(new Error("Timed out waiting for IntentExecuted event"));
-    }, deadlineSeconds * 1000);
+    }, timeoutMs);
 
     const filter = adapter.filters.IntentExecuted(intentId);
-    adapter.once(filter, (intentId, proof) => {
+    const onExecuted = (_intentId: string, proof: string) => {
       clearTimeout(timeout);
       const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
         ["bytes32", "uint256"],
         proof
       );
-      resolve({ intentId, blobId, endEpoch: endEpoch.toString() });
-    });
+      resolve({ blobId, endEpoch: endEpoch.toString() });
+    };
+    adapter.once(filter, onExecuted);
   });
 }
-```
 
-## viem
-
-### Setup
-
-```typescript
-import { createPublicClient, createWalletClient, http, custom, parseAbi, toHex } from "viem";
-import { sepolia } from "viem/chains";
-
-const ADAPTER_ADDRESS = "0x..." as const; // Your deployed BosphorAdapter address
-const DST_EID = 40378; // Sui testnet
-
-const abi = parseAbi([
-  "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-  "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
-  "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
-  "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
-]);
-
-const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(),
-});
-
-const walletClient = createWalletClient({
-  chain: sepolia,
-  transport: custom(window.ethereum),
-});
-```
-
-### Estimate fees
-
-```typescript
-const payload = new TextEncoder().encode("data to store on Walrus");
-const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-const options = "0x00030100110100000000000000000000000000030d40" as `0x${string}`;
-
-const fee = await publicClient.readContract({
-  address: ADAPTER_ADDRESS,
-  abi,
-  functionName: "quote",
-  args: [DST_EID, toHex(payload), deadline, options],
-});
-
-console.log("LZ fee:", fee.nativeFee, "wei");
-```
-
-### Submit an intent
-
-```typescript
-const [account] = await walletClient.getAddresses();
-
-const hash = await walletClient.writeContract({
-  address: ADAPTER_ADDRESS,
-  abi,
-  functionName: "submitIntent",
-  args: [DST_EID, toHex(payload), deadline, options],
-  value: fee.nativeFee,
-  account,
-});
-
-const receipt = await publicClient.waitForTransactionReceipt({ hash });
-console.log("Intent submitted in block:", receipt.blockNumber);
-```
-
-### Watch for execution confirmation
-
-```typescript
-const unwatch = publicClient.watchContractEvent({
-  address: ADAPTER_ADDRESS,
-  abi,
-  eventName: "IntentExecuted",
-  onLogs: (logs) => {
-    for (const log of logs) {
-      console.log("Intent executed:", log.args.intentId);
-      console.log("Proof:", log.args.proof);
-    }
-  },
-});
-
-// Call unwatch() to stop listening
+const { blobId: storedBlobId, endEpoch } = await waitForProof(intentId);
+console.log("Confirmed:", storedBlobId, "expires at epoch", endEpoch);
 ```
 
 ## Displaying intent status to users
 
 A typical UI flow for showing intent status:
 
-1. **Pending**: User clicks "Store", transaction is submitted. Show a spinner.
-2. **Submitted**: Transaction is confirmed on EVM. Show the intent ID and a link to [LayerZero Scan](https://testnet.layerzeroscan.com).
-3. **Delivering**: LayerZero is verifying and delivering the message. Poll LZ Scan or wait for the event.
-4. **Storing**: The relayer is uploading to Walrus and executing storage on Sui.
-5. **Confirmed**: `IntentExecuted` event received. Show the Walrus blob ID and expiry epoch.
+1. **Committing**: derive the blob id from the user's bytes. No chain interaction yet.
+2. **Submitting**: `submitIntent` is sent. Show a spinner; on confirmation show the intent id and a link to [LayerZero Scan](https://testnet.layerzeroscan.com).
+3. **Uploading**: POST the bytes to the relayer. Surface a `422` as "data does not match the commitment" and a `413` as "file too large".
+4. **Delivering**: LayerZero verifies and delivers the commitment to Sui.
+5. **Storing**: the relayer uploads to Walrus and calls `execute_store` on Sui.
+6. **Confirmed**: `IntentExecuted` received (or `executed(intentId)` is true). Show the Walrus blob id and expiry epoch.
 
-The full round-trip from submission to confirmation typically takes 2-10 minutes on testnet, depending on LayerZero DVN verification time and relayer processing speed.
+The full round-trip from submission to confirmation typically takes 2 to 10 minutes on testnet, depending on LayerZero DVN verification time and relayer processing speed.
 
 ## Related
 
 - [Contract Interface](contract-interface.md) for complete function signatures and Sui examples
+- [Commitment Format](commitment-format.md) for the wire layout and intent id derivation
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [Integration Checklist](integration-checklist.md) for the full integration workflow
 - [Troubleshooting](troubleshooting.md) for common issues
 
@@ -1307,26 +1353,39 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 ## 5. Fee estimation
 
-- [ ] Call `quote(dstEid, payload, deadline, options)` before `submitIntent` to get the LZ fee
+- [ ] Derive the commitment fields from your bytes: `blobId`, `size`, `encodingType` (the `@bosphor/sdk` `defaultComputeBlob` helper does this), plus `storageEpochs` and `deadline`
+- [ ] Call `quote(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` before `submitIntent` to get the LZ fee
 - [ ] Pass the returned `nativeFee` as `msg.value` to `submitIntent`
 - [ ] Use the default LZ options (`0x00030100110100000000000000000000000000030d40`) unless your use case requires custom gas limits
+- [ ] Note the cross-chain fee is flat regardless of file size (only the 49-byte commitment crosses the bridge)
 - [ ] Understand that the relayer adds a 10% fee buffer on the return path
 
 ## 6. Submit intents from your dApp
 
-- [ ] Import `IBosphorAdapter` interface for type-safe interaction
+- [ ] Prefer `@bosphor/sdk` (`store()` runs the whole flow in one call). See [sdk.bosphor.xyz](https://sdk.bosphor.xyz)
+- [ ] Otherwise, import `IBosphorAdapter` for type-safe interaction
+- [ ] Call `submitIntent(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` with the quoted `nativeFee` as `msg.value`
 - [ ] Set deadlines with enough buffer for cross-chain delivery (at least 15 minutes recommended)
 - [ ] Handle the `IntentSubmitted` event to get the `intentId`
-- [ ] Listen for `IntentExecuted` event to confirm fulfillment and decode the proof (blobId, endEpoch)
-- [ ] See [dApp Tutorial](dapp-tutorial.md) for complete ethers.js and viem examples
+- [ ] Listen for the `IntentExecuted` event (or poll `executed(intentId)`) to confirm fulfillment and decode the proof (blobId, endEpoch)
+- [ ] See [dApp Tutorial](dapp-tutorial.md) for complete SDK and raw ethers.js examples
 
-## 7. Relayer health
+## 7. Upload the bytes out-of-band
+
+The file bytes never cross the bridge. After `submitIntent` returns an `intentId`, POST the exact committed bytes to the relayer so it can store them on Walrus.
+
+- [ ] `POST {relayerBaseUrl}/blob/{intentId}` with the raw bytes as the body (`content-type: application/octet-stream`)
+- [ ] Base URL is `https://api.bosphor.xyz/testnet` on testnet, `https://api.bosphor.xyz` on mainnet
+- [ ] Treat a `404` right after submit as a timing race and retry with backoff; a `422` means the bytes do not match the commitment
+- [ ] See [Blob ingest](public-api.md#blob-ingest-out-of-band) for the full status-code contract (`@bosphor/sdk` `store()` does this step for you)
+
+## 8. Relayer health
 
 - [ ] Verify the relayer is running: `GET /health` should return `{"status": "ok"}`
 - [ ] Monitor relayer wallet balances (both Sepolia ETH and Sui testnet SUI)
 - [ ] Review [Relayer](relayer.md) for configuration and error handling details
 
-## 8. Pre-production review
+## 9. Pre-production review
 
 - [ ] Confirm all trust assumptions are documented and acceptable for your use case
 - [ ] Understand the emergency `confirmExecution` fallback and who holds the owner key
@@ -1337,6 +1396,8 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 ## Related
 
 - [Contract Interface](contract-interface.md) for function signatures and wire formats
+- [Commitment Format](commitment-format.md) for the wire layout and intent id derivation
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [dApp Tutorial](dapp-tutorial.md) for frontend integration examples
 - [Troubleshooting](troubleshooting.md) for common issues
 
@@ -1376,25 +1437,22 @@ const { intentId, blobId, endEpoch } = await client.store(bytes, { epochs: 5 });
 
 Bosphor connects several protocols:
 
-- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent payloads as Walrus blobs.
+- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent data as Walrus blobs.
 - **[LayerZero v2](https://layerzero.network/)**: Cross-chain messaging. Both message directions are DVN-verified.
 - **[Sui](https://sui.io/)**: The execution layer where Walrus storage and proof generation happen.
 - **Origin chains**: any EVM chain, and **Solana**, submit the same commitment over the same protocol.
 
 ## Current status
 
-**Milestone 2 complete (v0.2.0)**, deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow and validated on Ethereum mainnet.
-
-**Milestone 3 in progress.** The protocol now makes cross-chain cost independent of data size and adds a second origin ecosystem:
+**Milestone 3 complete.** The protocol makes cross-chain cost independent of data size and adds a second origin ecosystem:
 
 - **Reference commitments**: intents carry only a compact commitment (blob id, size, encoding, storage duration); the bytes travel out-of-band, so the cross-chain fee is flat regardless of file size.
-- **Solana adapter**: a devnet round-trip is live, submitting the same commitment over LayerZero.
-- **Unified TypeScript SDK** (`@bosphor/sdk`): one `store()` call for both EVM and Solana, with the blob id computed locally and the result verified on-chain. Docs at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+- **EVM and Solana origins live**: both submit the same commitment over LayerZero, with a verified round-trip on each.
+- **Unified TypeScript SDK** (`@bosphor/sdk`, published): one `store()` call for both EVM and Solana, with the blob id computed locally and the result verified on-chain. Docs at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+- **Reference dApp shipped** at [demo.bosphor.xyz](https://demo.bosphor.xyz): a permanence-focused UX that runs real EVM and Solana round-trips end to end.
 - Sui-side assertions bind the stored blob id and end epoch to the commitment, so the relayer cannot substitute or under-fund the data.
 
-The remaining M3 deliverable is the demonstration dApp (built in [`riva-labs/bosphor-dapp`](https://github.com/riva-labs/bosphor-dapp)).
-
-Earlier M2 infrastructure remains live: Prometheus + Grafana monitoring, a Kener status page at status.bosphor.xyz, a continuous canary, the public intent feed (`GET /public/intents`) at api.bosphor.xyz, Sentry, an on-demand chaos harness, and a self-operated LayerZero DVN.
+Milestone 2 built on Sepolia + Sui Testnet with a verified bidirectional E2E flow, validated on Ethereum mainnet. Its infrastructure remains live: Prometheus + Grafana monitoring, a Kener status page at status.bosphor.xyz, a continuous canary, the public intent feed (`GET /public/intents`) at api.bosphor.xyz, Sentry, an on-demand chaos harness, and a self-operated LayerZero DVN.
 
 ## Next steps
 
@@ -1510,9 +1568,9 @@ sequenceDiagram
     participant LZ as LayerZero DVN
     participant Sui as Sui OApp
 
-    User->>EVM: submitIntent(payload, deadline)
-    EVM->>EVM: ABI encode (intentId, sender, payload, deadline)
-    EVM->>LZ: _lzSend(type 0 message)
+    User->>EVM: submitIntent(commitment fields)
+    EVM->>EVM: pack intentId(32) ++ commitment(49)
+    EVM->>LZ: _lzSend(81-byte message)
     LZ->>LZ: DVN verification (2-block confirmation)
     LZ->>Sui: lz_receive()
     Sui->>Sui: Decode message, store IntentRecord
@@ -1521,21 +1579,20 @@ sequenceDiagram
 
 ### Step by step
 
-1. User calls `submitIntent(payload, deadline)` on the `BosphorAdapter` contract (Sepolia).
-2. The adapter ABI-encodes the message: `(bytes32 intentId, address sender, bytes payload, uint256 deadline)`.
-3. The message is prefixed with type byte `0x00` and sent via `_lzSend()` to LayerZero.
+1. User calls `submitIntent(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` on the `BosphorAdapter` contract (Sepolia). The file bytes are not passed here; only the commitment fields are.
+2. The adapter packs the message: `intentId(32) ++ commitment(49)` via `abi.encodePacked`, where the commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`.
+3. The message is sent via `_lzSend()` to LayerZero.
 4. LayerZero's DVN verifies the message and delivers it to the Sui endpoint.
 5. The LZ executor calls `lz_receive` on the Bosphor OApp on Sui.
-6. The OApp decodes the message, stores an `IntentRecord`, and emits an `IntentReceived` event.
+6. The OApp splits the message, decodes the commitment, records an `IntentRecord` holding the committed blob id and storage epochs, and emits an `IntentReceived` event.
 
-### Message format (type 0, forward)
+### Message format (forward)
 
 ```
-[0x00] [intentId (32 bytes)] [sender (32 bytes, left-padded address)]
-       [payload (dynamic)]   [deadline (32 bytes, uint256)]
+[intentId (32 bytes)] [commitment (49 bytes)]
 ```
 
-Total: 1 + 32 + 32 + len(payload) + 32 bytes.
+Total: 81 bytes. The commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
 ## Return path: Sui to EVM
 
@@ -1557,7 +1614,7 @@ sequenceDiagram
 
 ### Step by step
 
-1. The relayer uploads data to Walrus and calls `execute_store` on Sui.
+1. The relayer receives the file bytes out-of-band (`POST /blob/{intentId}`), uploads them to Walrus, and calls `execute_store` on Sui. `execute_store` asserts the certified blob matches the committed blob id and storage epochs; it cannot substitute other bytes.
 2. The relayer calls `lz_send_proof()` on the Bosphor OApp, passing the intent ID, blob ID, end epoch, and destination EID.
 3. The function builds a type-1 proof message and initiates a LayerZero send via a Programmable Transaction Block (PTB).
 4. The PTB routes through the LZ endpoint, ULN302, executor fee lib, DVN fee lib, and treasury.
@@ -1629,8 +1686,10 @@ The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer c
 ## Related
 
 - [Architecture](architecture.md) for the system overview
+- [Commitment Format](commitment-format.md) for the forward-message wire layout
 - [Sui Executor](sui-executor.md) for the Walrus execution step
 - [Contract Interface](contract-interface.md) for EVM function signatures
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [Relayer](relayer.md) for the operator that drives both paths
 
 ---
@@ -1640,7 +1699,9 @@ The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer c
 
 Bosphor exposes a read-only HTTP API that surfaces the live cross-chain lifecycle of every intent the relayer handles. It powers the public status dashboard and lets integrators build their own views without touching internal metrics. The API serves real data only: when the backing store is unavailable it returns an explicit error, never a fabricated feed.
 
-The feed is served by the relayer and, in the deployed testnet, is reachable at `https://api.bosphor.xyz`.
+The relayer HTTP API has two integration surfaces: the read-only intent feed documented here, and the [blob ingest](#blob-ingest-out-of-band) endpoint that receives the file bytes out-of-band.
+
+The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples on this page use the testnet path.
 
 ## The intent lifecycle
 
@@ -1704,6 +1765,51 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 ### CORS
 
 The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
+
+## Blob ingest (out-of-band)
+
+This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
+
+### `POST {relayerBaseUrl}/blob/{intentId}`
+
+Send the raw blob bytes as the request body. The relayer recomputes the Walrus blob id and size from the body and binds them to the on-chain commitment recorded for `intentId`.
+
+- **Path parameter**: `intentId`, the 0x-prefixed 32-byte intent id returned by `submitIntent`.
+- **Headers**: `content-type: application/octet-stream`.
+- **Body**: the raw blob bytes (not base64, not multipart, not JSON).
+
+Base URL: `https://api.bosphor.xyz/testnet` on testnet, `https://api.bosphor.xyz` on mainnet.
+
+```bash
+curl -X POST \
+  -H "content-type: application/octet-stream" \
+  --data-binary @./file.bin \
+  "https://api.bosphor.xyz/testnet/blob/0xabc...def"
+```
+
+On success the relayer responds `200`/`201` with a small JSON ack:
+
+```json
+{ "intentId": "0xabc...def", "blobId": "blob-xyz", "size": 1024 }
+```
+
+### Rejections
+
+Each rejection maps to a precise HTTP status so a client can react without parsing the message:
+
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | Body is empty or not raw bytes |
+| `404 Not Found` | No pending intent for that id (or the relayer has not seen it yet) |
+| `409 Conflict` | The intent is already executed |
+| `410 Gone` | The intent deadline has passed |
+| `413 Payload Too Large` | Body exceeds the ingest cap (`MAX_INGEST_BLOB_BYTES`, default 10 MiB) |
+| `422 Unprocessable Entity` | The recomputed blob id or size does not match the commitment |
+| `503 Service Unavailable` | The relayer is not ready or is shedding load (backpressure); honor `Retry-After` |
+
+A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff. A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
+
+The `@bosphor/sdk` `store()` flow performs this upload for you (`client.upload(intentId, data)` is also exposed as an escape hatch). See [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
 
 ## Configuration
 
