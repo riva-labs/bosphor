@@ -105,7 +105,10 @@ describe('SolanaLifecycleWatcher', () => {
   it('is inert when Solana support is not configured', async () => {
     const store = new InMemoryIntentLifecycleStore();
     const poll = jest.fn();
-    const solana = makeSolana({ isEnabled: jest.fn().mockReturnValue(false), pollIntentSubmitted: poll });
+    const solana = makeSolana({
+      isEnabled: jest.fn().mockReturnValue(false),
+      pollIntentSubmitted: poll,
+    });
     const watcher = new SolanaLifecycleWatcher(solana, sui, store, config);
 
     await watcher.onModuleInit();

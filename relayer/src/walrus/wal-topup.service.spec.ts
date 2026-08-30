@@ -2,7 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { WalTopUpService } from './wal-topup.service';
 import { SuiService } from '../chain/sui/sui.service';
 import { MetricsService } from '../metrics/metrics.service';
-import { WAL_COIN_TYPE, WAL_COIN_TYPE_BY_NETWORK, SUI_COIN_TYPE } from '../common/constants';
+import { WAL_COIN_TYPE, WAL_COIN_TYPE_BY_NETWORK } from '../common/constants';
 
 const GWEI = 1_000_000_000n; // 1 whole unit (SUI/WAL have 9 decimals)
 

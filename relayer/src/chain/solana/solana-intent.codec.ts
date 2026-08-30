@@ -125,7 +125,9 @@ export function parseIntentSubmittedEvents(logs: readonly string[]): SolanaInten
     if (idx === -1) continue;
     let bytes: Uint8Array;
     try {
-      bytes = Uint8Array.from(Buffer.from(line.slice(idx + PROGRAM_DATA_PREFIX.length).trim(), 'base64'));
+      bytes = Uint8Array.from(
+        Buffer.from(line.slice(idx + PROGRAM_DATA_PREFIX.length).trim(), 'base64'),
+      );
     } catch {
       continue;
     }

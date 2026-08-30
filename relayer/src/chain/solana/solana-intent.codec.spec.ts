@@ -21,9 +21,7 @@ describe('decodeIntentSubmitted', () => {
     const ev = decodeIntentSubmitted(bytes);
 
     expect(ev).not.toBeNull();
-    expect(ev!.intentId).toBe(
-      '0xbce25e9c9b9bbee3c06c71f225e39dddc1ac648c40cc0e3bf99964b9c1101985',
-    );
+    expect(ev!.intentId).toBe('0xbce25e9c9b9bbee3c06c71f225e39dddc1ac648c40cc0e3bf99964b9c1101985');
     expect(ev!.committedBlobId).toBe(
       '0x86cd116128af99d296001efaaa51a73d77ec7e02db9af834e1cd04f421c09f95',
     );
@@ -94,7 +92,9 @@ describe('encodeConfirmExecutionData', () => {
   });
 
   it('rejects a non-32-byte intent id or blob id', () => {
-    expect(() => encodeConfirmExecutionData('0xab', blobId, 1n)).toThrow(/intentId must be 32 bytes/);
+    expect(() => encodeConfirmExecutionData('0xab', blobId, 1n)).toThrow(
+      /intentId must be 32 bytes/,
+    );
     expect(() => encodeConfirmExecutionData(intentId, '0xcd', 1n)).toThrow(
       /returnedBlobId must be 32 bytes/,
     );

@@ -89,7 +89,9 @@ export class SolanaService implements OnModuleInit {
       this.admin = loadKeypair(keypair);
       this.logger.log(`Solana return signer: ${this.admin.publicKey.toBase58()}`);
     } else {
-      this.logger.warn('SOLANA_RELAYER_KEYPAIR unset - Solana return leg (confirm_execution) disabled');
+      this.logger.warn(
+        'SOLANA_RELAYER_KEYPAIR unset - Solana return leg (confirm_execution) disabled',
+      );
     }
   }
 

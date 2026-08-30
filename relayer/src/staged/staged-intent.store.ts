@@ -14,10 +14,7 @@ import {
  * PgIntentLifecycleStore.
  */
 export interface PgQueryable {
-  query(
-    text: string,
-    params?: unknown[],
-  ): Promise<{ rows: Record<string, unknown>[] }>;
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
 const TABLE = 'staged_intent';
@@ -70,13 +67,9 @@ export class StagedIntentStore {
       )
     `);
     // Additive migration for deployments created before delivery_digest existed.
-    await this.pool.query(
-      `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS delivery_digest TEXT`,
-    );
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS delivery_digest TEXT`);
     // Additive migration: gate for the byte-recovery sweep (next allowed attempt).
-    await this.pool.query(
-      `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bytes_recovery_at BIGINT`,
-    );
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bytes_recovery_at BIGINT`);
     // Drives the claim/drain query: active rows that are due, oldest first.
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${TABLE}_drain_idx ON ${TABLE} (state, next_attempt_at, created_at)`,
@@ -125,7 +118,14 @@ export class StagedIntentStore {
          delivery_digest = COALESCE(EXCLUDED.delivery_digest, ${TABLE}.delivery_digest),
          updated_at = EXCLUDED.updated_at
        WHERE ${TABLE}.state = 'active'`,
-      [intentId, details.srcEid, details.committedBlobId, details.deadline, now, details.deliveryDigest ?? null],
+      [
+        intentId,
+        details.srcEid,
+        details.committedBlobId,
+        details.deadline,
+        now,
+        details.deliveryDigest ?? null,
+      ],
     );
   }
 
@@ -190,10 +190,9 @@ export class StagedIntentStore {
 
   /** Fetch the raw bytes for `intentId` (only when actually storing it). */
   async fetchBytes(intentId: string): Promise<Buffer | undefined> {
-    const { rows } = await this.pool.query(
-      `SELECT bytes FROM ${TABLE} WHERE intent_id = $1`,
-      [intentId],
-    );
+    const { rows } = await this.pool.query(`SELECT bytes FROM ${TABLE} WHERE intent_id = $1`, [
+      intentId,
+    ]);
     const raw = rows.length ? (rows[0].bytes as Buffer | null) : null;
     return raw ?? undefined;
   }

@@ -24,11 +24,7 @@ import { ErrorReporter } from '../observability/error-reporter';
 import { StagedIntentStore } from '../staged/staged-intent.store';
 import { StagedIntentRow } from '../staged/staged-intent.types';
 import { IntentIngest } from '../ingest/intent-ingest.service';
-import {
-  blobIdMatches,
-  fieldToWalrusBlobId,
-  walrusBlobIdToField,
-} from '../common/walrus-blob-id';
+import { blobIdMatches, fieldToWalrusBlobId, walrusBlobIdToField } from '../common/walrus-blob-id';
 import { BYTES_RECOVERY_INTERVAL_MS, CLAIM_INTERVAL_MS } from '../common/constants';
 
 /**
@@ -186,7 +182,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     try {
       const now = Date.now();
       const rows = await this.staged.drainDue(now, this.batchSize);
-      const ready: { row: StagedIntentRow; sender: string; commitment: IntentCommitment | null }[] = [];
+      const ready: { row: StagedIntentRow; sender: string; commitment: IntentCommitment | null }[] =
+        [];
       for (const row of rows) {
         if (ready.length >= this.storeConcurrency) break;
         if (this.inProcess.has(row.intentId)) continue;
@@ -346,7 +343,8 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     // 1. Re-verify the recomputed blob id equals the commitment BEFORE any spend.
     // A mismatch is terminal (the buffered bytes are not what was committed).
-    const committedRef = commitment?.committedBlobId ?? row.committedBlobId ?? '0x' + '00'.repeat(32);
+    const committedRef =
+      commitment?.committedBlobId ?? row.committedBlobId ?? '0x' + '00'.repeat(32);
     if (!blobIdMatches(row.blobId ?? '', committedRef)) {
       await staged.markDead(
         intentId,
@@ -405,7 +403,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       } catch (err) {
         const msg = String(err);
         // EIntentAlreadyExecuted (abort code 2): a prior attempt recorded it.
-        if (msg.includes('execute_store') && (msg.includes(', 2)') || msg.includes('abort code: 2'))) {
+        if (
+          msg.includes('execute_store') &&
+          (msg.includes(', 2)') || msg.includes('abort code: 2'))
+        ) {
           this.logger.log(`[${intentId}] execute_store already done, proceeding`);
           storeDigest = ALREADY_RECORDED;
         } else {
@@ -455,7 +456,12 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     endEpoch: number,
   ): Promise<void> {
     try {
-      const quotedFee = await this.suiLz.quoteLzFee(intentId, walrusBlobId, endEpoch, this.evmDstEid);
+      const quotedFee = await this.suiLz.quoteLzFee(
+        intentId,
+        walrusBlobId,
+        endEpoch,
+        this.evmDstEid,
+      );
       // 10% buffer for price drift between quote and send.
       const feeAmount = (quotedFee * 11n) / 10n;
       this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount})`);
@@ -507,7 +513,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
           `(set SOLANA_RELAYER_KEYPAIR); cannot confirm_execution`,
       );
     }
-    this.logger.log(`[${intentId}] Confirming execution on Solana (src_eid: ${this.solanaSrcEid})...`);
+    this.logger.log(
+      `[${intentId}] Confirming execution on Solana (src_eid: ${this.solanaSrcEid})...`,
+    );
     const sig = await this.solana.confirmExecution(intentId, canonicalBlobIdHex, BigInt(endEpoch));
     this.metrics.recordLzSend('success');
     this.logger.log(`[${intentId}] Solana return confirmed: ${sig}`);

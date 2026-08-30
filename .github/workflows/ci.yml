@@ -80,6 +80,10 @@ jobs:
         run: npm ci
         working-directory: relayer
 
+      - name: Lint
+        run: npm run lint
+        working-directory: relayer
+
       - name: Build
         run: npm run build
         working-directory: relayer
