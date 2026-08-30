@@ -28,10 +28,12 @@
     "relayer:build": "cd relayer && npm run build",
     "docs:dev": "cd website && npm run start",
     "docs:build": "cd website && npm run build",
-    "test": "npm run test:forge && npm run test:move && npm run test:relayer",
+    "test": "npm run test:forge && npm run test:move && npm run test:relayer && npm run test:sdk",
     "test:forge": "cd contracts/evm && forge test -vvv",
     "test:move": "cd contracts/sui/lz-receiver && sui move test --build-env testnet",
-    "test:relayer": "cd relayer && npm run build && npm run test"
+    "test:relayer": "cd relayer && npm run build && npm run test",
+    "test:sdk": "cd sdk && npm test",
+    "test:codec": "cd contracts/solana/commitment-codec && cargo test"
   },
   "dependencies": {
     "@mysten/sui": "^2.23.1",

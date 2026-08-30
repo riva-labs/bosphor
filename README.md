@@ -61,11 +61,24 @@ flowchart LR
 ```bash
 git clone --recurse-submodules https://github.com/riva-labs/bosphor
 cd bosphor && nvm use && npm install
-cp .env.example .env  # fill in keys
-npm run new-deployment
 ```
 
-See [website/docs/deployment.md](website/docs/deployment.md) for detailed setup instructions.
+This is not an npm workspace yet: `npm install` at the root only installs the
+root tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`,
+`sdk-docs/`) has its own `package.json`, so install the ones you work on, e.g.
+`(cd relayer && npm install)`.
+
+Run the test gate (no keys or services needed for `forge`/`move`/relayer unit
+tests):
+
+```bash
+npm test            # forge + move + relayer + sdk
+```
+
+`npm run new-deployment` (deploy + wire + e2e) is a maintainer flow: it submits
+real testnet transactions and needs a funded wallet and a running relayer, so
+fill `.env` first (`cp .env.example .env`) and start the relayer. See
+[website/docs/deployment.md](website/docs/deployment.md) for the full setup.
 
 ## Using the SDK
 
@@ -78,6 +91,14 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 ```
 
 ```ts
+import { createBosphorClient } from "@bosphor/sdk/evm";
+
+const client = createBosphorClient({
+  adapter,                  // an ethers.Contract bound to BosphorAdapter (with a signer)
+  relayerUrl: "https://api.bosphor.xyz/testnet",
+  dstEid: 40378,            // Sui testnet
+});
+
 const { intentId, blobId, endEpoch } = await client.store(bytes, { epochs: 5 });
 ```
 
