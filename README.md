@@ -65,8 +65,13 @@ cd bosphor && nvm use && npm install
 
 This is not an npm workspace yet: `npm install` at the root only installs the
 root tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`,
-`sdk-docs/`) has its own `package.json`, so install the ones you work on, e.g.
-`(cd relayer && npm install)`.
+`sdk-docs/`) has its own `package.json`. Install everything in one command:
+
+```bash
+npm run setup
+```
+
+or install just the ones you work on, e.g. `(cd relayer && npm install)`.
 
 Run the test gate (no keys or services needed for `forge`/`move`/relayer unit
 tests):
