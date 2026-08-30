@@ -1,0 +1,11 @@
+{
+  "//": "Shared TypeScript baseline for the plain-TS packages (sdk, canary, chaos). Each package extends this and overrides only module/resolution and its own extras. The framework packages (relayer/NestJS, website/Docusaurus, sdk-docs/Next.js) keep their own tsconfig; they can adopt this base incrementally.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  }
+}
