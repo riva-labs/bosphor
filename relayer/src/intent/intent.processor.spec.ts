@@ -87,7 +87,10 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     getBlockNumber: jest.fn().mockResolvedValue(1),
     confirmExecution: jest.fn().mockResolvedValue('0xevm'),
   };
-  const solana = { canConfirm: () => true, confirmExecution: jest.fn().mockResolvedValue('solsig') };
+  const solana = {
+    canConfirm: () => true,
+    confirmExecution: jest.fn().mockResolvedValue('solsig'),
+  };
   const walTopUp = { ensureWal: jest.fn().mockResolvedValue(undefined) };
   const metrics = {
     recordIntentProcessed: jest.fn(),
@@ -108,7 +111,11 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     recordHop: jest.fn().mockResolvedValue(undefined),
   };
   const errorReporter = { captureException: jest.fn() };
-  const suiCheckpoint = { setOnEventCallback: jest.fn(), startStreaming: jest.fn(), stop: jest.fn() };
+  const suiCheckpoint = {
+    setOnEventCallback: jest.fn(),
+    startStreaming: jest.fn(),
+    stop: jest.fn(),
+  };
   const cfg: Record<string, number> = {
     SOLANA_SRC_EID,
     STORE_CONCURRENCY: 4,
@@ -211,7 +218,12 @@ describe('IntentProcessor durable queue', () => {
 
   it('is idempotent: a row with a prior upload + store never re-uploads or re-records', async () => {
     const { proc, staged, walrus, sui } = build([
-      makeRow({ walrusObjectId: '0xobj', walrusBlobId: 'wblob', endEpoch: 42, storeDigest: '0xprev' }),
+      makeRow({
+        walrusObjectId: '0xobj',
+        walrusBlobId: 'wblob',
+        endEpoch: 42,
+        storeDigest: '0xprev',
+      }),
     ]);
     await proc.tick();
 
@@ -242,7 +254,10 @@ describe('IntentProcessor durable queue', () => {
     const { proc, staged, walrus } = build([makeRow({ blobId: OTHER_B64URL })]);
     await proc.tick();
 
-    expect(staged.markDead).toHaveBeenCalledWith('0xintent', expect.stringContaining('does not match'));
+    expect(staged.markDead).toHaveBeenCalledWith(
+      '0xintent',
+      expect.stringContaining('does not match'),
+    );
     expect(walrus.upload).not.toHaveBeenCalled();
     expect(staged.markDone).not.toHaveBeenCalled();
   });
@@ -319,7 +334,10 @@ describe('IntentProcessor durable queue', () => {
     walrus.upload.mockRejectedValue(new Error('walrus down'));
     await proc.tick();
 
-    expect(staged.markDead).toHaveBeenCalledWith('0xintent', expect.stringContaining('attempts exhausted'));
+    expect(staged.markDead).toHaveBeenCalledWith(
+      '0xintent',
+      expect.stringContaining('attempts exhausted'),
+    );
     expect(metrics.recordDeadLetter).toHaveBeenCalledWith('pre_store');
     expect(staged.reschedule).not.toHaveBeenCalled(); // dead, not rescheduled
   });
@@ -357,7 +375,18 @@ describe('IntentProcessor durable queue', () => {
     const { proc, staged, walrus } = build([makeRow()], { STORE_ATTEMPT_TIMEOUT_MS: 20 });
     // Upload hangs well past the 20ms timeout.
     walrus.upload.mockReturnValue(
-      new Promise((res) => setTimeout(() => res({ blobId: COMMITTED_B64URL, suiObjectId: '0xobj', endEpoch: 42, walCostMist: undefined }), 200)),
+      new Promise((res) =>
+        setTimeout(
+          () =>
+            res({
+              blobId: COMMITTED_B64URL,
+              suiObjectId: '0xobj',
+              endEpoch: 42,
+              walCostMist: undefined,
+            }),
+          200,
+        ),
+      ),
     );
     await proc.tick();
 

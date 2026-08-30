@@ -24,7 +24,10 @@ function fakeRes(): { headers: Record<string, string>; header(n: string, v: stri
   };
 }
 
-function controllerFor(result: IngestResult): { ctrl: IngestController; res: ReturnType<typeof fakeRes> } {
+function controllerFor(result: IngestResult): {
+  ctrl: IngestController;
+  res: ReturnType<typeof fakeRes>;
+} {
   const ingest = { ingest: jest.fn().mockResolvedValue(result) } as unknown as IntentIngest;
   return { ctrl: new IngestController(ingest), res: fakeRes() };
 }
@@ -60,7 +63,9 @@ describe('IngestController', () => {
     ['wrong-blob-id', UnprocessableEntityException],
   ] as const)('maps %s to the right HTTP error without a Retry-After', async (reason, Exc) => {
     const { ctrl, res } = controllerFor({ ok: false, intentId: INTENT_ID, reason, message: 'no' });
-    await expect(ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), res)).rejects.toBeInstanceOf(Exc);
+    await expect(ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), res)).rejects.toBeInstanceOf(
+      Exc,
+    );
     expect(res.headers['Retry-After']).toBeUndefined();
   });
 

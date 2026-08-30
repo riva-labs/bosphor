@@ -25,7 +25,10 @@ class FakePool implements PgQueryable {
       const cutoff = params[0] as number;
       const purged: Record<string, unknown>[] = [];
       for (const [id, r] of this.rows) {
-        if (['done', 'dead', 'expired'].includes(r.state as string) && (r.updated_at as number) < cutoff) {
+        if (
+          ['done', 'dead', 'expired'].includes(r.state as string) &&
+          (r.updated_at as number) < cutoff
+        ) {
           purged.push({ intent_id: id });
           this.rows.delete(id);
         }
@@ -374,7 +377,11 @@ describe('StagedIntentStore', () => {
     await store.upsertBytes('0xd', { bytes: bytes('payload'), blobId: 'blob-d', size: 7 });
     expect((await store.fetchBytes('0xd'))?.toString()).toBe('payload');
 
-    await store.persistUpload('0xd', { walrusObjectId: '0xobj', walrusBlobId: 'wblob', endEpoch: 42 });
+    await store.persistUpload('0xd', {
+      walrusObjectId: '0xobj',
+      walrusBlobId: 'wblob',
+      endEpoch: 42,
+    });
     await store.persistStore('0xd', '0xdigest');
     await store.markReturned('0xd');
     const row = await store.get('0xd');
