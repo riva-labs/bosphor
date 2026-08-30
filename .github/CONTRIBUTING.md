@@ -20,8 +20,8 @@ cp .env.example .env
 
 This is not an npm workspace yet: the root `npm install` only installs the root
 tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`, `sdk-docs/`)
-has its own `package.json`, so install the ones you work on, e.g.
-`(cd relayer && npm install)` or `(cd sdk && npm install)`.
+has its own `package.json`. Run `npm run setup` to install all of them in one
+command, or install just the ones you work on, e.g. `(cd relayer && npm install)`.
 
 Optional: install the opt-in pre-push hook so the Release Guard check runs
 locally before you push:
