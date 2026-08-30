@@ -3,7 +3,7 @@ title: Changelog
 description: Notable changes to @bosphor/sdk, newest first.
 ---
 
-The current release is **`@bosphor/sdk` 0.9.0**. The full, authoritative
+The current release is **`@bosphor/sdk` 0.10.0**. The full, authoritative
 changelog lives in the repo:
 [CHANGELOG.md](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md),
 and each release is tagged
@@ -13,6 +13,13 @@ and each release is tagged
 The SDK is pre-1.0. `feat` bumps the minor version and `fix` bumps the patch;
 breaking changes bump the minor while pre-1.0. Pin a version in production.
 </Callout>
+
+## 0.10.0
+
+- **feat:** `fromEthersContract(contract)` builds the whole EVM adapter (including the `queryProof` reader) from an `ethers.Contract`, so no more `as unknown as AdapterContract` cast or hand-written proof-log parsing.
+- **feat:** `submit()` returns `txHash` and `store()` surfaces it on the result (EVM and Solana).
+- **feat:** `createDefaultComputeBlob(network)` and a `network` client option, so a mainnet adapter no longer silently commits a testnet-encoded blob id.
+- `AdapterContract.getIntentId`/`nonces` are now optional. Backward compatible.
 
 ## 0.9.0
 
