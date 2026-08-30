@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 (2026-08-30)
+
+### Bug Fixes
+
+- fix(relayer): record the confirmed hop on the Solana return leg
+
 ## 0.7.0 (2026-08-30)
 
 ### Features
