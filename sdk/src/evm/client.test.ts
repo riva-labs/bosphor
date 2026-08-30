@@ -6,6 +6,7 @@ import {
   type AdapterContract,
   type EvmTransactionReceipt,
 } from "./client.js";
+import { fromEthersContract, type EthersContractLike } from "./adapter.js";
 import { ProofTimeoutError, RelayerUploadError } from "../errors.js";
 import type { FetchLike } from "../store-flow.js";
 import type { BlobEncoding, ComputeBlob, Hex } from "../types.js";
@@ -297,4 +298,60 @@ test("awaitProof() rejects with the abort reason when the signal fires mid-poll"
     () => client.awaitProof(INTENT_ID, { pollMs: 2, timeoutMs: 60_000, signal: ac.signal }),
     /stop waiting/,
   );
+});
+
+test("store() and submit() surface the origin submit tx hash", async () => {
+  const { adapter } = makeFakeAdapter();
+  const { fetch } = makeFetch(200, '{"intentId":"x","blobId":"y","size":3}');
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const result = await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+  assert.equal(result.txHash, "0xdeadbeef");
+});
+
+test("fromEthersContract delegates methods and wires queryProof from the event log", async () => {
+  let queried = false;
+  const contract: EthersContractLike = {
+    async submitIntent() {
+      return { hash: "0xabc", async wait() { return { logs: [] }; } };
+    },
+    async quote() {
+      return { nativeFee: 7n, lzTokenFee: 0n };
+    },
+    async executed() {
+      return true;
+    },
+    async committedBlobId() {
+      return BLOB_ID;
+    },
+    interface: {
+      parseLog() {
+        return null;
+      },
+    },
+    filters: {
+      IntentExecuted(intentId) {
+        return { intentId };
+      },
+    },
+    async queryFilter() {
+      queried = true;
+      return [{ args: { proof: encodeProof(BLOB_ID, END_EPOCH) } }];
+    },
+  };
+
+  const adapter = fromEthersContract(contract, { proofLookbackBlocks: 10 });
+  assert.equal(await adapter.executed(INTENT_ID), true);
+  assert.equal(await adapter.committedBlobId(INTENT_ID), BLOB_ID);
+  const proof = await adapter.queryProof!(INTENT_ID);
+  assert.ok(queried, "queryProof should call the contract's queryFilter");
+  assert.equal(decodeProofEndEpoch(proof!), END_EPOCH);
+  // Optional members the contract does not expose stay undefined.
+  assert.equal(adapter.nonces, undefined);
+  assert.equal(adapter.getIntentId, undefined);
 });

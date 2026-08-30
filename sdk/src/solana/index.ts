@@ -36,7 +36,8 @@ export type { DecodedIntentState } from "./proof.js";
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
 export type { DefaultSolanaChainOptions } from "./backend.js";
 
-export { defaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
+export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
+export type { WalrusNetwork } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/solana` is self-sufficient.
 export {

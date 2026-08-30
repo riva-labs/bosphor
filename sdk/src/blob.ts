@@ -43,57 +43,72 @@ function base64UrlToBytes32Hex(base64url: string): Hex {
   return `0x${bytesToHex(bytes)}`;
 }
 
-/**
- * The default, `@mysten/walrus`-backed blob-id computation. Lazily imports the
- * Walrus SDK on first use. The Walrus `WalrusClient.encodeBlob` API derives the id
- * offline, so this makes no network call.
- *
- * If `@mysten/walrus` is not installed (e.g. an offline install skipped the
- * optional chain SDK), this throws loudly with guidance rather than silently
- * fabricating an id.
- */
-export const defaultComputeBlob: ComputeBlob = async (
-  data: Uint8Array,
-): Promise<BlobEncoding> => {
-  // Import specifiers are held in variables so TypeScript does not try to resolve
-  // (and typecheck) the optional peers at compile time. They are only pulled in at
-  // runtime, when a consumer actually opts into the real Walrus-backed impl.
-  const walrusSpec = "@mysten/walrus";
-  const grpcSpec = "@mysten/sui/grpc";
+/** Walrus network. The RedStuff encoding (hence the blob id) depends on it. */
+export type WalrusNetwork = "testnet" | "mainnet";
 
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  let walrusMod: any;
-  let grpcMod: any;
-  try {
-    [walrusMod, grpcMod] = await Promise.all([import(walrusSpec), import(grpcSpec)]);
-  } catch (err) {
-    throw new Error(
-      "computeBlob requires the optional peer dependencies '@mysten/walrus' and " +
-        "'@mysten/sui'. Install them (npm install @mysten/walrus @mysten/sui) or " +
-        `pass a custom computeBlob to the client. Underlying error: ${String(err)}`,
-    );
-  }
-
-  // The relayer computes the same id via `client.walrus.encodeBlob`. Mirror that
-  // exact seam, a `SuiGrpcClient` extended with `walrus()` exactly as the relayer
-  // builds it, so the client-computed id matches the relayer's recomputation byte
-  // for byte. `encodeBlob` derives the id locally from the bytes; no RPC is made,
-  // so the base URL is never contacted here. The network is fixed to testnet
-  // because the RedStuff encoding depends on the network's shard count; a mainnet
-  // consumer should pass a custom computeBlob built for mainnet.
-  const suiClient = new grpcMod.SuiGrpcClient({
-    network: "testnet",
-    baseUrl: "https://fullnode.testnet.sui.io",
-  }).$extend(walrusMod.walrus());
-  const { blobId } = await suiClient.walrus.encodeBlob(new Uint8Array(data));
-  /* eslint-enable @typescript-eslint/no-explicit-any */
-
-  return {
-    blobId: base64UrlToBytes32Hex(blobId),
-    size: data.length,
-    // Walrus RedStuff is encoding type 0 (the only Walrus encoding today).
-    encodingType: 0,
-  };
+const WALRUS_FULLNODE: Record<WalrusNetwork, string> = {
+  testnet: "https://fullnode.testnet.sui.io",
+  mainnet: "https://fullnode.mainnet.sui.io",
 };
+
+/**
+ * Build a `@mysten/walrus`-backed blob-id computation bound to a specific network.
+ * Lazily imports the Walrus SDK on first use; `encodeBlob` derives the id offline,
+ * so no network call is made. Because the RedStuff encoding depends on the
+ * network's shard count, the blob id differs between testnet and mainnet, so the
+ * network is explicit here. A mainnet consumer MUST use
+ * `createDefaultComputeBlob("mainnet")` (or pass a custom `computeBlob`); using the
+ * testnet default on mainnet would commit a wrong blob id.
+ *
+ * If `@mysten/walrus` is not installed, this throws loudly with guidance rather
+ * than silently fabricating an id.
+ */
+export function createDefaultComputeBlob(network: WalrusNetwork): ComputeBlob {
+  return async (data: Uint8Array): Promise<BlobEncoding> => {
+    // Import specifiers are held in variables so TypeScript does not try to resolve
+    // (and typecheck) the optional peers at compile time. They are only pulled in at
+    // runtime, when a consumer actually opts into the real Walrus-backed impl.
+    const walrusSpec = "@mysten/walrus";
+    const grpcSpec = "@mysten/sui/grpc";
+
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    let walrusMod: any;
+    let grpcMod: any;
+    try {
+      [walrusMod, grpcMod] = await Promise.all([import(walrusSpec), import(grpcSpec)]);
+    } catch (err) {
+      throw new Error(
+        "computeBlob requires the optional peer dependencies '@mysten/walrus' and " +
+          "'@mysten/sui'. Install them (npm install @mysten/walrus @mysten/sui) or " +
+          `pass a custom computeBlob to the client. Underlying error: ${String(err)}`,
+      );
+    }
+
+    // The relayer computes the same id via `client.walrus.encodeBlob`. Mirror that
+    // exact seam, a `SuiGrpcClient` extended with `walrus()` exactly as the relayer
+    // builds it, so the client-computed id matches the relayer's recomputation byte
+    // for byte. `encodeBlob` derives the id locally from the bytes; no RPC is made,
+    // so the base URL is never contacted here.
+    const suiClient = new grpcMod.SuiGrpcClient({
+      network,
+      baseUrl: WALRUS_FULLNODE[network],
+    }).$extend(walrusMod.walrus());
+    const { blobId } = await suiClient.walrus.encodeBlob(new Uint8Array(data));
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+
+    return {
+      blobId: base64UrlToBytes32Hex(blobId),
+      size: data.length,
+      // Walrus RedStuff is encoding type 0 (the only Walrus encoding today).
+      encodingType: 0,
+    };
+  };
+}
+
+/**
+ * The default, testnet-bound blob-id computation. Kept for back-compat; for
+ * mainnet use `createDefaultComputeBlob("mainnet")` or pass a custom `computeBlob`.
+ */
+export const defaultComputeBlob: ComputeBlob = createDefaultComputeBlob("testnet");
 
 export { base64UrlToBytes32Hex };

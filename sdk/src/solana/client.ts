@@ -19,7 +19,7 @@
  */
 
 import type { ComputeBlob, Hex, StoreResult } from "../types.js";
-import { defaultComputeBlob } from "../blob.js";
+import { createDefaultComputeBlob, type WalrusNetwork } from "../blob.js";
 import { ProofTimeoutError } from "../errors.js";
 import {
   DEFAULT_EPOCHS,
@@ -110,6 +110,12 @@ export interface BosphorSolanaClientOptions {
   defaultEpochs?: number;
   /** Seconds added to `now` to derive the deadline when not supplied. */
   deadlineSeconds?: number;
+  /**
+   * Walrus network for the default blob-id computation. Set to `"mainnet"` for a
+   * mainnet deployment. Ignored when `computeBlob` is provided. Defaults to
+   * `"testnet"`.
+   */
+  network?: WalrusNetwork;
   /** Blob-id computation seam; defaults to the `@mysten/walrus`-backed impl. */
   computeBlob?: ComputeBlob;
   /** `fetch` implementation; defaults to the global `fetch`. */
@@ -153,7 +159,7 @@ export class BosphorSolanaClient {
     this.nativeFee = opts.nativeFee ?? 0n;
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
-    this.computeBlobFn = opts.computeBlob ?? defaultComputeBlob;
+    this.computeBlobFn = opts.computeBlob ?? createDefaultComputeBlob(opts.network ?? "testnet");
     this.fetchFn = resolveFetch(opts.fetch);
   }
 
@@ -174,7 +180,10 @@ export class BosphorSolanaClient {
    * Returns the intent id parsed from the `IntentSubmitted` event logs. Fails
    * loudly if the backend yields no intent id.
    */
-  async submit(encoded: EncodedIntent, opts: SubmitOptions = {}): Promise<{ intentId: Hex }> {
+  async submit(
+    encoded: EncodedIntent,
+    opts: SubmitOptions = {},
+  ): Promise<{ intentId: Hex; txHash: string }> {
     const result = await this.chain.submitIntent({
       blobId: encoded.blobId,
       size: encoded.size,
@@ -191,7 +200,7 @@ export class BosphorSolanaClient {
         "submit_intent produced no IntentSubmitted event; cannot determine intent id",
       );
     }
-    return { intentId: result.intentId };
+    return { intentId: result.intentId, txHash: result.signature };
   }
 
   /**
@@ -258,10 +267,10 @@ export class BosphorSolanaClient {
   ): Promise<StoreResult> {
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
-    const { intentId } = await this.submit(encoded, opts);
+    const { intentId, txHash } = await this.submit(encoded, opts);
     await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
-    return { intentId, blobId, endEpoch };
+    return { intentId, blobId, endEpoch, txHash };
   }
 }
 

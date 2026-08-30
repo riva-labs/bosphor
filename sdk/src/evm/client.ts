@@ -12,7 +12,7 @@
  */
 
 import type { ComputeBlob, Hex, StoreResult } from "../types.js";
-import { defaultComputeBlob } from "../blob.js";
+import { createDefaultComputeBlob, type WalrusNetwork } from "../blob.js";
 import { ProofTimeoutError } from "../errors.js";
 import {
   DEFAULT_EPOCHS,
@@ -64,7 +64,7 @@ export interface AdapterContract {
     storageEpochs: number,
     deadline: bigint,
     options: Hex,
-  ): Promise<{ nativeFee: bigint; lzTokenFee: bigint }>;
+  ): Promise<MessagingFee>;
   executed(intentId: Hex): Promise<boolean>;
   committedBlobId(intentId: Hex): Promise<Hex>;
   /**
@@ -75,7 +75,7 @@ export interface AdapterContract {
    * event log for the intent id.
    */
   queryProof?(intentId: Hex): Promise<Hex | null>;
-  getIntentId(
+  getIntentId?(
     sender: string,
     blobId: Hex,
     size: number,
@@ -84,7 +84,7 @@ export interface AdapterContract {
     deadline: bigint,
     nonce: bigint,
   ): Promise<Hex>;
-  nonces(sender: string): Promise<bigint>;
+  nonces?(sender: string): Promise<bigint>;
   interface: {
     parseLog(log: { topics: readonly string[]; data: string }): {
       name: string;
@@ -116,6 +116,12 @@ export interface BosphorEvmClientOptions {
   defaultEpochs?: number;
   /** Seconds added to `now` to derive the deadline when not supplied. */
   deadlineSeconds?: number;
+  /**
+   * Walrus network for the default blob-id computation. The blob id differs
+   * between testnet and mainnet, so set this to `"mainnet"` for a mainnet adapter.
+   * Ignored when `computeBlob` is provided. Defaults to `"testnet"`.
+   */
+  network?: WalrusNetwork;
   /** Blob-id computation seam; defaults to the `@mysten/walrus`-backed impl. */
   computeBlob?: ComputeBlob;
   /** `fetch` implementation; defaults to the global `fetch`. */
@@ -162,7 +168,7 @@ export class BosphorEvmClient {
     this.options = opts.options ?? "0x";
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
-    this.computeBlobFn = opts.computeBlob ?? defaultComputeBlob;
+    this.computeBlobFn = opts.computeBlob ?? createDefaultComputeBlob(opts.network ?? "testnet");
     this.fetchFn = resolveFetch(opts.fetch);
   }
 
@@ -194,10 +200,10 @@ export class BosphorEvmClient {
 
   /**
    * Submit the intent on-chain, attaching `fee.nativeFee` as native value. Returns
-   * the intent id read from the `IntentSubmitted` event (or derived locally as a
-   * fallback). Fails loudly if the receipt yields no intent id.
+   * the intent id read from the `IntentSubmitted` event and the origin transaction
+   * hash. Fails loudly if the receipt yields no intent id.
    */
-  async submit(encoded: EncodedIntent, fee: MessagingFee): Promise<{ intentId: Hex }> {
+  async submit(encoded: EncodedIntent, fee: MessagingFee): Promise<{ intentId: Hex; txHash: string }> {
     const tx = await this.adapter.submitIntent(
       this.dstEid,
       encoded.blobId,
@@ -220,7 +226,7 @@ export class BosphorEvmClient {
         `submitIntent tx ${tx.hash} emitted no IntentSubmitted event; cannot determine intent id`,
       );
     }
-    return { intentId };
+    return { intentId, txHash: tx.hash };
   }
 
   /**
@@ -237,17 +243,13 @@ export class BosphorEvmClient {
   }
 
   /**
-   * Poll `executed(intentId)` until it is true, then read and decode the committed
-   * blob id and the proof's end epoch. Throws `ProofTimeoutError` if the intent
-   * never executes within `timeoutMs`.
-   *
-   * Note: the adapter proof `abi.encode(blobId, endEpoch)` is emitted in the
-   * `IntentExecuted` event, not stored. We surface the committed blob id from
-   * `committedBlobId` (which equals the proof blob id, enforced on-chain) and the
-   * end epoch from the same proof via the event when available. When the event is
-   * not accessible through the polling view, `endEpoch` is read from the proof the
-   * caller supplies; here we resolve it from `committedBlobId` and the stored
-   * commitment, falling back to reading the emitted proof.
+   * Poll `executed(intentId)` until it is true, then return the committed blob id
+   * (from `committedBlobId`, which equals the proof blob id, enforced on-chain) and
+   * the proof's end epoch. The end epoch is decoded from the `IntentExecuted` proof
+   * via the adapter's `queryProof`; if the adapter does not provide `queryProof`
+   * this throws rather than fabricate an epoch. An adapter built with
+   * {@link fromEthersContract} wires `queryProof` automatically. Throws
+   * `ProofTimeoutError` if the intent never executes within `timeoutMs`.
    */
   async awaitProof(
     intentId: Hex,
@@ -299,10 +301,10 @@ export class BosphorEvmClient {
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
     const fee = await this.quote(encoded);
-    const { intentId } = await this.submit(encoded, fee);
+    const { intentId, txHash } = await this.submit(encoded, fee);
     await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
-    return { intentId, blobId, endEpoch };
+    return { intentId, blobId, endEpoch, txHash };
   }
 
   /**
