@@ -4,60 +4,122 @@ title: dApp Integration Tutorial
 
 # dApp Integration Tutorial
 
-Practical examples for integrating Bosphor into a frontend application. These examples show how to submit storage intents, estimate fees, and listen for execution confirmations.
+Practical examples for integrating Bosphor into a frontend application. Bosphor stores your bytes on Walrus and returns a verified proof to your origin chain. In Milestone 3 the cross-chain fee is flat regardless of file size: only a compact commitment (blob id, size, encoding, storage duration, deadline) crosses the bridge, and the bytes are uploaded to the relayer out-of-band.
+
+The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples below use the testnet path.
 
 import AgentPrompt from '@site/src/components/AgentPrompt';
 
-<AgentPrompt prompt="Build a TypeScript module that integrates with the Bosphor protocol. I need functions to: (1) estimate LayerZero fees via the `quote` function, (2) submit a storage intent via `submitIntent` with the quoted fee as msg.value, and (3) listen for the `IntentExecuted` event to confirm storage and decode the proof (blobId, endEpoch). Use ethers.js v6 or viem. The BosphorAdapter ABI and contract address are in the Bosphor repo under `contracts/evm/`. The destination EID for Sui testnet is 40378." />
+<AgentPrompt prompt="Build a TypeScript module that stores bytes with Bosphor using @bosphor/sdk. I need a single store() call that (1) derives the Walrus blob id locally, (2) submits the commitment via the BosphorAdapter, (3) uploads the raw bytes out-of-band to the relayer, and (4) resolves with the verified { intentId, blobId, endEpoch }. Wire it to an ethers.js v6 signer and the deployed BosphorAdapter. The destination EID for Sui testnet is 40378 and the testnet relayer base URL is https://api.bosphor.xyz/testnet." />
 
-## ethers.js v6
+## Recommended: @bosphor/sdk
 
-### Setup
+The SDK is the recommended path. One `store()` call runs the whole flow: derive the blob id, quote, submit, upload the bytes out-of-band, and wait for the verified proof. Full guides and API reference live at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+
+```bash
+npm install @bosphor/sdk ethers
+```
 
 ```typescript
 import { ethers } from "ethers";
+import { createBosphorClient } from "@bosphor/sdk/evm";
 
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner();
 
 const ADAPTER_ADDRESS = "0x..."; // Your deployed BosphorAdapter address
+const RELAYER_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
+
+// Minimal ABI the client needs: quote, submitIntent, and the IntentSubmitted event.
+const adapter = new ethers.Contract(
+  ADAPTER_ADDRESS,
+  [
+    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
+  ],
+  signer
+);
+
+const client = createBosphorClient({
+  adapter,
+  relayerUrl: RELAYER_URL,
+  dstEid: 40378, // Sui testnet
+  // LZ execution options: type 3 (lzReceive), 200k gas limit.
+  options: "0x00030100110100000000000000000000000000030d40",
+});
+
+// One call: derive blobId, submit the commitment, upload bytes out-of-band, wait for the proof.
+const data = new TextEncoder().encode("data to store on Walrus");
+const { intentId, blobId, endEpoch } = await client.store(data, { epochs: 5 });
+
+console.log("Stored:", intentId, blobId, "expires at epoch", endEpoch.toString());
+```
+
+### Escape hatches
+
+`store()` is the happy path. The client also exposes each step so you can drive them yourself: `encode(data)`, `quote(encoded)`, `submit(encoded, fee)`, `upload(intentId, data)`, and `awaitProof(intentId)`. This is useful when you want to show progress in the UI or retry a single step. If a `store()` call is interrupted after submit, re-run `client.upload(intentId, data)` (the relayer needs the bytes) and then `client.awaitProof(intentId)`.
+
+## Raw path (ethers.js v6)
+
+If you cannot use the SDK, here is the same flow against the contract directly. There are four steps: derive the commitment fields, quote, submit, and upload the bytes out-of-band.
+
+### Setup
+
+```typescript
+import { ethers } from "ethers";
+// The SDK's blob-id derivation is reusable on its own.
+import { defaultComputeBlob } from "@bosphor/sdk/evm";
+
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+
+const ADAPTER_ADDRESS = "0x..."; // Your deployed BosphorAdapter address
+const RELAYER_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
 const DST_EID = 40378; // Sui testnet
+const OPTIONS = "0x00030100110100000000000000000000000000030d40"; // type 3, 200k gas
 
 const adapter = new ethers.Contract(
   ADAPTER_ADDRESS,
   [
-    "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-    "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
-    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
+    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
+    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
+    "function executed(bytes32) view returns (bool)",
+    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
     "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
   ],
   signer
 );
 ```
 
-### Estimate fees
+### Derive the commitment and estimate fees
 
-Always call `quote` before submitting to get the exact LayerZero fee:
+Compute the Walrus blob id, size, and encoding from your bytes, then quote. Always call `quote` before submitting to get the exact LayerZero fee.
 
 ```typescript
-const payload = ethers.toUtf8Bytes("data to store on Walrus");
-const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
-// LZ execution options: type 3 (lzReceive), 200k gas limit. See Contract Interface > LZ Options.
-const options = "0x00030100110100000000000000000000000000030d40";
+const data = new TextEncoder().encode("data to store on Walrus");
 
-const fee = await adapter.quote(DST_EID, payload, deadline, options);
+// Derive the commitment fields client-side.
+const { blobId, size, encodingType } = await defaultComputeBlob(data);
+const storageEpochs = 5;
+const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour from now
+
+const fee = await adapter.quote(
+  DST_EID, blobId, size, encodingType, storageEpochs, deadline, OPTIONS
+);
 console.log("LZ fee:", ethers.formatEther(fee.nativeFee), "ETH");
 ```
 
-### Submit an intent
+### Submit the intent
 
 ```typescript
-const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
-  value: fee.nativeFee,
-});
+const tx = await adapter.submitIntent(
+  DST_EID, blobId, size, encodingType, storageEpochs, deadline, OPTIONS,
+  { value: fee.nativeFee }
+);
 const receipt = await tx.wait();
 
-// Extract intentId from the event
+// Extract intentId from the IntentSubmitted event.
 const event = receipt.logs
   .map((log) => {
     try { return adapter.interface.parseLog(log); } catch { return null; }
@@ -69,162 +131,79 @@ const intentId = event.args.intentId;
 console.log("Intent submitted:", intentId);
 ```
 
-### Listen for execution confirmation
+### Upload the bytes out-of-band
+
+The bytes never cross the bridge. POST them to the relayer, which recomputes the blob id and binds it to the on-chain commitment. See [Blob ingest](public-api.md#blob-ingest-out-of-band) for the full status-code contract.
 
 ```typescript
-adapter.on("IntentExecuted", (intentId, proof) => {
-  const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
-    ["bytes32", "uint256"],
-    proof
-  );
-  console.log("Intent executed:", intentId);
-  console.log("Walrus blob ID:", blobId);
-  console.log("Storage expires at epoch:", endEpoch.toString());
-});
+async function uploadBlob(intentId: string, data: Uint8Array) {
+  // A 404 right after submit is usually a timing race (the relayer has not seen
+  // the IntentSubmitted event yet). Retry with backoff.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const res = await fetch(`${RELAYER_URL}/blob/${intentId}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: data,
+    });
+    if (res.ok) return (await res.json()) as { intentId: string; blobId: string; size: number };
+    if (res.status === 404 || res.status === 503) {
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+    throw new Error(`blob upload rejected: ${res.status} ${await res.text()}`);
+  }
+  throw new Error("blob upload timed out waiting for the relayer to see the intent");
+}
+
+await uploadBlob(intentId, data);
 ```
 
-### Full example: submit and wait
+### Wait for the execution proof
+
+Confirmation arrives as the `IntentExecuted` event, or you can poll `executed(intentId)`. The proof is `abi.encode(blobId, endEpoch)`.
 
 ```typescript
-async function submitAndWait(data: string, deadlineSeconds: number = 3600) {
-  const payload = ethers.toUtf8Bytes(data);
-  const deadline = Math.floor(Date.now() / 1000) + deadlineSeconds;
-  const options = "0x00030100110100000000000000000000000000030d40";
-
-  // 1. Estimate fee
-  const fee = await adapter.quote(DST_EID, payload, deadline, options);
-
-  // 2. Submit intent
-  const tx = await adapter.submitIntent(DST_EID, payload, deadline, options, {
-    value: fee.nativeFee,
-  });
-  const receipt = await tx.wait();
-
-  const event = receipt.logs
-    .map((log) => {
-      try { return adapter.interface.parseLog(log); } catch { return null; }
-    })
-    .find((e) => e?.name === "IntentSubmitted");
-
-  if (!event) throw new Error("IntentSubmitted event not found in receipt");
-  const intentId = event.args.intentId;
-
-  // 3. Wait for execution confirmation (with timeout)
-  return new Promise((resolve, reject) => {
+function waitForProof(intentId: string, timeoutMs = 5 * 60_000) {
+  return new Promise<{ blobId: string; endEpoch: string }>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      adapter.removeAllListeners("IntentExecuted");
+      adapter.off(filter, onExecuted);
       reject(new Error("Timed out waiting for IntentExecuted event"));
-    }, deadlineSeconds * 1000);
+    }, timeoutMs);
 
     const filter = adapter.filters.IntentExecuted(intentId);
-    adapter.once(filter, (intentId, proof) => {
+    const onExecuted = (_intentId: string, proof: string) => {
       clearTimeout(timeout);
       const [blobId, endEpoch] = ethers.AbiCoder.defaultAbiCoder().decode(
         ["bytes32", "uint256"],
         proof
       );
-      resolve({ intentId, blobId, endEpoch: endEpoch.toString() });
-    });
+      resolve({ blobId, endEpoch: endEpoch.toString() });
+    };
+    adapter.once(filter, onExecuted);
   });
 }
-```
 
-## viem
-
-### Setup
-
-```typescript
-import { createPublicClient, createWalletClient, http, custom, parseAbi, toHex } from "viem";
-import { sepolia } from "viem/chains";
-
-const ADAPTER_ADDRESS = "0x..." as const; // Your deployed BosphorAdapter address
-const DST_EID = 40378; // Sui testnet
-
-const abi = parseAbi([
-  "function quote(uint32,bytes,uint256,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-  "function submitIntent(uint32,bytes,uint256,bytes) payable returns (bytes32)",
-  "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes payload, uint256 nonce, uint256 deadline)",
-  "event IntentExecuted(bytes32 indexed intentId, bytes proof)",
-]);
-
-const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(),
-});
-
-const walletClient = createWalletClient({
-  chain: sepolia,
-  transport: custom(window.ethereum),
-});
-```
-
-### Estimate fees
-
-```typescript
-const payload = new TextEncoder().encode("data to store on Walrus");
-const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
-const options = "0x00030100110100000000000000000000000000030d40" as `0x${string}`;
-
-const fee = await publicClient.readContract({
-  address: ADAPTER_ADDRESS,
-  abi,
-  functionName: "quote",
-  args: [DST_EID, toHex(payload), deadline, options],
-});
-
-console.log("LZ fee:", fee.nativeFee, "wei");
-```
-
-### Submit an intent
-
-```typescript
-const [account] = await walletClient.getAddresses();
-
-const hash = await walletClient.writeContract({
-  address: ADAPTER_ADDRESS,
-  abi,
-  functionName: "submitIntent",
-  args: [DST_EID, toHex(payload), deadline, options],
-  value: fee.nativeFee,
-  account,
-});
-
-const receipt = await publicClient.waitForTransactionReceipt({ hash });
-console.log("Intent submitted in block:", receipt.blockNumber);
-```
-
-### Watch for execution confirmation
-
-```typescript
-const unwatch = publicClient.watchContractEvent({
-  address: ADAPTER_ADDRESS,
-  abi,
-  eventName: "IntentExecuted",
-  onLogs: (logs) => {
-    for (const log of logs) {
-      console.log("Intent executed:", log.args.intentId);
-      console.log("Proof:", log.args.proof);
-    }
-  },
-});
-
-// Call unwatch() to stop listening
+const { blobId: storedBlobId, endEpoch } = await waitForProof(intentId);
+console.log("Confirmed:", storedBlobId, "expires at epoch", endEpoch);
 ```
 
 ## Displaying intent status to users
 
 A typical UI flow for showing intent status:
 
-1. **Pending**: User clicks "Store", transaction is submitted. Show a spinner.
-2. **Submitted**: Transaction is confirmed on EVM. Show the intent ID and a link to [LayerZero Scan](https://testnet.layerzeroscan.com).
-3. **Delivering**: LayerZero is verifying and delivering the message. Poll LZ Scan or wait for the event.
-4. **Storing**: The relayer is uploading to Walrus and executing storage on Sui.
-5. **Confirmed**: `IntentExecuted` event received. Show the Walrus blob ID and expiry epoch.
+1. **Committing**: derive the blob id from the user's bytes. No chain interaction yet.
+2. **Submitting**: `submitIntent` is sent. Show a spinner; on confirmation show the intent id and a link to [LayerZero Scan](https://testnet.layerzeroscan.com).
+3. **Uploading**: POST the bytes to the relayer. Surface a `422` as "data does not match the commitment" and a `413` as "file too large".
+4. **Delivering**: LayerZero verifies and delivers the commitment to Sui.
+5. **Storing**: the relayer uploads to Walrus and calls `execute_store` on Sui.
+6. **Confirmed**: `IntentExecuted` received (or `executed(intentId)` is true). Show the Walrus blob id and expiry epoch.
 
-The full round-trip from submission to confirmation typically takes 2-10 minutes on testnet, depending on LayerZero DVN verification time and relayer processing speed.
+The full round-trip from submission to confirmation typically takes 2 to 10 minutes on testnet, depending on LayerZero DVN verification time and relayer processing speed.
 
 ## Related
 
 - [Contract Interface](contract-interface.md) for complete function signatures and Sui examples
+- [Commitment Format](commitment-format.md) for the wire layout and intent id derivation
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [Integration Checklist](integration-checklist.md) for the full integration workflow
 - [Troubleshooting](troubleshooting.md) for common issues

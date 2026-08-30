@@ -53,26 +53,39 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 ## 5. Fee estimation
 
-- [ ] Call `quote(dstEid, payload, deadline, options)` before `submitIntent` to get the LZ fee
+- [ ] Derive the commitment fields from your bytes: `blobId`, `size`, `encodingType` (the `@bosphor/sdk` `defaultComputeBlob` helper does this), plus `storageEpochs` and `deadline`
+- [ ] Call `quote(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` before `submitIntent` to get the LZ fee
 - [ ] Pass the returned `nativeFee` as `msg.value` to `submitIntent`
 - [ ] Use the default LZ options (`0x00030100110100000000000000000000000000030d40`) unless your use case requires custom gas limits
+- [ ] Note the cross-chain fee is flat regardless of file size (only the 49-byte commitment crosses the bridge)
 - [ ] Understand that the relayer adds a 10% fee buffer on the return path
 
 ## 6. Submit intents from your dApp
 
-- [ ] Import `IBosphorAdapter` interface for type-safe interaction
+- [ ] Prefer `@bosphor/sdk` (`store()` runs the whole flow in one call). See [sdk.bosphor.xyz](https://sdk.bosphor.xyz)
+- [ ] Otherwise, import `IBosphorAdapter` for type-safe interaction
+- [ ] Call `submitIntent(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` with the quoted `nativeFee` as `msg.value`
 - [ ] Set deadlines with enough buffer for cross-chain delivery (at least 15 minutes recommended)
 - [ ] Handle the `IntentSubmitted` event to get the `intentId`
-- [ ] Listen for `IntentExecuted` event to confirm fulfillment and decode the proof (blobId, endEpoch)
-- [ ] See [dApp Tutorial](dapp-tutorial.md) for complete ethers.js and viem examples
+- [ ] Listen for the `IntentExecuted` event (or poll `executed(intentId)`) to confirm fulfillment and decode the proof (blobId, endEpoch)
+- [ ] See [dApp Tutorial](dapp-tutorial.md) for complete SDK and raw ethers.js examples
 
-## 7. Relayer health
+## 7. Upload the bytes out-of-band
+
+The file bytes never cross the bridge. After `submitIntent` returns an `intentId`, POST the exact committed bytes to the relayer so it can store them on Walrus.
+
+- [ ] `POST {relayerBaseUrl}/blob/{intentId}` with the raw bytes as the body (`content-type: application/octet-stream`)
+- [ ] Base URL is `https://api.bosphor.xyz/testnet` on testnet, `https://api.bosphor.xyz` on mainnet
+- [ ] Treat a `404` right after submit as a timing race and retry with backoff; a `422` means the bytes do not match the commitment
+- [ ] See [Blob ingest](public-api.md#blob-ingest-out-of-band) for the full status-code contract (`@bosphor/sdk` `store()` does this step for you)
+
+## 8. Relayer health
 
 - [ ] Verify the relayer is running: `GET /health` should return `{"status": "ok"}`
 - [ ] Monitor relayer wallet balances (both Sepolia ETH and Sui testnet SUI)
 - [ ] Review [Relayer](relayer.md) for configuration and error handling details
 
-## 8. Pre-production review
+## 9. Pre-production review
 
 - [ ] Confirm all trust assumptions are documented and acceptable for your use case
 - [ ] Understand the emergency `confirmExecution` fallback and who holds the owner key
@@ -83,5 +96,7 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 ## Related
 
 - [Contract Interface](contract-interface.md) for function signatures and wire formats
+- [Commitment Format](commitment-format.md) for the wire layout and intent id derivation
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [dApp Tutorial](dapp-tutorial.md) for frontend integration examples
 - [Troubleshooting](troubleshooting.md) for common issues
