@@ -18,7 +18,7 @@ Same one-line API as EVM, minus the `quote` step (the LayerZero fee is passed as
 |--------|-----------|---------|
 | `store` | `store(data: Uint8Array, opts?: EncodeOptions & AwaitProofOptions)` | `Promise<StoreResult>` |
 | `encode` | `encode(data: Uint8Array, opts?: EncodeOptions)` | `Promise<EncodedIntent>` |
-| `submit` | `submit(encoded: EncodedIntent, opts?: SubmitOptions)` | `Promise<{ intentId: Hex }>` |
+| `submit` | `submit(encoded: EncodedIntent, opts?: SubmitOptions)` | `Promise<{ intentId: Hex; txHash: string }>` |
 | `upload` | `upload(intentId: Hex, data: Uint8Array, opts?: { signal?: AbortSignal })` | `Promise<void>` |
 | `awaitProof` | `awaitProof(intentId: Hex, opts?: AwaitProofOptions)` | `Promise<{ blobId: Hex; endEpoch: bigint }>` |
 
@@ -53,5 +53,6 @@ The decoded `IntentState` PDA, the on-chain proof of record.
 
 - `createBosphorSolanaClient(options)`: factory that mirrors `new BosphorSolanaClient(options)`.
 - `createDefaultSolanaChain(options)`: builds the default `SolanaChain` backend (lazily loads `@solana/web3.js`).
+- `createDefaultComputeBlob(network)`: build the blob-id computation bound to `"testnet"` or `"mainnet"` (the client also accepts a `network` option).
 - `decodeIntentState(data)` / `readSolanaProof(data)`: decode the `IntentState` account bytes.
 - `BOSPHOR_PROGRAM_ID`, `INTENT_STATE_LEN`: the program id and account length constants.
