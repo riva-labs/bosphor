@@ -7,7 +7,9 @@ title: Public Intent Feed API
 
 Bosphor exposes a read-only HTTP API that surfaces the live cross-chain lifecycle of every intent the relayer handles. It powers the public status dashboard and lets integrators build their own views without touching internal metrics. The API serves real data only: when the backing store is unavailable it returns an explicit error, never a fabricated feed.
 
-The feed is served by the relayer and, in the deployed testnet, is reachable at `https://api.bosphor.xyz`.
+The relayer HTTP API has two integration surfaces: the read-only intent feed documented here, and the [blob ingest](#blob-ingest-out-of-band) endpoint that receives the file bytes out-of-band.
+
+The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples on this page use the testnet path.
 
 ## The intent lifecycle
 
@@ -71,6 +73,51 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 ### CORS
 
 The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
+
+## Blob ingest (out-of-band)
+
+This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
+
+### `POST {relayerBaseUrl}/blob/{intentId}`
+
+Send the raw blob bytes as the request body. The relayer recomputes the Walrus blob id and size from the body and binds them to the on-chain commitment recorded for `intentId`.
+
+- **Path parameter**: `intentId`, the 0x-prefixed 32-byte intent id returned by `submitIntent`.
+- **Headers**: `content-type: application/octet-stream`.
+- **Body**: the raw blob bytes (not base64, not multipart, not JSON).
+
+Base URL: `https://api.bosphor.xyz/testnet` on testnet, `https://api.bosphor.xyz` on mainnet.
+
+```bash
+curl -X POST \
+  -H "content-type: application/octet-stream" \
+  --data-binary @./file.bin \
+  "https://api.bosphor.xyz/testnet/blob/0xabc...def"
+```
+
+On success the relayer responds `200`/`201` with a small JSON ack:
+
+```json
+{ "intentId": "0xabc...def", "blobId": "blob-xyz", "size": 1024 }
+```
+
+### Rejections
+
+Each rejection maps to a precise HTTP status so a client can react without parsing the message:
+
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | Body is empty or not raw bytes |
+| `404 Not Found` | No pending intent for that id (or the relayer has not seen it yet) |
+| `409 Conflict` | The intent is already executed |
+| `410 Gone` | The intent deadline has passed |
+| `413 Payload Too Large` | Body exceeds the ingest cap (`MAX_INGEST_BLOB_BYTES`, default 10 MiB) |
+| `422 Unprocessable Entity` | The recomputed blob id or size does not match the commitment |
+| `503 Service Unavailable` | The relayer is not ready or is shedding load (backpressure); honor `Retry-After` |
+
+A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff. A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
+
+The `@bosphor/sdk` `store()` flow performs this upload for you (`client.upload(intentId, data)` is also exposed as an escape hatch). See [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
 
 ## Configuration
 

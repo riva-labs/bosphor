@@ -37,25 +37,22 @@ const { intentId, blobId, endEpoch } = await client.store(bytes, { epochs: 5 });
 
 Bosphor connects several protocols:
 
-- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent payloads as Walrus blobs.
+- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent data as Walrus blobs.
 - **[LayerZero v2](https://layerzero.network/)**: Cross-chain messaging. Both message directions are DVN-verified.
 - **[Sui](https://sui.io/)**: The execution layer where Walrus storage and proof generation happen.
 - **Origin chains**: any EVM chain, and **Solana**, submit the same commitment over the same protocol.
 
 ## Current status
 
-**Milestone 2 complete (v0.2.0)**, deployed on Sepolia + Sui Testnet with verified bidirectional E2E flow and validated on Ethereum mainnet.
-
-**Milestone 3 in progress.** The protocol now makes cross-chain cost independent of data size and adds a second origin ecosystem:
+**Milestone 3 complete.** The protocol makes cross-chain cost independent of data size and adds a second origin ecosystem:
 
 - **Reference commitments**: intents carry only a compact commitment (blob id, size, encoding, storage duration); the bytes travel out-of-band, so the cross-chain fee is flat regardless of file size.
-- **Solana adapter**: a devnet round-trip is live, submitting the same commitment over LayerZero.
-- **Unified TypeScript SDK** (`@bosphor/sdk`): one `store()` call for both EVM and Solana, with the blob id computed locally and the result verified on-chain. Docs at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+- **EVM and Solana origins live**: both submit the same commitment over LayerZero, with a verified round-trip on each.
+- **Unified TypeScript SDK** (`@bosphor/sdk`, published): one `store()` call for both EVM and Solana, with the blob id computed locally and the result verified on-chain. Docs at [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+- **Reference dApp shipped** at [demo.bosphor.xyz](https://demo.bosphor.xyz): a permanence-focused UX that runs real EVM and Solana round-trips end to end.
 - Sui-side assertions bind the stored blob id and end epoch to the commitment, so the relayer cannot substitute or under-fund the data.
 
-The remaining M3 deliverable is the demonstration dApp (built in [`riva-labs/bosphor-dapp`](https://github.com/riva-labs/bosphor-dapp)).
-
-Earlier M2 infrastructure remains live: Prometheus + Grafana monitoring, a Kener status page at status.bosphor.xyz, a continuous canary, the public intent feed (`GET /public/intents`) at api.bosphor.xyz, Sentry, an on-demand chaos harness, and a self-operated LayerZero DVN.
+Milestone 2 built on Sepolia + Sui Testnet with a verified bidirectional E2E flow, validated on Ethereum mainnet. Its infrastructure remains live: Prometheus + Grafana monitoring, a Kener status page at status.bosphor.xyz, a continuous canary, the public intent feed (`GET /public/intents`) at api.bosphor.xyz, Sentry, an on-demand chaos harness, and a self-operated LayerZero DVN.
 
 ## Next steps
 

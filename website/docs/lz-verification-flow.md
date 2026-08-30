@@ -24,9 +24,9 @@ sequenceDiagram
     participant LZ as LayerZero DVN
     participant Sui as Sui OApp
 
-    User->>EVM: submitIntent(payload, deadline)
-    EVM->>EVM: ABI encode (intentId, sender, payload, deadline)
-    EVM->>LZ: _lzSend(type 0 message)
+    User->>EVM: submitIntent(commitment fields)
+    EVM->>EVM: pack intentId(32) ++ commitment(49)
+    EVM->>LZ: _lzSend(81-byte message)
     LZ->>LZ: DVN verification (2-block confirmation)
     LZ->>Sui: lz_receive()
     Sui->>Sui: Decode message, store IntentRecord
@@ -35,21 +35,20 @@ sequenceDiagram
 
 ### Step by step
 
-1. User calls `submitIntent(payload, deadline)` on the `BosphorAdapter` contract (Sepolia).
-2. The adapter ABI-encodes the message: `(bytes32 intentId, address sender, bytes payload, uint256 deadline)`.
-3. The message is prefixed with type byte `0x00` and sent via `_lzSend()` to LayerZero.
+1. User calls `submitIntent(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` on the `BosphorAdapter` contract (Sepolia). The file bytes are not passed here; only the commitment fields are.
+2. The adapter packs the message: `intentId(32) ++ commitment(49)` via `abi.encodePacked`, where the commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`.
+3. The message is sent via `_lzSend()` to LayerZero.
 4. LayerZero's DVN verifies the message and delivers it to the Sui endpoint.
 5. The LZ executor calls `lz_receive` on the Bosphor OApp on Sui.
-6. The OApp decodes the message, stores an `IntentRecord`, and emits an `IntentReceived` event.
+6. The OApp splits the message, decodes the commitment, records an `IntentRecord` holding the committed blob id and storage epochs, and emits an `IntentReceived` event.
 
-### Message format (type 0, forward)
+### Message format (forward)
 
 ```
-[0x00] [intentId (32 bytes)] [sender (32 bytes, left-padded address)]
-       [payload (dynamic)]   [deadline (32 bytes, uint256)]
+[intentId (32 bytes)] [commitment (49 bytes)]
 ```
 
-Total: 1 + 32 + 32 + len(payload) + 32 bytes.
+Total: 81 bytes. The commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
 ## Return path: Sui to EVM
 
@@ -71,7 +70,7 @@ sequenceDiagram
 
 ### Step by step
 
-1. The relayer uploads data to Walrus and calls `execute_store` on Sui.
+1. The relayer receives the file bytes out-of-band (`POST /blob/{intentId}`), uploads them to Walrus, and calls `execute_store` on Sui. `execute_store` asserts the certified blob matches the committed blob id and storage epochs; it cannot substitute other bytes.
 2. The relayer calls `lz_send_proof()` on the Bosphor OApp, passing the intent ID, blob ID, end epoch, and destination EID.
 3. The function builds a type-1 proof message and initiates a LayerZero send via a Programmable Transaction Block (PTB).
 4. The PTB routes through the LZ endpoint, ULN302, executor fee lib, DVN fee lib, and treasury.
@@ -143,6 +142,8 @@ The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer c
 ## Related
 
 - [Architecture](architecture.md) for the system overview
+- [Commitment Format](commitment-format.md) for the forward-message wire layout
 - [Sui Executor](sui-executor.md) for the Walrus execution step
 - [Contract Interface](contract-interface.md) for EVM function signatures
+- [Blob ingest](public-api.md#blob-ingest-out-of-band) for the out-of-band upload contract
 - [Relayer](relayer.md) for the operator that drives both paths
