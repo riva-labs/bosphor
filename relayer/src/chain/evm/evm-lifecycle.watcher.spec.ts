@@ -76,6 +76,26 @@ describe('EvmLifecycleWatcher', () => {
     expect(poll).toHaveBeenNthCalledWith(2, 150);
   });
 
+  it('survives a transient RPC failure on a poll tick and keeps polling', async () => {
+    const store = new InMemoryIntentLifecycleStore();
+    const poll = jest
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('request timeout'), { code: 'TIMEOUT' }))
+      .mockResolvedValueOnce({ submitted: [], executed: [], newFromBlock: 150 });
+    const evm = makeEvm({ pollLifecycleEvents: poll });
+    const watcher = new EvmLifecycleWatcher(evm, store);
+
+    // A rejection escaping scheduledPoll's void-discarded promise would be an
+    // unhandled rejection and crash the process; the tick must swallow it.
+    watcher.scheduledPoll();
+    await new Promise(setImmediate);
+
+    // The polling gate was released, so the next tick runs and succeeds.
+    watcher.scheduledPoll();
+    await new Promise(setImmediate);
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+
   it('does not throw when the store fails while recording a hop', async () => {
     const failing = {
       recordHop: jest.fn().mockRejectedValue(new Error('db down')),

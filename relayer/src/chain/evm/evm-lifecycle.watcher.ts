@@ -35,9 +35,19 @@ export class EvmLifecycleWatcher implements OnModuleInit {
   scheduledPoll(): void {
     if (this.polling) return;
     this.polling = true;
-    void this.pollOnce().finally(() => {
-      this.polling = false;
-    });
+    // pollOnce can reject on a transient RPC error (the head-of-tick
+    // getBlockNumber is not inside pollLifecycleEvents' try/catch). Catch it
+    // here: a `void`-discarded rejection is an unhandled rejection, which
+    // kills the process under Node's default policy.
+    void this.pollOnce()
+      .catch((err) => {
+        this.logger.warn(
+          `Lifecycle poll failed (${(err as Error)?.message?.slice(0, 120) ?? err}); retrying next cycle`,
+        );
+      })
+      .finally(() => {
+        this.polling = false;
+      });
   }
 
   async pollOnce(): Promise<void> {
