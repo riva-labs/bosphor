@@ -35,7 +35,7 @@ use zro::zro::ZRO;
 
 /// Intent with this ID was already received and recorded.
 const EIntentAlreadyReceived: u64 = 0;
-/// Message is not exactly 81 bytes (intent_id(32) ++ commitment(49)).
+/// Message is not exactly 82 bytes (intent_id(32) ++ commitment(50)).
 const EInvalidMessageLength: u64 = 1;
 /// Caller is not the authorized relayer.
 const EUnauthorizedRelayer: u64 = 2;
@@ -148,10 +148,10 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
 ///
 /// Any SUI value attached to the message is forwarded to the transaction sender.
 ///
-/// Message format from EVM (M3 reference commitment, big-endian, 81 bytes):
+/// Message format from the origin chain (versioned commitment, big-endian, 82 bytes):
 ///   [0:32]    intentId (bytes32)
-///   [32:81]   commitment (49 bytes):
-///               blobId(32) ++ size(u32) ++ encodingType(u8)
+///   [32:82]   commitment (50 bytes, version 1):
+///               version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8)
 ///               ++ storageEpochs(u32) ++ deadline(u64)
 ///
 /// The committed blob id and storage epochs are decoded and stored in the
@@ -162,7 +162,7 @@ fun init(otw: LZ_RECEIVER, ctx: &mut TxContext) {
 /// * `oapp` - The OApp shared object for peer/endpoint validation.
 /// * `call` - Hot-potato Call object from the LZ executor.
 ///
-/// Aborts with `EInvalidMessageLength` if the message is not exactly 81 bytes.
+/// Aborts with `EInvalidMessageLength` if the message is not exactly 82 bytes.
 /// Aborts with `EIntentAlreadyReceived` if the intent ID is already recorded.
 public fun lz_receive(
     config: &mut LzReceiverConfig,
@@ -174,10 +174,10 @@ public fun lz_receive(
     let param = oapp.lz_receive(&config.oapp_cap, call);
     let (src_eid, _sender, nonce, guid, message, _executor, _extra, value) = param.destroy();
 
-    // Message is intent_id(32) ++ commitment(49) = 81 bytes.
-    assert!(message.length() == 81, EInvalidMessageLength);
+    // Message is intent_id(32) ++ commitment(50) = 82 bytes.
+    assert!(message.length() == 82, EInvalidMessageLength);
     let intent_id = slice(&message, 0, 32);
-    let commitment = slice(&message, 32, 49);
+    let commitment = slice(&message, 32, 50);
 
     assert!(!config.received_intents.contains(intent_id), EIntentAlreadyReceived);
 
