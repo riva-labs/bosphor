@@ -1978,6 +1978,7 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EVM_DST_EID` | `40161` | EVM destination endpoint ID for proof verification |
+| `EVM_CHAIN_ID` | `11155111` | Chain id of the network behind `EVM_RPC_URL`. Pins the provider to a static network so startup never depends on runtime chain-id discovery over a flaky RPC |
 | `SUI_GRPC_URL` | `https://sui-testnet.mystenlabs.com` | Sui gRPC endpoint |
 | `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
