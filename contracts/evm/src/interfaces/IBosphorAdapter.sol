@@ -74,7 +74,7 @@ interface IBosphorAdapter {
 
     /// @notice Submits a storage intent and sends it to the destination chain via LayerZero.
     /// @dev The cross-chain message is `abi.encodePacked(intentId, CommitmentCodec.encode(c))`,
-    ///      a fixed 81 bytes (32-byte intent id plus the 49-byte commitment). No raw blob
+    ///      a fixed 82 bytes (32-byte intent id plus the 50-byte versioned commitment). No raw blob
     ///      contents are ever placed on the wire. The caller must attach enough native gas to
     ///      cover the LayerZero messaging fee (use `quote` to estimate). The intent id is
     ///      deterministically derived from the commitment, the sender, and the sender's nonce.
@@ -109,7 +109,7 @@ interface IBosphorAdapter {
     // --- Fee estimation ---
 
     /// @notice Estimates the LayerZero messaging fee for a `submitIntent` call.
-    /// @dev Builds the same 81-byte message that `submitIntent` would send (using a zeroed
+    /// @dev Builds the same 82-byte message that `submitIntent` would send (using a zeroed
     ///      intent id placeholder since the actual id is not known before submission) and
     ///      delegates to the internal `_quote` helper provided by OApp.
     /// @param _dstEid LayerZero endpoint ID of the destination chain.

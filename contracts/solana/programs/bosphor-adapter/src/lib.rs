@@ -6,7 +6,7 @@
 //! and receives the execution proof back through the endpoint.
 //!
 //! Forward leg (Solana -> Sui): `submit_intent` records `IntentState` and CPIs the
-//! endpoint `send` with the 81-byte message `intentId(32) ++ commitment(49)`,
+//! endpoint `send` with the 82-byte message `intentId(32) ++ commitment(50)`,
 //! exactly what the Sui `lz_receive` parses.
 //!
 //! Return leg (Sui -> Solana): the endpoint invokes `lz_receive` with the 97-byte
@@ -165,7 +165,7 @@ mod tests {
 
         assert_eq!(
             hex(&intent_id),
-            "58564b85f5eeb8341134919fc24d54b4a6df32f86bf579cadbd1bcb131b8bb17",
+            "d992b1e321ffe9439081c607dfe780265eb9bf2e185a28b6e120876fe25bec47",
             "Solana adapter intent id must match the frozen cross-chain parity vector"
         );
     }
@@ -178,7 +178,7 @@ mod tests {
             compute_intent_id([0u8; 32], 0, 0, 0, 0, &Pubkey::new_from_array([0u8; 32]), 0);
         assert_eq!(
             hex(&intent_id),
-            "496e418294117864002a95f894a01c9cc414c86e17325489a5ea2f0eef181967",
+            "a4f556b8070855da3e9bfc0116ab844ef964254b9516f31df26d980ad8a6b74a",
         );
     }
 }

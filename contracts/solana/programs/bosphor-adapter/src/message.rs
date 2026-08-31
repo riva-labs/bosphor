@@ -2,11 +2,11 @@
 //! Sui, and TypeScript implementations so the Solana <-> Sui round-trip is
 //! interoperable.
 //!
-//! Forward leg (Solana -> Sui), 81 bytes:
-//!   `intentId(32) ++ commitment(49)`
-//! where `commitment` is the canonical 49-byte encoding from
-//! `bosphor_commitment_codec` (blobId ++ size ++ encodingType ++ storageEpochs ++
-//! deadline). This is exactly what the Sui `lz_receive` parses.
+//! Forward leg (Solana -> Sui), 82 bytes:
+//!   `intentId(32) ++ commitment(50)`
+//! where `commitment` is the canonical 50-byte version-1 encoding from
+//! `bosphor_commitment_codec` (version ++ blobId ++ size ++ encodingType ++
+//! storageEpochs ++ deadline). This is exactly what the Sui `lz_receive` parses.
 //!
 //! Return leg (Sui -> Solana), 97 bytes, type-1 proof:
 //!   `[0x01] ++ intentId(32) ++ blobId(32) ++ endEpoch(u256 big-endian, 32)`
@@ -15,8 +15,8 @@
 
 use bosphor_commitment_codec::{encode, Commitment, COMMITMENT_LEN};
 
-/// Length of the forward-leg message: intentId(32) ++ commitment(49).
-pub const FORWARD_MESSAGE_LEN: usize = 32 + COMMITMENT_LEN; // 81
+/// Length of the forward-leg message: intentId(32) ++ commitment(50).
+pub const FORWARD_MESSAGE_LEN: usize = 32 + COMMITMENT_LEN; // 82
 
 /// Length of the return-leg type-1 proof message.
 pub const PROOF_MESSAGE_LEN: usize = 97;
@@ -24,7 +24,7 @@ pub const PROOF_MESSAGE_LEN: usize = 97;
 /// Type byte for the return-leg proof (message type 1).
 pub const PROOF_TYPE_1: u8 = 0x01;
 
-/// Builds the 81-byte forward message `intentId(32) ++ commitment(49)`.
+/// Builds the 82-byte forward message `intentId(32) ++ commitment(50)`.
 pub fn encode_forward(intent_id: &[u8; 32], commitment: &Commitment) -> Vec<u8> {
     let mut out = Vec::with_capacity(FORWARD_MESSAGE_LEN);
     out.extend_from_slice(intent_id);
@@ -74,7 +74,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn forward_message_is_81_bytes_and_layout_correct() {
+    fn forward_message_is_82_bytes_and_layout_correct() {
         let intent_id = [7u8; 32];
         let c = Commitment {
             blob_id: [9u8; 32],

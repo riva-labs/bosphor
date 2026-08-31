@@ -7,7 +7,7 @@
  * Phase 2 (Return):  Relayer -> Walrus store -> execute_store -> LZ return -> EVM proof
  *
  * M3 is reference-based: the forward LayerZero message carries only the intent id
- * and the 49-byte commitment, never the blob bytes. The blob id is computed
+ * and the 50-byte versioned commitment, never the blob bytes. The blob id is computed
  * client-side (offline) and the raw bytes are handed to the relayer out-of-band
  * via `POST {RELAYER_URL}/blob/{intentId}`. This mirrors exactly what an SDK
  * consumer does through `BosphorEvmClient.store()`; the script reuses the SDK's

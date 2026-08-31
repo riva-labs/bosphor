@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-08-31)
+
+### Features
+
+- feat(contracts): versioned commitment codec v1 on the EVM side
+
 ## 0.4.0 (2026-08-11)
 
 ### Features

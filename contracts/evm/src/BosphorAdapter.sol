@@ -69,7 +69,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
         intentDeadlines[intentId] = _deadline;
 
         // The forward message carries only the intent id and the encoded commitment,
-        // 32 + 49 = 81 bytes. No raw blob contents are placed on the wire.
+        // 32 + 50 = 82 bytes. No raw blob contents are placed on the wire.
         bytes memory message = abi.encodePacked(intentId, CommitmentCodec.encode(c));
         _lzSend(_dstEid, message, _options, MessagingFee(msg.value, 0), msg.sender);
 
@@ -152,7 +152,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
     ) external view returns (MessagingFee memory fee) {
         CommitmentCodec.Commitment memory c =
             CommitmentCodec.Commitment(_blobId, _size, _encodingType, _storageEpochs, _deadline);
-        // Same 81-byte shape as submitIntent, with a zeroed intent id placeholder.
+        // Same 82-byte shape as submitIntent, with a zeroed intent id placeholder.
         bytes memory message = abi.encodePacked(bytes32(0), CommitmentCodec.encode(c));
         return _quote(_dstEid, message, _options, false);
     }

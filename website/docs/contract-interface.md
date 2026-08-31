@@ -17,7 +17,7 @@ Integrators should import `IBosphorAdapter.sol` from `contracts/evm/src/interfac
 import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
 ```
 
-Bosphor moves data off the messaging layer. An intent carries a compact, fixed-size **commitment** (blob id, size, encoding, storage duration, deadline) rather than the file bytes. See [Commitment Format](commitment-format.md) for the canonical 49-byte layout and the `intentId` derivation. The file bytes are uploaded to the relayer out-of-band, never through the bridge (see [Blob ingest](public-api.md#blob-ingest-out-of-band)).
+Bosphor moves data off the messaging layer. An intent carries a compact, fixed-size **commitment** (blob id, size, encoding, storage duration, deadline) rather than the file bytes. See [Commitment Format](commitment-format.md) for the canonical 50-byte versioned layout and the `intentId` derivation. The file bytes are uploaded to the relayer out-of-band, never through the bridge (see [Blob ingest](public-api.md#blob-ingest-out-of-band)).
 
 ## BosphorAdapter.sol (EVM)
 
@@ -49,7 +49,7 @@ function submitIntent(
 | `_deadline` | uint64 | Unix timestamp (seconds) after which the intent expires |
 | `_options` | bytes | LayerZero execution options (gas limit, etc.) |
 
-**Returns**: `intentId`, derived as `keccak256(commitment(49) ++ sender(32) ++ nonce(u64))`. See [Commitment Format](commitment-format.md).
+**Returns**: `intentId`, derived as `keccak256(commitment(50) ++ sender(32) ++ nonce(u64))`. See [Commitment Format](commitment-format.md).
 
 **Emits**: `IntentSubmitted(intentId, sender, targetChainId, blobId, size, encodingType, storageEpochs, nonce, deadline)`
 
@@ -69,7 +69,7 @@ function quote(
 ) external view returns (MessagingFee memory);
 ```
 
-**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`. Because only the 49-byte commitment crosses the bridge, the fee is flat regardless of file size.
+**Returns**: `MessagingFee { nativeFee, lzTokenFee }`. Pass `nativeFee` as `msg.value` to `submitIntent`. Because only the 50-byte commitment crosses the bridge, the fee is flat regardless of file size.
 
 ### confirmExecution
 
@@ -119,7 +119,7 @@ function getIntentId(
 ) external pure returns (bytes32);
 ```
 
-The id is `keccak256(commitment(49) ++ sender(32, left-padded) ++ nonce(u64 big-endian))`. See [Commitment Format](commitment-format.md).
+The id is `keccak256(commitment(50) ++ sender(32, left-padded) ++ nonce(u64 big-endian))`. See [Commitment Format](commitment-format.md).
 
 ### View Functions
 
@@ -340,16 +340,16 @@ public fun lz_receive(
 )
 ```
 
-Message format from EVM (M3 reference commitment, big-endian, exactly 81 bytes):
+Message format from EVM (versioned reference commitment, big-endian, exactly 82 bytes):
 
 | Offset | Length | Field |
 |--------|--------|-------|
 | 0:32 | 32 | intentId (bytes32) |
-| 32:81 | 49 | commitment: `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)` |
+| 32:82 | 50 | commitment: `version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)` |
 
 The commitment is decoded into the `IntentRecord`, which stores the committed blob id and storage epochs for `execute_store` to verify against. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
-**Aborts**: `EInvalidMessageLength` (1) if the message is not exactly 81 bytes, `EIntentAlreadyReceived` (0) if duplicate.
+**Aborts**: `EInvalidMessageLength` (1) if the message is not exactly 82 bytes, `EIntentAlreadyReceived` (0) if duplicate, `EUnsupportedCommitmentVersion` (commitment codec, 3) if the version byte is unknown.
 
 #### lz_send_proof
 
@@ -476,7 +476,7 @@ public struct ProofSent has copy, drop {
 | Code | Name | Description |
 |------|------|-------------|
 | 0 | `EIntentAlreadyReceived` | Intent with this ID was already received |
-| 1 | `EInvalidMessageLength` | Message is not exactly 81 bytes (intentId(32) ++ commitment(49)) |
+| 1 | `EInvalidMessageLength` | Message is not exactly 82 bytes (intentId(32) ++ commitment(50)) |
 | 2 | `EUnauthorizedRelayer` | Caller is not the authorized relayer |
 | 3 | `EZeroAddress` | Relayer address must not be zero |
 | 4 | `EIntentNotReceived` | Intent must exist before sending proof |
@@ -520,7 +520,7 @@ public struct StorageExecuted has copy, drop {
 
 ### Step 1: Intent Delivery (EVM to Sui)
 
-`abi.encodePacked(intentId, CommitmentCodec.encode(commitment))` sent via `_lzSend`: `intentId(32) ++ commitment(49)` = 81 bytes. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
+`abi.encodePacked(intentId, CommitmentCodec.encode(commitment))` sent via `_lzSend`: `intentId(32) ++ commitment(50)` = 82 bytes. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
 ### Step 2: Proof Verification (Sui to EVM)
 

@@ -4,20 +4,26 @@
 //! format (after TypeScript, Solidity, and Move) and is pinned byte for byte to the
 //! same shared parity vectors (`shared/parity/commitment-vectors.json`).
 //!
-//! Canonical commitment layout (49 bytes, big-endian):
-//!   blob_id(32) ++ size(u32) ++ encoding_type(u8) ++ storage_epochs(u32) ++ deadline(u64)
+//! Canonical commitment layout (50 bytes, big-endian, format version 1):
+//!   version(u8=1) ++ blob_id(32) ++ size(u32) ++ encoding_type(u8) ++ storage_epochs(u32) ++ deadline(u64)
+//!
+//! The leading version byte lets the format evolve without coordinated redeploys:
+//! `decode` rejects any version it does not understand instead of silently
+//! misreading the bytes that follow.
 //!
 //! Storage is committed as a duration (`storage_epochs`), never an absolute end
 //! epoch, because origin chains do not know the current Walrus epoch.
 //!
-//! intentId derivation:
-//!   keccak256( commitment(49) ++ sender(32, left-padded big-endian) ++ nonce(u64) )
+//! intentId derivation (covers the versioned bytes):
+//!   keccak256( commitment(50) ++ sender(32, left-padded big-endian) ++ nonce(u64) )
 //!
 //! `keccak256` is vendored (see [`keccak`]) so the crate is dependency-free and
 //! builds offline. A Solana program can substitute `solana_program::keccak::hash`,
 //! which produces identical output.
 
-pub const COMMITMENT_LEN: usize = 49;
+/// The single commitment wire-format version this crate understands.
+pub const COMMITMENT_VERSION: u8 = 1;
+pub const COMMITMENT_LEN: usize = 50;
 pub const BLOB_ID_LEN: usize = 32;
 /// Canonical sender width in the intentId preimage (big-endian, left-padded).
 pub const SENDER_LEN: usize = 32;
@@ -37,14 +43,15 @@ pub struct Commitment {
     pub deadline: u64,
 }
 
-/// Encodes a commitment into its canonical 49-byte big-endian representation.
+/// Encodes a commitment into its canonical 50-byte big-endian version-1 representation.
 pub fn encode(c: &Commitment) -> [u8; COMMITMENT_LEN] {
     let mut out = [0u8; COMMITMENT_LEN];
-    out[0..32].copy_from_slice(&c.blob_id);
-    out[32..36].copy_from_slice(&c.size.to_be_bytes());
-    out[36] = c.encoding_type;
-    out[37..41].copy_from_slice(&c.storage_epochs.to_be_bytes());
-    out[41..49].copy_from_slice(&c.deadline.to_be_bytes());
+    out[0] = COMMITMENT_VERSION;
+    out[1..33].copy_from_slice(&c.blob_id);
+    out[33..37].copy_from_slice(&c.size.to_be_bytes());
+    out[37] = c.encoding_type;
+    out[38..42].copy_from_slice(&c.storage_epochs.to_be_bytes());
+    out[42..50].copy_from_slice(&c.deadline.to_be_bytes());
     out
 }
 
@@ -53,26 +60,31 @@ pub fn encode(c: &Commitment) -> [u8; COMMITMENT_LEN] {
 pub enum DecodeError {
     /// The input was not exactly [`COMMITMENT_LEN`] bytes.
     InvalidLength(usize),
+    /// The version byte was not [`COMMITMENT_VERSION`].
+    UnsupportedVersion(u8),
 }
 
-/// Decodes a canonical 49-byte commitment. Inverse of [`encode`].
+/// Decodes a canonical 50-byte version-1 commitment. Inverse of [`encode`].
 pub fn decode(bytes: &[u8]) -> Result<Commitment, DecodeError> {
     if bytes.len() != COMMITMENT_LEN {
         return Err(DecodeError::InvalidLength(bytes.len()));
     }
+    if bytes[0] != COMMITMENT_VERSION {
+        return Err(DecodeError::UnsupportedVersion(bytes[0]));
+    }
     let mut blob_id = [0u8; BLOB_ID_LEN];
-    blob_id.copy_from_slice(&bytes[0..32]);
+    blob_id.copy_from_slice(&bytes[1..33]);
     Ok(Commitment {
         blob_id,
-        size: u32::from_be_bytes(bytes[32..36].try_into().unwrap()),
-        encoding_type: bytes[36],
-        storage_epochs: u32::from_be_bytes(bytes[37..41].try_into().unwrap()),
-        deadline: u64::from_be_bytes(bytes[41..49].try_into().unwrap()),
+        size: u32::from_be_bytes(bytes[33..37].try_into().unwrap()),
+        encoding_type: bytes[37],
+        storage_epochs: u32::from_be_bytes(bytes[38..42].try_into().unwrap()),
+        deadline: u64::from_be_bytes(bytes[42..50].try_into().unwrap()),
     })
 }
 
-/// Derives the canonical, chain-agnostic intentId:
-///   keccak256( commitment(49) ++ sender(32, left-padded big-endian) ++ nonce(u64) )
+/// Derives the canonical, chain-agnostic intentId over the versioned bytes:
+///   keccak256( commitment(50) ++ sender(32, left-padded big-endian) ++ nonce(u64) )
 ///
 /// `sender` may be shorter than 32 bytes (e.g. a 20-byte EVM address); it is
 /// left-padded with zeros so EVM, Sui, and Solana senders derive uniformly.
@@ -227,6 +239,24 @@ mod tests {
 
     #[test]
     fn decode_rejects_wrong_length() {
-        assert_eq!(decode(&[0u8; 48]), Err(DecodeError::InvalidLength(48)));
+        // 49 bytes is the legacy unversioned length and must be rejected.
+        assert_eq!(decode(&[0u8; 49]), Err(DecodeError::InvalidLength(49)));
+        assert_eq!(decode(&[0u8; 51]), Err(DecodeError::InvalidLength(51)));
+    }
+
+    #[test]
+    fn decode_rejects_unsupported_version() {
+        let c = Commitment {
+            blob_id: h32(&"11".repeat(32)),
+            size: 1,
+            encoding_type: 0,
+            storage_epochs: 1,
+            deadline: 0,
+        };
+        for bad in [0u8, 2, 0xff] {
+            let mut bytes = encode(&c);
+            bytes[0] = bad;
+            assert_eq!(decode(&bytes), Err(DecodeError::UnsupportedVersion(bad)));
+        }
     }
 }

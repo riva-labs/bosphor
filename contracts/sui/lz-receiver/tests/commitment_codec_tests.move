@@ -67,3 +67,50 @@ fun parity_vectors() {
         i = i + 1;
     };
 }
+
+// === Negative fixtures: unsupported versions must abort ===
+
+/// Sanity check on the generated negative fixtures: exactly two, full length,
+/// carrying the version bytes 0 and 2 that decode must reject.
+#[test]
+fun invalid_vectors_are_well_formed() {
+    let invalid = commitment_vectors::invalid_all();
+    assert!(invalid.length() == 2, 200);
+    assert!(commitment_vectors::invalid_version(invalid.borrow(0)) == 0, 201);
+    assert!(commitment_vectors::invalid_version(invalid.borrow(1)) == 2, 202);
+    let mut i = 0u64;
+    while (i < invalid.length()) {
+        let c = commitment_vectors::invalid_commitment(invalid.borrow(i));
+        assert!(c.length() == 50, 203 + i);
+        i = i + 1;
+    };
+}
+
+#[test]
+#[expected_failure(abort_code = commitment_codec::EUnsupportedCommitmentVersion)]
+fun decode_rejects_version_zero() {
+    let invalid = commitment_vectors::invalid_all();
+    let commitment = commitment_vectors::invalid_commitment(invalid.borrow(0));
+    commitment_codec::decode(&commitment);
+}
+
+#[test]
+#[expected_failure(abort_code = commitment_codec::EUnsupportedCommitmentVersion)]
+fun decode_rejects_version_two() {
+    let invalid = commitment_vectors::invalid_all();
+    let commitment = commitment_vectors::invalid_commitment(invalid.borrow(1));
+    commitment_codec::decode(&commitment);
+}
+
+#[test]
+#[expected_failure(abort_code = commitment_codec::EInvalidCommitmentLength)]
+fun decode_rejects_legacy_49_byte_commitment() {
+    // The pre-version format was 49 bytes; it must be rejected on length alone.
+    let mut legacy = vector::empty<u8>();
+    let mut i = 0u64;
+    while (i < 49) {
+        legacy.push_back(0u8);
+        i = i + 1;
+    };
+    commitment_codec::decode(&legacy);
+}

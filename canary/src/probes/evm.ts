@@ -28,7 +28,7 @@ export interface EvmProbeConfig {
   proofLookbackBlocks: number;
 }
 
-// M3 adapter ABI: submitIntent/quote take the 49-byte commitment fields (no
+// M3 adapter ABI: submitIntent/quote take the commitment fields (no
 // payload). IntentExecuted carries the abi.encode(blobId, endEpoch) proof.
 const ADAPTER_ABI = [
   'event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)',
