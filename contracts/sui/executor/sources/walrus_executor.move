@@ -11,6 +11,7 @@ module bosphor::walrus_executor;
 
 use bosphor_lz::lz_receiver::LzReceiverConfig;
 use bosphor_lz::reference;
+use oapp::oapp::{OApp, AdminCap};
 use sui::clock::Clock;
 use sui::event;
 use sui::table::{Self, Table};
@@ -31,6 +32,8 @@ const EDeadlineExpired: u64 = 3;
 const EBlobIdMismatch: u64 = 4;
 /// Certified blob does not cover the committed number of storage epochs.
 const EInsufficientStorageEpochs: u64 = 5;
+/// Relayer address must not be zero.
+const EZeroAddress: u64 = 6;
 
 // === Structs ===
 
@@ -82,6 +85,14 @@ public struct ConfigCreated has copy, drop {
     config_id: address,
     /// Address of the initial relayer (the deployer).
     relayer: address,
+}
+
+/// Emitted when the authorized relayer address changes via `set_relayer`.
+public struct RelayerChanged has copy, drop {
+    /// Relayer address before the change.
+    old_relayer: address,
+    /// Relayer address after the change.
+    new_relayer: address,
 }
 
 // === Init ===
@@ -247,6 +258,33 @@ public fun update_relayer(
     config.relayer = new_relayer;
 }
 
+/// Sets the authorized relayer address. Only the OApp admin can call this.
+///
+/// Unlike `update_relayer`, this does not require the current relayer key, so
+/// the admin can rotate a lost or compromised relayer key without republishing
+/// the package. Emits a `RelayerChanged` event.
+///
+/// * `config` - Shared ExecutorConfig to update.
+/// * `admin_cap` - AdminCap proving the caller owns the OApp.
+/// * `oapp` - The OApp shared object for admin verification.
+/// * `new_relayer` - New relayer address. Must not be the zero address.
+///
+/// Aborts with `EZeroAddress` if `new_relayer` is `@0x0`.
+entry fun set_relayer(
+    config: &mut ExecutorConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+) {
+    oapp.assert_admin(admin_cap);
+    assert!(new_relayer != @0x0, EZeroAddress);
+    event::emit(RelayerChanged {
+        old_relayer: config.relayer,
+        new_relayer,
+    });
+    config.relayer = new_relayer;
+}
+
 // === Test ===
 
 /// Test-only initializer. Creates and shares the ExecutorConfig with the
@@ -254,4 +292,16 @@ public fun update_relayer(
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     init(ctx);
+}
+
+/// Test-only wrapper for `set_relayer`. Entry functions are not callable from
+/// other modules, so tests go through this wrapper.
+#[test_only]
+public fun set_relayer_for_testing(
+    config: &mut ExecutorConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+) {
+    set_relayer(config, admin_cap, oapp, new_relayer);
 }
