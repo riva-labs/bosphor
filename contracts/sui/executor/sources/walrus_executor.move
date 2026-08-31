@@ -305,3 +305,10 @@ public fun set_relayer_for_testing(
 ) {
     set_relayer(config, admin_cap, oapp, new_relayer);
 }
+
+/// Test-only accessor for `RelayerChanged` fields, in emission order:
+/// (old_relayer, new_relayer).
+#[test_only]
+public fun relayer_changed_fields(event: &RelayerChanged): (address, address) {
+    (event.old_relayer, event.new_relayer)
+}

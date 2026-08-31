@@ -11,7 +11,10 @@
 // exercised by CI for the reasons above.
 #[test_only]
 module bosphor::walrus_executor_tests {
+    use sui::event;
     use sui::test_scenario;
+    use call::call_cap;
+    use oapp::oapp;
     use bosphor::walrus_executor::{Self, ExecutorConfig};
 
     const RELAYER: address = @0xA;
@@ -64,6 +67,94 @@ module bosphor::walrus_executor_tests {
         {
             let mut config = scenario.take_shared<ExecutorConfig>();
             walrus_executor::update_relayer(&mut config, ATTACKER, scenario.ctx());
+            test_scenario::return_shared(config);
+        };
+        scenario.end();
+    }
+
+    // === set_relayer (AdminCap-gated) tests ===
+
+    #[test]
+    fun test_set_relayer_updates_relayer_and_emits_event() {
+        let mut scenario = test_scenario::begin(RELAYER);
+        {
+            walrus_executor::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(RELAYER);
+        {
+            let mut config = scenario.take_shared<ExecutorConfig>();
+            let call_cap = call_cap::new_individual_cap(scenario.ctx());
+            let admin_cap = oapp::create_admin_cap_for_test(scenario.ctx());
+            let oapp_obj = oapp::create_oapp_for_test(&call_cap, &admin_cap, scenario.ctx());
+
+            walrus_executor::set_relayer_for_testing(&mut config, &admin_cap, &oapp_obj, USER);
+
+            let events = event::events_by_type<walrus_executor::RelayerChanged>();
+            assert!(events.length() == 1, 0);
+            let (old_relayer, new_relayer) =
+                walrus_executor::relayer_changed_fields(events.borrow(0));
+            assert!(old_relayer == RELAYER, 1);
+            assert!(new_relayer == USER, 2);
+
+            oapp::share_oapp_for_test(oapp_obj);
+            transfer::public_transfer(call_cap, RELAYER);
+            transfer::public_transfer(admin_cap, RELAYER);
+            test_scenario::return_shared(config);
+        };
+        // The stored relayer is now USER: only USER may call update_relayer.
+        scenario.next_tx(USER);
+        {
+            let mut config = scenario.take_shared<ExecutorConfig>();
+            walrus_executor::update_relayer(&mut config, RELAYER, scenario.ctx());
+            test_scenario::return_shared(config);
+        };
+        scenario.end();
+    }
+
+    #[test, expected_failure(abort_code = oapp::EInvalidAdminCap)]
+    fun test_set_relayer_wrong_admin_cap_fails() {
+        let mut scenario = test_scenario::begin(RELAYER);
+        {
+            walrus_executor::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(ATTACKER);
+        {
+            let mut config = scenario.take_shared<ExecutorConfig>();
+            let call_cap = call_cap::new_individual_cap(scenario.ctx());
+            let admin_cap = oapp::create_admin_cap_for_test(scenario.ctx());
+            let oapp_obj = oapp::create_oapp_for_test(&call_cap, &admin_cap, scenario.ctx());
+            // A second cap that does not match the OApp's registered admin cap.
+            let wrong_cap = oapp::create_admin_cap_for_test(scenario.ctx());
+
+            walrus_executor::set_relayer_for_testing(&mut config, &wrong_cap, &oapp_obj, ATTACKER);
+
+            oapp::share_oapp_for_test(oapp_obj);
+            transfer::public_transfer(call_cap, ATTACKER);
+            transfer::public_transfer(admin_cap, ATTACKER);
+            transfer::public_transfer(wrong_cap, ATTACKER);
+            test_scenario::return_shared(config);
+        };
+        scenario.end();
+    }
+
+    #[test, expected_failure(abort_code = walrus_executor::EZeroAddress)]
+    fun test_set_relayer_zero_address_fails() {
+        let mut scenario = test_scenario::begin(RELAYER);
+        {
+            walrus_executor::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(RELAYER);
+        {
+            let mut config = scenario.take_shared<ExecutorConfig>();
+            let call_cap = call_cap::new_individual_cap(scenario.ctx());
+            let admin_cap = oapp::create_admin_cap_for_test(scenario.ctx());
+            let oapp_obj = oapp::create_oapp_for_test(&call_cap, &admin_cap, scenario.ctx());
+
+            walrus_executor::set_relayer_for_testing(&mut config, &admin_cap, &oapp_obj, @0x0);
+
+            oapp::share_oapp_for_test(oapp_obj);
+            transfer::public_transfer(call_cap, RELAYER);
+            transfer::public_transfer(admin_cap, RELAYER);
             test_scenario::return_shared(config);
         };
         scenario.end();
