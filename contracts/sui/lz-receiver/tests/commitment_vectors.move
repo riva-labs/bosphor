@@ -26,6 +26,18 @@ public fun nonce(v: &Vector): u64 { v.nonce }
 public fun commitment(v: &Vector): vector<u8> { v.commitment }
 public fun intent_id(v: &Vector): vector<u8> { v.intent_id }
 
+/// A full-length commitment whose version byte is not a supported version.
+/// Every decoder must reject it.
+public struct InvalidVector has copy, drop {
+    name: vector<u8>,
+    version: u8,
+    commitment: vector<u8>,
+}
+
+public fun invalid_name(v: &InvalidVector): vector<u8> { v.name }
+public fun invalid_version(v: &InvalidVector): u8 { v.version }
+public fun invalid_commitment(v: &InvalidVector): vector<u8> { v.commitment }
+
 public fun all(): vector<Vector> {
     let mut v = vector::empty<Vector>();
     v.push_back(Vector {
@@ -37,8 +49,8 @@ public fun all(): vector<Vector> {
         deadline: 0,
         sender: x"0000000000000000000000000000000000000000000000000000000000000000",
         nonce: 0,
-        commitment: x"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-        intent_id: x"496e418294117864002a95f894a01c9cc414c86e17325489a5ea2f0eef181967",
+        commitment: x"0100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        intent_id: x"a4f556b8070855da3e9bfc0116ab844ef964254b9516f31df26d980ad8a6b74a",
     });
     v.push_back(Vector {
         name: b"default_epochs_evm_zero_sender",
@@ -49,8 +61,8 @@ public fun all(): vector<Vector> {
         deadline: 0,
         sender: x"0000000000000000000000000000000000000000",
         nonce: 0,
-        commitment: x"00000000000000000000000000000000000000000000000000000000000000000000000000000000050000000000000000",
-        intent_id: x"0fe90843b2ea90fb6b0952a72fb1cbab1875821768640b5a7955aed434ac08f2",
+        commitment: x"0100000000000000000000000000000000000000000000000000000000000000000000000000000000050000000000000000",
+        intent_id: x"77d74d8839cfef65e97c4619989a5cd3ffb1b8b0e142825b8270e1bf8aded8c7",
     });
     v.push_back(Vector {
         name: b"canonical_evm",
@@ -61,8 +73,8 @@ public fun all(): vector<Vector> {
         deadline: 1760000000,
         sender: x"00112233445566778899aabbccddeeff00112233",
         nonce: 7,
-        commitment: x"abababababababababababababababababababababababababababababababab0000040001000000050000000068e77800",
-        intent_id: x"70286217803b49a342aa1ad3de24977ea30ff17ab3654e2aa8957e1a9cf799c9",
+        commitment: x"01abababababababababababababababababababababababababababababababab0000040001000000050000000068e77800",
+        intent_id: x"7827b0f7e14c906b545f8bc961cc4ccad1f73ba2b68461b12df0a49fa8f6bb25",
     });
     v.push_back(Vector {
         name: b"sui_sender",
@@ -73,8 +85,8 @@ public fun all(): vector<Vector> {
         deadline: 1234567890,
         sender: x"cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe",
         nonce: 1,
-        commitment: x"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef00000001020000000a00000000499602d2",
-        intent_id: x"58564b85f5eeb8341134919fc24d54b4a6df32f86bf579cadbd1bcb131b8bb17",
+        commitment: x"01deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef00000001020000000a00000000499602d2",
+        intent_id: x"d992b1e321ffe9439081c607dfe780265eb9bf2e185a28b6e120876fe25bec47",
     });
     v.push_back(Vector {
         name: b"max_fields",
@@ -85,8 +97,23 @@ public fun all(): vector<Vector> {
         deadline: 18446744073709551615,
         sender: x"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         nonce: 18446744073709551615,
-        commitment: x"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-        intent_id: x"43ca9d53e5a7adbcb88a9f1be9258336fe0e4d9ad25f51dfbd100b126f4e8f97",
+        commitment: x"01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        intent_id: x"6acabe660433db2f3c7e16b0a65e673cfcd59b0a427c3ba0f85e72571cc8129c",
+    });
+    v
+}
+
+public fun invalid_all(): vector<InvalidVector> {
+    let mut v = vector::empty<InvalidVector>();
+    v.push_back(InvalidVector {
+        name: b"unsupported_version_0",
+        version: 0,
+        commitment: x"00abababababababababababababababababababababababababababababababab0000040001000000050000000068e77800",
+    });
+    v.push_back(InvalidVector {
+        name: b"unsupported_version_2",
+        version: 2,
+        commitment: x"02abababababababababababababababababababababababababababababababab0000040001000000050000000068e77800",
     });
     v
 }
