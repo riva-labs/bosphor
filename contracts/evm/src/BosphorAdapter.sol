@@ -69,7 +69,7 @@ contract BosphorAdapter is OApp, IBosphorAdapter {
         intentDeadlines[intentId] = _deadline;
 
         // The forward message carries only the intent id and the encoded commitment,
-        // 32 + 49 = 81 bytes. No raw blob contents are placed on the wire.
+        // 32 + 50 = 82 bytes. No raw blob contents are placed on the wire.
         bytes memory message = abi.encodePacked(intentId, CommitmentCodec.encode(c));
         _lzSend(_dstEid, message, _options, MessagingFee(msg.value, 0), msg.sender);
 

@@ -26,11 +26,20 @@ contract CommitmentCodecTest is Test {
         string deadline; // u64 decimal string
         string sender; // 20- or 32-byte hex, no 0x prefix
         string nonce; // u64 decimal string
-        string commitment; // 49-byte hex, no 0x prefix
+        string commitment; // 50-byte hex, no 0x prefix
         string intentId; // 32-byte hex, no 0x prefix
     }
 
+    /// @dev One negative oracle vector: a full-length commitment whose version
+    ///      byte is not supported. Decode must revert with the typed error.
+    struct InvalidVec {
+        string name;
+        uint256 version;
+        string commitment; // 50-byte hex, no 0x prefix
+    }
+
     Vec[] internal vectors;
+    InvalidVec[] internal invalidVectors;
 
     function setUp() public {
         string memory json = vm.readFile("../../shared/parity/commitment-vectors.json");
@@ -54,13 +63,27 @@ contract CommitmentCodecTest is Test {
             );
         }
         assertGt(vectors.length, 0, "no vectors loaded");
+
+        string[] memory invalidNames = abi.decode(vm.parseJson(json, ".invalidVectors[*].name"), (string[]));
+        for (uint256 i = 0; i < invalidNames.length; i++) {
+            string memory p = string.concat(".invalidVectors[", vm.toString(i), "]");
+            invalidVectors.push(
+                InvalidVec({
+                    name: vm.parseJsonString(json, string.concat(p, ".name")),
+                    version: vm.parseJsonUint(json, string.concat(p, ".version")),
+                    commitment: vm.parseJsonString(json, string.concat(p, ".commitment"))
+                })
+            );
+        }
+        assertGt(invalidVectors.length, 0, "no invalid vectors loaded");
     }
 
     function test_EncodeMatchesOracle() public view {
         for (uint256 i = 0; i < vectors.length; i++) {
             Vec memory v = vectors[i];
             bytes memory encoded = _toCommitment(v).encode();
-            assertEq(encoded.length, 49, string.concat("length != 49 for ", v.name));
+            assertEq(encoded.length, 50, string.concat("length != 50 for ", v.name));
+            assertEq(uint8(encoded[0]), CommitmentCodec.COMMITMENT_VERSION, string.concat("version byte for ", v.name));
             assertEq(encoded, _hexToBytes(v.commitment), string.concat("commitment mismatch for ", v.name));
         }
     }
@@ -94,11 +117,30 @@ contract CommitmentCodecTest is Test {
     function test_DecodeRevertsOnWrongLength() public {
         // Route through an external call so expectRevert sees the revert at a
         // lower depth than the internal (inlined) library function would produce.
+        // 49 bytes is the legacy unversioned length and must be rejected.
         vm.expectRevert(CommitmentCodec.InvalidCommitmentLength.selector);
-        this.decodeExternal(new bytes(48));
+        this.decodeExternal(new bytes(49));
 
         vm.expectRevert(CommitmentCodec.InvalidCommitmentLength.selector);
-        this.decodeExternal(new bytes(50));
+        this.decodeExternal(new bytes(51));
+    }
+
+    function test_DecodeRevertsOnUnsupportedVersionOracle() public {
+        for (uint256 i = 0; i < invalidVectors.length; i++) {
+            InvalidVec memory v = invalidVectors[i];
+            vm.expectRevert(
+                abi.encodeWithSelector(CommitmentCodec.UnsupportedCommitmentVersion.selector, uint8(v.version))
+            );
+            this.decodeExternal(_hexToBytes(v.commitment));
+        }
+    }
+
+    function test_DecodeRevertsOnUnsupportedVersion() public {
+        // A well-formed 50-byte commitment with a tampered version byte.
+        bytes memory encoded = _toCommitment(vectors[0]).encode();
+        encoded[0] = 0xff;
+        vm.expectRevert(abi.encodeWithSelector(CommitmentCodec.UnsupportedCommitmentVersion.selector, uint8(0xff)));
+        this.decodeExternal(encoded);
     }
 
     /// @dev External wrapper so decode reverts can be asserted with expectRevert.

@@ -74,7 +74,7 @@ interface IBosphorAdapter {
 
     /// @notice Submits a storage intent and sends it to the destination chain via LayerZero.
     /// @dev The cross-chain message is `abi.encodePacked(intentId, CommitmentCodec.encode(c))`,
-    ///      a fixed 81 bytes (32-byte intent id plus the 49-byte commitment). No raw blob
+    ///      a fixed 82 bytes (32-byte intent id plus the 50-byte versioned commitment). No raw blob
     ///      contents are ever placed on the wire. The caller must attach enough native gas to
     ///      cover the LayerZero messaging fee (use `quote` to estimate). The intent id is
     ///      deterministically derived from the commitment, the sender, and the sender's nonce.
