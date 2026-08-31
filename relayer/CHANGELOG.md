@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 (2026-08-31)
+
+### Features
+
+- feat(relayer): count return-leg settlement mode in the intent processor
+- feat(relayer): add return-mode counter to the metrics service
+
 ## 0.7.2 (2026-08-31)
 
 ### Bug Fixes
