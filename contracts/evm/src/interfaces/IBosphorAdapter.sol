@@ -109,7 +109,7 @@ interface IBosphorAdapter {
     // --- Fee estimation ---
 
     /// @notice Estimates the LayerZero messaging fee for a `submitIntent` call.
-    /// @dev Builds the same 81-byte message that `submitIntent` would send (using a zeroed
+    /// @dev Builds the same 82-byte message that `submitIntent` would send (using a zeroed
     ///      intent id placeholder since the actual id is not known before submission) and
     ///      delegates to the internal `_quote` helper provided by OApp.
     /// @param _dstEid LayerZero endpoint ID of the destination chain.
