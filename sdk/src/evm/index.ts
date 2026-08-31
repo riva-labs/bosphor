@@ -19,7 +19,12 @@ export type {
 } from "./client.js";
 
 // Typed error hierarchy (shared across chains).
-export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
+export {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerUploadError,
+  UnsupportedCommitmentVersionError,
+} from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
 export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
@@ -29,6 +34,7 @@ export type { WalrusNetwork } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/evm` is self-sufficient.
 export {
+  COMMITMENT_VERSION,
   COMMITMENT_BYTES,
   BLOB_ID_BYTES,
   SENDER_BYTES,

@@ -2,13 +2,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { encodeCommitment, decodeCommitment, deriveIntentId } from "./commitment-codec.js";
+import {
+  COMMITMENT_VERSION,
+  encodeCommitment,
+  decodeCommitment,
+  deriveIntentId,
+} from "./commitment-codec.js";
+import { UnsupportedCommitmentVersionError } from "./errors.js";
 
 // Tracer: the canonical wire format is
-//   blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)
-// all big-endian, total 49 bytes. This asserts the exact byte layout for a
+//   version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)
+// all big-endian, total 50 bytes. This asserts the exact byte layout for a
 // hand-verifiable input (all-zero blob, storageEpochs = 5, everything else 0).
-test("encodeCommitment produces the canonical 49-byte big-endian layout", () => {
+test("encodeCommitment produces the canonical 50-byte big-endian version-1 layout", () => {
   const bytes = encodeCommitment({
     blobId: hexToBytes("00".repeat(32)),
     size: 0,
@@ -18,13 +24,15 @@ test("encodeCommitment produces the canonical 49-byte big-endian layout", () => 
   });
 
   const expected =
+    "01" + //             version = 1
     "00".repeat(32) + // blobId
     "00000000" + //       size = 0
     "00" + //             encodingType = 0
     "00000005" + //       storageEpochs = 5
     "0000000000000000"; // deadline = 0
 
-  assert.equal(bytes.length, 49);
+  assert.equal(bytes.length, 50);
+  assert.equal(bytes[0], COMMITMENT_VERSION);
   assert.equal(bytesToHex(bytes), expected);
 });
 
@@ -46,7 +54,37 @@ test("decodeCommitment is the exact inverse of encodeCommitment", () => {
   assert.equal(decoded.deadline, commitment.deadline);
 });
 
-test("deriveIntentId hashes commitment ++ sender(32,left-padded) ++ nonce(u64)", () => {
+test("decodeCommitment rejects unknown versions with a typed error", () => {
+  const encoded = encodeCommitment({
+    blobId: hexToBytes("11".repeat(32)),
+    size: 1,
+    encodingType: 0,
+    storageEpochs: 1,
+    deadline: 0n,
+  });
+
+  for (const badVersion of [0, 2, 0xff]) {
+    const tampered = new Uint8Array(encoded);
+    tampered[0] = badVersion;
+    assert.throws(
+      () => decodeCommitment(tampered),
+      (err: unknown) => {
+        assert.ok(err instanceof UnsupportedCommitmentVersionError);
+        assert.equal(err.version, badVersion);
+        assert.equal(err.supported, COMMITMENT_VERSION);
+        assert.equal(err.code, "UNSUPPORTED_COMMITMENT_VERSION");
+        return true;
+      },
+    );
+  }
+});
+
+test("decodeCommitment rejects wrong lengths (including the legacy 49 bytes)", () => {
+  assert.throws(() => decodeCommitment(new Uint8Array(49)), /must be 50 bytes/);
+  assert.throws(() => decodeCommitment(new Uint8Array(51)), /must be 50 bytes/);
+});
+
+test("deriveIntentId hashes commitment(50) ++ sender(32,left-padded) ++ nonce(u64)", () => {
   const commitment = {
     blobId: hexToBytes("22".repeat(32)),
     size: 1024,
@@ -58,10 +96,10 @@ test("deriveIntentId hashes commitment ++ sender(32,left-padded) ++ nonce(u64)",
   const sender = hexToBytes("00112233445566778899aabbccddeeff00112233");
   const nonce = 7n;
 
-  const preimage = new Uint8Array(49 + 32 + 8);
+  const preimage = new Uint8Array(50 + 32 + 8);
   preimage.set(encodeCommitment(commitment), 0);
-  preimage.set(sender, 49 + (32 - sender.length)); // left-padded sender
-  new DataView(preimage.buffer).setBigUint64(49 + 32, nonce); // nonce u64 BE
+  preimage.set(sender, 50 + (32 - sender.length)); // left-padded sender
+  new DataView(preimage.buffer).setBigUint64(50 + 32, nonce); // nonce u64 BE
   const expected = keccak_256(preimage);
 
   assert.deepEqual(deriveIntentId(commitment, sender, nonce), expected);

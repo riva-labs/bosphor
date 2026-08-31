@@ -12,6 +12,7 @@
  */
 
 export {
+  COMMITMENT_VERSION,
   COMMITMENT_BYTES,
   BLOB_ID_BYTES,
   SENDER_BYTES,
@@ -24,7 +25,12 @@ export type { Commitment } from "./commitment-codec.js";
 export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "./types.js";
 
 // Typed error hierarchy: catch `BosphorError` once, narrow on the subclass.
-export { BosphorError, ProofTimeoutError, RelayerUploadError } from "./errors.js";
+export {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerUploadError,
+  UnsupportedCommitmentVersionError,
+} from "./errors.js";
 
 // Shared store-flow vocabulary (identical on every chain subpath).
 export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "./store-flow.js";

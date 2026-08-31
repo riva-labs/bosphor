@@ -90,3 +90,25 @@ export class RelayerUploadError extends BosphorError {
     this.reason = reason;
   }
 }
+
+/**
+ * Thrown by `decodeCommitment` when the version byte of an encoded commitment is
+ * not one the SDK understands. A mismatch means the counterpart (contract or
+ * relayer) speaks a different wire-format generation; retrying cannot help.
+ *
+ * @property code `"UNSUPPORTED_COMMITMENT_VERSION"`
+ */
+export class UnsupportedCommitmentVersionError extends BosphorError {
+  /** The version byte found in the encoded commitment. */
+  readonly version: number;
+  /** The single version this SDK build supports. */
+  readonly supported: number;
+  constructor(version: number, supported: number) {
+    super(`unsupported commitment version ${version}, this SDK supports version ${supported}`, {
+      code: "UNSUPPORTED_COMMITMENT_VERSION",
+      retryable: false,
+    });
+    this.version = version;
+    this.supported = supported;
+  }
+}
