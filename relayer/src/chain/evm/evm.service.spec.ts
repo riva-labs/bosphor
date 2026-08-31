@@ -45,6 +45,30 @@ describe('EvmService', () => {
     jest.restoreAllMocks();
   });
 
+  describe('onModuleInit', () => {
+    it('pins the provider to the configured chain id so no runtime network discovery happens', () => {
+      const values: Record<string, unknown> = {
+        EVM_RPC_URL: 'https://rpc.invalid',
+        EVM_RELAYER_KEY: '0x' + '11'.repeat(32),
+        EVM_ADAPTER_ADDRESS: '0x' + '22'.repeat(20),
+      };
+      const config = {
+        getOrThrow: jest.fn((key: string) => values[key]),
+        get: jest.fn((key: string) => (key === 'EVM_CHAIN_ID' ? 11155111 : undefined)),
+      };
+      const fresh = new EvmService(config as any);
+
+      fresh.onModuleInit();
+
+      // With an explicit static network the provider knows its chain id
+      // upfront; without it, reading _network before discovery would throw
+      // ("network is not available yet") and boot would hit the RPC.
+      const provider = (fresh as any).provider;
+      expect(provider._network.chainId).toBe(11155111n);
+      provider.destroy();
+    });
+  });
+
   describe('getBlockNumber', () => {
     it('should return the current block number from provider', async () => {
       const blockNumber = await service.getBlockNumber();

@@ -7,6 +7,11 @@ export const configValidationSchema = Joi.object({
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
   EVM_DST_EID: Joi.number().integer().default(40161),
+  // Chain id of the network behind EVM_RPC_URL. Pinning it lets the provider
+  // start with a static network instead of discovering the chain id over the
+  // RPC at boot, so a flaky endpoint can never fail startup with an
+  // "initial-network-discovery" timeout. Defaults to Sepolia.
+  EVM_CHAIN_ID: Joi.number().integer().default(11155111),
 
   // Sui
   // Selects network-specific constants (e.g. the WAL coin type). Defaults to

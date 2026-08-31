@@ -63,7 +63,15 @@ export class EvmService implements OnModuleInit {
     const privateKey = this.config.getOrThrow<string>('EVM_RELAYER_KEY');
     const adapterAddress = this.config.getOrThrow<string>('EVM_ADAPTER_ADDRESS');
 
-    this.provider = new ethers.JsonRpcProvider(rpcUrl, undefined, {
+    const chainId = this.config.get<number>('EVM_CHAIN_ID') ?? 11155111;
+
+    // Pin the network explicitly: with staticNetwork alone (no network arg)
+    // ethers still probes eth_chainId once at startup, and on a flaky RPC that
+    // probe times out and escapes as an uncaught "failed to bootstrap network
+    // detection" NETWORK_ERROR (the 2026-08-31 testnet relayer crash). With
+    // both set, the provider starts with the network already known and never
+    // performs runtime network discovery.
+    this.provider = new ethers.JsonRpcProvider(rpcUrl, chainId, {
       staticNetwork: true,
       polling: true,
     });
