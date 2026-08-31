@@ -76,7 +76,7 @@ The API is read-only and restricted to the dashboard origin via CORS. Set `DASHB
 
 ## Blob ingest (out-of-band)
 
-This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
+This is the M3 data-independent-cost design in practice. Only the 50-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
 
 ### `POST {relayerBaseUrl}/blob/{intentId}`
 

@@ -27,14 +27,14 @@ flowchart LR
 
 ### Message Flow
 
-1. **EVM -> Sui** (LayerZero): `submitIntent` sends `intentId(32) ++ commitment(49)` = 81 bytes (`abi.encodePacked`) through LayerZero v2 OApp messaging. The commitment holds the Walrus blob id, size, encoding, storage duration, and deadline; no raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
+1. **EVM -> Sui** (LayerZero): `submitIntent` sends `intentId(32) ++ commitment(50)` = 82 bytes (`abi.encodePacked`) through LayerZero v2 OApp messaging. The commitment holds the Walrus blob id, size, encoding, storage duration, and deadline; no raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 2. **Sui lz_receive**: LZ executor builds a PTB using `ptb_builder::build_lz_receive_ptb`, calls `lz_receiver::lz_receive` which validates peer + endpoint and emits `IntentReceived`.
 3. **Relayer**: Polls `IntentReceived` events on Sui, receives the file bytes out-of-band over HTTP (`POST /blob/{intentId}`), uploads them to Walrus, and calls `execute_store`. The bytes never cross the bridge.
 4. **Sui -> EVM** (LayerZero): Relayer calls `lz_send_proof` on Sui, which sends a type 1 message via LayerZero back to EVM. The EVM `_lzReceive` decodes `(intentId, blobId, endEpoch)` and marks the intent as executed.
 
 ## EVM Adapter Contract (BosphorAdapter.sol)
 
-The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (trusted-relayer fallback). Intent IDs are derived as `keccak256(commitment(49) ++ sender(32) ++ nonce(u64))`; see [Commitment Format](commitment-format.md). On proof receipt the adapter asserts the returned blob id equals the committed one (`BlobIdMismatch` otherwise).
+The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (trusted-relayer fallback). Intent IDs are derived as `keccak256(commitment(50) ++ sender(32) ++ nonce(u64))`; see [Commitment Format](commitment-format.md). On proof receipt the adapter asserts the returned blob id equals the committed one (`BlobIdMismatch` otherwise).
 
 For the complete interface reference, function signatures, events, errors, and code examples, see [Contract Interface](contract-interface.md).
 
@@ -44,14 +44,14 @@ For the complete interface reference, function signatures, events, errors, and c
 
 Receives cross-chain messages from EVM via LayerZero v2 executor.
 
-- `lz_receive(config, oapp, call, ctx)`: Validates the LZ Call hot-potato, splits the 81-byte message into `intentId(32)` and `commitment(49)`, decodes the commitment (blob id, size, encoding, storage epochs, deadline), records the committed blob id and storage epochs in the `received_intents` table, and emits `IntentReceived`.
+- `lz_receive(config, oapp, call, ctx)`: Validates the LZ Call hot-potato, splits the 82-byte message into `intentId(32)` and `commitment(50)`, decodes the commitment (blob id, size, encoding, storage epochs, deadline), records the committed blob id and storage epochs in the `received_intents` table, and emits `IntentReceived`.
 - `register_oapp(config, oapp, endpoint, info, ctx)`: Entry function that registers the OApp with the LZ endpoint using the internal CallCap.
 - `committed_blob_id(config, intent_id)` / `committed_storage_epochs(config, intent_id)`: View functions returning the committed reference, read by `execute_store`.
 - `is_received(config, intent_id)`: View function to check if an intent was received.
 
 ### commitment_codec.move
 
-Encodes and decodes the 49-byte reference commitment (`blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian). It is the Move half of the single cross-chain `CommitmentCodec`, pinned byte-for-byte against shared parity vectors alongside the Solidity, TypeScript, and Rust implementations. See [Commitment Format](commitment-format.md).
+Encodes and decodes the 50-byte versioned reference commitment (`version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian). It is the Move half of the single cross-chain `CommitmentCodec`, pinned byte-for-byte against shared parity vectors alongside the Solidity, TypeScript, and Rust implementations. See [Commitment Format](commitment-format.md).
 
 ### codec.move
 
@@ -82,7 +82,7 @@ Generates PTB metadata for the LZ executor.
 
 ### Step 1: Intent Delivery (EVM -> Sui)
 
-1. `submitIntent` calls `_lzSend` with the 81-byte `intentId(32) ++ commitment(49)` message
+1. `submitIntent` calls `_lzSend` with the 82-byte `intentId(32) ++ commitment(50)` message
 2. LayerZero DVN (LayerZero Labs) verifies the message on Sui endpoint
 3. Confirmation depth: 2 blocks
 4. LZ executor reads `OAppInfoV1` from endpoint registry, builds PTB, executes `lz_receive`

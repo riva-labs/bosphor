@@ -57,7 +57,7 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 - [ ] Call `quote(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` before `submitIntent` to get the LZ fee
 - [ ] Pass the returned `nativeFee` as `msg.value` to `submitIntent`
 - [ ] Use the default LZ options (`0x00030100110100000000000000000000000000030d40`) unless your use case requires custom gas limits
-- [ ] Note the cross-chain fee is flat regardless of file size (only the 49-byte commitment crosses the bridge)
+- [ ] Note the cross-chain fee is flat regardless of file size (only the 50-byte commitment crosses the bridge)
 - [ ] Understand that the relayer adds a 10% fee buffer on the return path
 
 ## 6. Submit intents from your dApp

@@ -25,8 +25,8 @@ sequenceDiagram
     participant Sui as Sui OApp
 
     User->>EVM: submitIntent(commitment fields)
-    EVM->>EVM: pack intentId(32) ++ commitment(49)
-    EVM->>LZ: _lzSend(81-byte message)
+    EVM->>EVM: pack intentId(32) ++ commitment(50)
+    EVM->>LZ: _lzSend(82-byte message)
     LZ->>LZ: DVN verification (2-block confirmation)
     LZ->>Sui: lz_receive()
     Sui->>Sui: Decode message, store IntentRecord
@@ -36,7 +36,7 @@ sequenceDiagram
 ### Step by step
 
 1. User calls `submitIntent(dstEid, blobId, size, encodingType, storageEpochs, deadline, options)` on the `BosphorAdapter` contract (Sepolia). The file bytes are not passed here; only the commitment fields are.
-2. The adapter packs the message: `intentId(32) ++ commitment(49)` via `abi.encodePacked`, where the commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`.
+2. The adapter packs the message: `intentId(32) ++ commitment(50)` via `abi.encodePacked`, where the commitment is `version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`.
 3. The message is sent via `_lzSend()` to LayerZero.
 4. LayerZero's DVN verifies the message and delivers it to the Sui endpoint.
 5. The LZ executor calls `lz_receive` on the Bosphor OApp on Sui.
@@ -45,10 +45,10 @@ sequenceDiagram
 ### Message format (forward)
 
 ```
-[intentId (32 bytes)] [commitment (49 bytes)]
+[intentId (32 bytes)] [commitment (50 bytes)]
 ```
 
-Total: 81 bytes. The commitment is `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
+Total: 82 bytes. The commitment is `version(u8=1) ++ blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)`, big-endian. No raw blob bytes are on the wire. See [Commitment Format](commitment-format.md).
 
 ## Return path: Sui to EVM
 
