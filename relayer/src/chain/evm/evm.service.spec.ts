@@ -1,16 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { EvmService } from './evm.service';
+import { ErrorReporter } from '../../observability/error-reporter';
+import { EVM_BOOTSTRAP_MAX_ATTEMPTS } from '../../common';
 
 describe('EvmService', () => {
   let service: EvmService;
   let mockProvider: any;
   let mockAdapter: any;
+  let mockReporter: { captureException: jest.Mock };
 
   beforeEach(async () => {
     mockProvider = {
       getBlockNumber: jest.fn().mockResolvedValue(1000),
     };
+    mockReporter = { captureException: jest.fn() };
 
     mockAdapter = {
       filters: {
@@ -29,6 +33,10 @@ describe('EvmService', () => {
         {
           provide: ConfigService,
           useValue: { getOrThrow: jest.fn() },
+        },
+        {
+          provide: ErrorReporter,
+          useValue: mockReporter,
         },
       ],
     })
@@ -56,7 +64,7 @@ describe('EvmService', () => {
         getOrThrow: jest.fn((key: string) => values[key]),
         get: jest.fn((key: string) => (key === 'EVM_CHAIN_ID' ? 11155111 : undefined)),
       };
-      const fresh = new EvmService(config as any);
+      const fresh = new EvmService(config as any, mockReporter as any);
 
       fresh.onModuleInit();
 
@@ -75,6 +83,56 @@ describe('EvmService', () => {
 
       expect(blockNumber).toBe(1000);
       expect(mockProvider.getBlockNumber).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('bootstrapBlockNumber', () => {
+    const transient = () => Object.assign(new Error('request timeout'), { code: 'TIMEOUT' });
+
+    beforeEach(() => {
+      // The backoff sleeps are real setTimeout waits in production; skip them
+      // so the retry loop runs instantly under test.
+      (service as any).sleep = jest.fn().mockResolvedValue(undefined);
+    });
+
+    it('retries transient bootstrap failures with backoff, then succeeds', async () => {
+      mockProvider.getBlockNumber
+        .mockRejectedValueOnce(transient())
+        .mockRejectedValueOnce(transient())
+        .mockResolvedValueOnce(1000);
+
+      await expect(service.bootstrapBlockNumber()).resolves.toBe(1000);
+
+      expect(mockProvider.getBlockNumber).toHaveBeenCalledTimes(3);
+      // Exponential backoff between attempts: 1s then 2s.
+      expect((service as any).sleep).toHaveBeenNthCalledWith(1, 1000);
+      expect((service as any).sleep).toHaveBeenNthCalledWith(2, 2000);
+    });
+
+    it('reports each transient failure so Sentry groups them as warnings', async () => {
+      mockProvider.getBlockNumber.mockRejectedValueOnce(transient()).mockResolvedValueOnce(1000);
+
+      await service.bootstrapBlockNumber();
+
+      expect(mockReporter.captureException).toHaveBeenCalledTimes(1);
+      expect(mockReporter.captureException).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'TIMEOUT' }),
+      );
+    });
+
+    it('throws immediately on a non-transient error', async () => {
+      mockProvider.getBlockNumber.mockRejectedValue(new Error('invalid project id'));
+
+      await expect(service.bootstrapBlockNumber()).rejects.toThrow('invalid project id');
+      expect(mockProvider.getBlockNumber).toHaveBeenCalledTimes(1);
+      expect((service as any).sleep).not.toHaveBeenCalled();
+    });
+
+    it('gives up after the bounded attempts when the endpoint stays dead', async () => {
+      mockProvider.getBlockNumber.mockRejectedValue(transient());
+
+      await expect(service.bootstrapBlockNumber()).rejects.toThrow('request timeout');
+      expect(mockProvider.getBlockNumber).toHaveBeenCalledTimes(EVM_BOOTSTRAP_MAX_ATTEMPTS);
     });
   });
 

@@ -85,6 +85,7 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
   };
   const evm = {
     getBlockNumber: jest.fn().mockResolvedValue(1),
+    bootstrapBlockNumber: jest.fn().mockResolvedValue(1),
     confirmExecution: jest.fn().mockResolvedValue('0xevm'),
   };
   const solana = {

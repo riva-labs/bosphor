@@ -5,6 +5,7 @@ import { InMemoryIntentLifecycleStore } from '../../lifecycle/in-memory-intent-l
 function makeEvm(overrides: Partial<EvmService>): EvmService {
   return {
     getBlockNumber: jest.fn().mockResolvedValue(100),
+    bootstrapBlockNumber: jest.fn().mockResolvedValue(100),
     pollLifecycleEvents: jest.fn().mockResolvedValue({
       submitted: [],
       executed: [],
@@ -62,7 +63,7 @@ describe('EvmLifecycleWatcher', () => {
       .mockResolvedValueOnce({ submitted: [], executed: [], newFromBlock: 150 })
       .mockResolvedValueOnce({ submitted: [], executed: [], newFromBlock: 175 });
     const evm = makeEvm({
-      getBlockNumber: jest.fn().mockResolvedValue(100),
+      bootstrapBlockNumber: jest.fn().mockResolvedValue(100),
       pollLifecycleEvents: poll,
     });
     const watcher = new EvmLifecycleWatcher(evm, store);

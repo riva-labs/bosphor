@@ -25,7 +25,9 @@ export class EvmLifecycleWatcher implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     // Start from the current head; the feed tracks intents from now forward.
-    this.cursor = await this.evm.getBlockNumber();
+    // The bootstrap probe retries transient RPC blips with backoff, because a
+    // rejection escaping onModuleInit kills the process.
+    this.cursor = await this.evm.bootstrapBlockNumber();
     this.logger.log(`Watching EVM lifecycle events from block ${this.cursor}`);
   }
 

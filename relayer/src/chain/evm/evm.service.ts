@@ -1,6 +1,13 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
+import {
+  EVM_BOOTSTRAP_BACKOFF_BASE_MS,
+  EVM_BOOTSTRAP_MAX_ATTEMPTS,
+  MAX_BACKOFF_MS,
+} from '../../common';
+import { ErrorReporter } from '../../observability/error-reporter';
+import { isTransientRpcError } from '../../observability/transient-rpc-error';
 
 /** Blocks to stay behind head when querying logs, to tolerate load-balanced RPCs
  * whose nodes lag the one that answered getBlockNumber. */
@@ -56,7 +63,10 @@ export class EvmService implements OnModuleInit {
   private wallet!: ethers.Wallet;
   private adapter!: ethers.Contract;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly errorReporter: ErrorReporter,
+  ) {}
 
   onModuleInit() {
     const rpcUrl = this.config.getOrThrow<string>('EVM_RPC_URL');
@@ -78,11 +88,17 @@ export class EvmService implements OnModuleInit {
     // The background block poller (needed by tx.wait) makes RPC calls that
     // reject on transient public-RPC errors (520, timeout). Give ethers an
     // error listener so those are logged here as warnings instead of bubbling
-    // up as unhandled rejections.
+    // up as unhandled rejections. Everything is still reported: Sentry's
+    // beforeSend hook downgrades transient RPC errors to a single grouped
+    // warning, so real provider faults stay visible without the noise.
     this.provider.on('error', (err) => {
-      this.logger.warn(
-        `EVM provider error (transient, retrying): ${(err as Error)?.message ?? err}`,
-      );
+      const message = (err as Error)?.message ?? String(err);
+      if (isTransientRpcError(err)) {
+        this.logger.warn(`EVM provider error (transient, retrying): ${message}`);
+      } else {
+        this.logger.error(`EVM provider error: ${message}`);
+      }
+      this.errorReporter.captureException(err);
     });
     this.wallet = new ethers.Wallet(privateKey, this.provider);
     this.adapter = new ethers.Contract(adapterAddress, ADAPTER_ABI, this.wallet);
@@ -93,6 +109,37 @@ export class EvmService implements OnModuleInit {
 
   async getBlockNumber(): Promise<number> {
     return this.provider.getBlockNumber();
+  }
+
+  /**
+   * First RPC touch at startup. A transient blip on the endpoint (request
+   * timeout, 5xx, connection reset) retries with capped exponential backoff
+   * instead of rejecting, because the callers sit in Nest onModuleInit hooks
+   * where an escaped rejection kills the whole process. Non-transient errors
+   * (bad URL, auth) and a still-dead endpoint after the bounded attempts still
+   * throw: at that point a restart with a fresh window is the right move.
+   */
+  async bootstrapBlockNumber(): Promise<number> {
+    let backoffMs = EVM_BOOTSTRAP_BACKOFF_BASE_MS;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.provider.getBlockNumber();
+      } catch (err) {
+        if (!isTransientRpcError(err) || attempt >= EVM_BOOTSTRAP_MAX_ATTEMPTS) throw err;
+        this.logger.warn(
+          `EVM bootstrap attempt ${attempt}/${EVM_BOOTSTRAP_MAX_ATTEMPTS} failed ` +
+            `(${(err as Error)?.message?.slice(0, 120) ?? err}); retrying in ${backoffMs}ms`,
+        );
+        // Grouped as a transient warning by the Sentry beforeSend hook.
+        this.errorReporter.captureException(err);
+        await this.sleep(backoffMs);
+        backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async pollEvents(fromBlock: number): Promise<{ events: EvmIntentEvent[]; newFromBlock: number }> {

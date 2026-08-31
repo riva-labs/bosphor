@@ -108,7 +108,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    const block = await this.evm.getBlockNumber();
+    // Bootstrap probe with transient retry: an RPC blip here must not reject,
+    // because a rejection escaping onModuleInit kills the process.
+    const block = await this.evm.bootstrapBlockNumber();
     this.logger.log(`EVM connected at block ${block}`);
     this.logger.log(`Sui relayer: ${this.sui.getAddress()}`);
     this.logger.log(`LZ package: ${this.sui.getLzPackageId() || '(not configured)'}`);
