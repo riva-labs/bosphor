@@ -12,7 +12,7 @@
 const TRANSIENT_ETHERS_CODES = new Set(['SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR']);
 
 const TRANSIENT_MESSAGE_RE =
-  /request timeout|server response 5\d\d|etimedout|econnreset|econnrefused|socket hang up|bad gateway|service unavailable|too many requests|error code: 5\d\d/i;
+  /request timeout|server response 5\d\d|etimedout|econnreset|econnrefused|socket hang up|bad gateway|service unavailable|too many requests|error code: 5\d\d|failed to bootstrap network detection/i;
 
 /** Follow ethers' wrapped `.cause` chain, bounded so a cycle can't loop forever. */
 export function isTransientRpcError(err: unknown, depth = 0): boolean {

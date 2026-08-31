@@ -23,6 +23,21 @@ describe('isTransientRpcError', () => {
     expect(isTransientRpcError(new Error('socket hang up'))).toBe(true);
   });
 
+  it('flags the ethers initial-network-discovery bootstrap failure', () => {
+    // The exact shape ethers emits when the startup eth_chainId probe times
+    // out: a NETWORK_ERROR wrapping the underlying request timeout.
+    const timeout = Object.assign(new Error('request timeout (request={ ... })'), {
+      code: 'TIMEOUT',
+    });
+    const bootstrap = Object.assign(
+      new Error('failed to bootstrap network detection (event="initial-network-discovery")'),
+      { code: 'NETWORK_ERROR', info: { error: timeout } },
+    );
+    expect(isTransientRpcError(bootstrap)).toBe(true);
+    // Message alone must be enough if the code is stripped by re-wrapping.
+    expect(isTransientRpcError(new Error('failed to bootstrap network detection'))).toBe(true);
+  });
+
   it('follows the wrapped ethers .cause chain', () => {
     const cause = Object.assign(new Error('boom'), { code: 'TIMEOUT' });
     const wrapper = Object.assign(new Error('outer'), { cause });
