@@ -55,3 +55,15 @@ test('classifies RPC rate limits and timeouts as transient', () => {
   assert.equal(isTransientRpcError(new Error('request timeout (code=TIMEOUT)')), true);
   assert.equal(isTransientRpcError(new Error('proof mismatch for intent 0xabc')), false);
 });
+
+test('classifies Cloudflare-style 5xx origin errors as transient', () => {
+  assert.equal(
+    isTransientRpcError(
+      new Error(
+        'server response 520 <none> (request={ }, response={ }, error=null, info={ "responseBody": "error code: 520\\n" }, code=SERVER_ERROR, version=6.17.0)',
+      ),
+    ),
+    true,
+  );
+  assert.equal(isTransientRpcError(new Error('server response 521 <none>')), true);
+});

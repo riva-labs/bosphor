@@ -19,8 +19,11 @@ export interface ProbeFailureLike {
 // retries naturally and Prometheus failure-rate alerts catch a persistent
 // outage, so a single rate-limited submit is not an actionable error. Mirror
 // the relayer: downgrade to warning and collapse into one grouped issue.
+// Kept in sync with the relayer's transient-rpc-error patterns. Probe errors
+// arrive as strings here, so ethers codes are matched in their stringified
+// form (code=SERVER_ERROR) rather than via the error object.
 const TRANSIENT_RPC_RE =
-  /429|Too Many Requests|rate limit|ETIMEDOUT|ECONNRESET|ECONNREFUSED|request timeout|fetch failed|502 Bad Gateway|503 Service|504 Gateway/i;
+  /429|too many requests|rate limit|etimedout|econnreset|econnrefused|request timeout|fetch failed|socket hang up|bad gateway|service unavailable|server response 5\d\d|error code: 5\d\d|code=(SERVER_ERROR|NETWORK_ERROR|TIMEOUT)/i;
 
 export function isTransientRpcError(err: unknown): boolean {
   return TRANSIENT_RPC_RE.test(err instanceof Error ? err.message : String(err));
