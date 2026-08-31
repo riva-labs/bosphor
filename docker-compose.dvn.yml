@@ -18,6 +18,11 @@ services:
     env_file: ../bosphor-dvn/.env
     environment:
       - DVN_METRICS_PORT=9301
+      - DVN_STATE_DIR=/data
+    volumes:
+      # Persisted poll cursors: a recreate resumes where it left off instead of
+      # re-scanning history (429 bursts on free RPCs, missed-packet window on EVM).
+      - dvn-state:/data
     ports:
       - "9301:9301"
     restart: unless-stopped
@@ -29,6 +34,13 @@ services:
     env_file: ../bosphor-dvn/.env
     environment:
       - DVN_METRICS_PORT=9302
+      - DVN_STATE_DIR=/data
+    volumes:
+      - dvn-state:/data
     ports:
       - "9302:9302"
     restart: unless-stopped
+
+volumes:
+  # Shared by both workers; each pathway writes its own cursor-<pathway>.json.
+  dvn-state:

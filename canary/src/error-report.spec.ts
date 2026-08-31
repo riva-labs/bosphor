@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reportProbeFailure, type CaptureLike } from './error-report.ts';
+import { isTransientRpcError, reportProbeFailure, type CaptureLike } from './error-report.ts';
 
 function makeCapture() {
   const calls: Array<{ err: unknown; tags?: Record<string, string> }> = [];
@@ -40,4 +40,30 @@ test('falls back to unknown stage when none is given', () => {
   reportProbeFailure(capture, { success: false, intentId: '0xabc' });
 
   assert.equal(calls[0].tags?.stage, 'unknown');
+});
+
+test('omits the intentId tag when the probe failed before an intent existed', () => {
+  const { capture, calls } = makeCapture();
+
+  reportProbeFailure(capture, { success: false, intentId: '', failedStage: 'submit', chain: 'solana' });
+
+  assert.deepEqual(calls[0].tags, { stage: 'submit', chain: 'solana' });
+});
+
+test('classifies RPC rate limits and timeouts as transient', () => {
+  assert.equal(isTransientRpcError(new Error('429 Too Many Requests: {"code": 429}')), true);
+  assert.equal(isTransientRpcError(new Error('request timeout (code=TIMEOUT)')), true);
+  assert.equal(isTransientRpcError(new Error('proof mismatch for intent 0xabc')), false);
+});
+
+test('classifies Cloudflare-style 5xx origin errors as transient', () => {
+  assert.equal(
+    isTransientRpcError(
+      new Error(
+        'server response 520 <none> (request={ }, response={ }, error=null, info={ "responseBody": "error code: 520\\n" }, code=SERVER_ERROR, version=6.17.0)',
+      ),
+    ),
+    true,
+  );
+  assert.equal(isTransientRpcError(new Error('server response 521 <none>')), true);
 });
