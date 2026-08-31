@@ -3,7 +3,9 @@
 FROM node:22-slim
 WORKDIR /app
 
-# 1. Build the SDK first, with its own devDeps, so dist/ exists.
+# 1. Build the SDK first, with its own devDeps, so dist/ exists. The SDK's
+#    tsconfig extends the repo-root tsconfig.base.json, so copy that alongside.
+COPY tsconfig.base.json ./
 COPY sdk/ ./sdk/
 RUN cd sdk && npm install && npm run build
 
