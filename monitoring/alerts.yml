@@ -211,6 +211,35 @@ groups:
             not reached the origin chain. Check LayerZero delivery and the
             confirmExecution fallback.
 
+      # Proof-path degradation: too many return legs are settling via the
+      # owner-gated confirmExecution fallback instead of the canonical LayerZero
+      # proof path. The min-count clause (>= 3 returns in the hour) is the
+      # cold-start guard: a fresh relayer with one unlucky return does not page.
+      # NOTE: 100% fallback is the CURRENT known state until #337 repairs the
+      # lz_send_proof path, so this alert will scream by design until then. Do
+      # not silence it permanently; it is the signal that #337 is still open.
+      - alert: BosphorRelayerReturnFallbackHigh
+        expr: >-
+          (
+            sum by(job) (increase(bosphor_relayer_return_mode_total{mode="fallback"}[1h]))
+            /
+            sum by(job) (increase(bosphor_relayer_return_mode_total[1h]))
+          ) > 0.5
+          and
+          sum by(job) (increase(bosphor_relayer_return_mode_total[1h])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor relayer returns are mostly falling back to confirmExecution"
+          description: >-
+            {{ $value | humanizePercentage }} of return legs on {{ $labels.job }}
+            settled via the owner-gated confirmExecution fallback (instead of the
+            LayerZero proof path) over the last hour. The proof path is degraded.
+            Check lz_send_total{result="failure"} and the Sui LZ send quote/send
+            errors in the relayer logs. Known state: this stays at 100% until
+            #337 lands the proof-path fix.
+
       # Backpressure headroom: staged bytes are approaching MAX_STAGED_BYTES
       # (default 256 MiB). At the ceiling, ingest sheds new blobs with a 503, so
       # this is the early warning that the store queue is not draining fast enough.
