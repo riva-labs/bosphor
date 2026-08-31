@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0 (2026-08-31)
+
+### Features
+
+- feat(sdk): regenerate parity vectors as version-1 fixtures
+- feat(sdk): version the commitment wire format (v1, 50 bytes)
+
 ## 0.10.0 (2026-08-30)
 
 ### Features
