@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 (2026-08-31)
+
+### Bug Fixes
+
+- fix(relayer): catch poll-tick rejections in the EVM lifecycle watcher
+- fix(relayer): retry EVM bootstrap with backoff instead of crashing
+- fix(relayer): classify the ethers bootstrap discovery failure as transient
+- fix(relayer): pin the EVM provider to a static network from config
+
 ## 0.7.1 (2026-08-30)
 
 ### Bug Fixes

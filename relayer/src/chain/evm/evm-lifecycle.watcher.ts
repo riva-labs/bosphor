@@ -25,7 +25,9 @@ export class EvmLifecycleWatcher implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     // Start from the current head; the feed tracks intents from now forward.
-    this.cursor = await this.evm.getBlockNumber();
+    // The bootstrap probe retries transient RPC blips with backoff, because a
+    // rejection escaping onModuleInit kills the process.
+    this.cursor = await this.evm.bootstrapBlockNumber();
     this.logger.log(`Watching EVM lifecycle events from block ${this.cursor}`);
   }
 
@@ -33,9 +35,19 @@ export class EvmLifecycleWatcher implements OnModuleInit {
   scheduledPoll(): void {
     if (this.polling) return;
     this.polling = true;
-    void this.pollOnce().finally(() => {
-      this.polling = false;
-    });
+    // pollOnce can reject on a transient RPC error (the head-of-tick
+    // getBlockNumber is not inside pollLifecycleEvents' try/catch). Catch it
+    // here: a `void`-discarded rejection is an unhandled rejection, which
+    // kills the process under Node's default policy.
+    void this.pollOnce()
+      .catch((err) => {
+        this.logger.warn(
+          `Lifecycle poll failed (${(err as Error)?.message?.slice(0, 120) ?? err}); retrying next cycle`,
+        );
+      })
+      .finally(() => {
+        this.polling = false;
+      });
   }
 
   async pollOnce(): Promise<void> {

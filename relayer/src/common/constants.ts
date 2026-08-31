@@ -10,6 +10,18 @@ export const CURSOR_FILE_NAME = '.sui-checkpoint-cursor';
 /** Maximum backoff (ms) for checkpoint stream reconnection. */
 export const MAX_BACKOFF_MS = 30_000;
 
+/** First retry delay (ms) for the EVM provider bootstrap probe. Doubles per
+ * attempt, capped at {@link MAX_BACKOFF_MS}. */
+export const EVM_BOOTSTRAP_BACKOFF_BASE_MS = 1_000;
+
+/**
+ * Attempts before the EVM provider bootstrap probe gives up (about 90s of
+ * retrying with the capped exponential backoff). An RPC blip at startup rides
+ * through; an endpoint that is still dead after this window is a real outage,
+ * so the process exits and the supervisor restarts it with a fresh window.
+ */
+export const EVM_BOOTSTRAP_MAX_ATTEMPTS = 8;
+
 /** EVM event polling interval (ms). */
 export const POLL_INTERVAL_MS = 5_000;
 
