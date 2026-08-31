@@ -111,7 +111,7 @@ pub struct SubmitIntent<'info> {
 ///
 /// Derives the canonical intent id over the commitment, the 32-byte sender, and
 /// the per-sender nonce; records `IntentState`; increments the nonce; builds the
-/// 81-byte forward message `intentId ++ commitment`; CPIs the endpoint `send`;
+/// 82-byte forward message `intentId ++ commitment`; CPIs the endpoint `send`;
 /// and emits `IntentSubmitted` with the resulting GUID/nonce.
 #[allow(clippy::too_many_arguments)]
 pub fn handle_submit_intent(
