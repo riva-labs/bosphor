@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1 (2026-09-01)
+
+### Bug Fixes
+
+- fix(scripts): authorize the operational relayer at deploy and in the repro script
+- fix(relayer): validate LzReceiverConfig relayer authority before LZ send
+
 ## 0.9.0 (2026-09-01)
 
 ### Features

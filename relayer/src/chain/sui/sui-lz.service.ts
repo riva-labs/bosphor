@@ -60,7 +60,50 @@ export class SuiLzService {
   /** Destination eids whose send-path worker config already passed validation. */
   private readonly validatedDstEids = new Set<number>();
 
+  /** Whether the on-chain LzReceiverConfig relayer already matched our signer. */
+  private relayerAuthorityValidated = false;
+
   constructor(private readonly sui: SuiService) {}
+
+  /**
+   * Verify that the address this service signs with is the relayer authorized
+   * by the on-chain LzReceiverConfig.
+   *
+   * lz_send_proof asserts ctx.sender() == config.relayer and aborts with code 2
+   * (EUnauthorizedRelayer) otherwise. The config initializes to the deployer at
+   * publish, so a deployment that never ran lz_receiver::set_relayer rejects
+   * the operational relayer key during transaction resolution with an opaque
+   * MoveAbort (the 2026-09-01 live failure behind issue #337). Checking the
+   * config up front turns that into an actionable error naming both addresses.
+   * The result is cached for the lifetime of the process.
+   */
+  private async assertRelayerAuthority(): Promise<void> {
+    if (this.relayerAuthorityValidated) return;
+
+    const lzConfigId = this.sui.getLzConfigId();
+    const client = this.sui.getClient();
+    const { response } = await client.ledgerService.getObject({
+      objectId: lzConfigId,
+      readMask: { paths: ['json'] },
+    });
+    const authorized = protoString(response.object?.json as ProtoValue, 'relayer');
+    if (!authorized) {
+      throw new Error(`Failed to read the authorized relayer from LzReceiverConfig ${lzConfigId}`);
+    }
+
+    const signer = normalizeAddress(this.sui.getAddress());
+    if (normalizeAddress(authorized) !== signer) {
+      throw new Error(
+        `LZ relayer authority mismatch: LzReceiverConfig ${lzConfigId} authorizes ` +
+          `${normalizeAddress(authorized)} but this relayer signs as ${signer}, so ` +
+          `lz_send_proof aborts with EUnauthorizedRelayer (code 2). The OApp admin must run ` +
+          `lz_receiver::set_relayer for this address (scripts/util/set-lz-relayer.ts).`,
+      );
+    }
+
+    this.relayerAuthorityValidated = true;
+    this.logger.log(`LZ relayer authority validated (${signer})`);
+  }
 
   /**
    * Read the CallCap identity of a worker object (executor or DVN).
@@ -100,6 +143,9 @@ export class SuiLzService {
    * destination eid for the lifetime of the process.
    */
   private async assertSendPathConfig(dstEid: number): Promise<void> {
+    // Independent of dstEid, cached on its own flag.
+    await this.assertRelayerAuthority();
+
     if (this.validatedDstEids.has(dstEid)) return;
 
     const infra = this.sui.getLzInfra();

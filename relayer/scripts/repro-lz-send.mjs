@@ -12,7 +12,6 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 
-const RELAYER = '0x545827b281cde00d2f3b15b03e0d6569ce081214ec3113cc633dea62657a540d';
 const DST_EID = 40161;
 
 const env = {
@@ -51,6 +50,23 @@ let endEpoch = process.env.END_EPOCH ? Number(process.env.END_EPOCH) : 250;
 const optionsBytes = Array.from(Buffer.from('00030100110100000000000000000000000000030d40', 'hex'));
 
 const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://fullnode.testnet.sui.io:443' });
+
+// Simulate and send as the relayer the on-chain LzReceiverConfig actually
+// authorizes. A hardcoded address here once masked the live abort 2
+// (EUnauthorizedRelayer): the script pinned the deployer, which was authorized,
+// while the deployed relayer signed with a different, unauthorized key.
+async function readAuthorizedRelayer() {
+  const { response } = await client.ledgerService.getObject({
+    objectId: env.lzConfigId,
+    readMask: { paths: ['json'] },
+  });
+  const field = response.object?.json?.kind?.structValue?.fields?.relayer;
+  const relayer = field?.kind?.oneofKind === 'stringValue' ? field.kind.stringValue : undefined;
+  if (!relayer) throw new Error(`Failed to read relayer from LzReceiverConfig ${env.lzConfigId}`);
+  return relayer;
+}
+const RELAYER = await readAuthorizedRelayer();
+console.log(`authorized relayer (on-chain): ${RELAYER}`);
 
 function buildQuoteTx() {
   const tx = new Transaction();
@@ -237,7 +253,10 @@ async function sendLive(intentIdHex, blobFieldHex, endEpochArg) {
   const { secretKey } = decodeSuiPrivateKey(key);
   const signer = Ed25519Keypair.fromSecretKey(secretKey);
   if (signer.toSuiAddress() !== RELAYER) {
-    throw new Error(`key resolves to ${signer.toSuiAddress()}, expected relayer ${RELAYER}`);
+    throw new Error(
+      `key resolves to ${signer.toSuiAddress()} but the LzReceiverConfig authorizes ${RELAYER}; ` +
+        `run scripts/util/set-lz-relayer.ts to fix the on-chain relayer`,
+    );
   }
 
   const ids = Array.from(Buffer.from(intentIdHex.replace(/^0x/, ''), 'hex'));
