@@ -1,11 +1,17 @@
 # Changelog
 
-## 0.9.2 (2026-09-01)
+## 0.9.3 (2026-09-01)
 
 ### Bug Fixes
 
 - fix(relayer): serialize EVM sends and rebuild on nonce conflicts
 - fix(relayer): add nonce-conflict classifier and fee-bump helpers
+
+## 0.9.2 (2026-09-01)
+
+### Bug Fixes
+
+- fix(relayer): scope byte-recovery sweep to pre-store rows
 
 ## 0.9.1 (2026-09-01)
 

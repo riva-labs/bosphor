@@ -1,3 +1,6 @@
+# Memory limits: sized from observed steady-state usage (2026-08-31 snapshot)
+# with 4-8x headroom, so one leaking process cannot OOM the host. The OOM killer
+# then targets the offending container, whose restart policy brings it back.
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,6 +10,7 @@ services:
       POSTGRES_DB: bosphor
     volumes:
       - bosphor-pgdata:/var/lib/postgresql/data
+    mem_limit: 1g
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bosphor -d bosphor"]
@@ -19,6 +23,9 @@ services:
     env_file: .env
     ports:
       - "3000:3000"
+    # Headroom for staged blob buffers (BYTEA payloads are fetched lazily, but a
+    # store batch can hold several blobs in memory at once).
+    mem_limit: 1536m
     restart: unless-stopped
     depends_on:
       postgres:
@@ -36,6 +43,9 @@ services:
       context: .
       dockerfile: canary/Dockerfile
     env_file: .env
+    # The canary embeds the SDK and encodes probe blobs in-process; observed
+    # ~420MB steady state.
+    mem_limit: 1g
     restart: unless-stopped
     depends_on:
       - relayer
@@ -45,12 +55,15 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
+      # Metric history survives container recreates (post-mortems need it).
+      - bosphor-promdata:/prometheus
     ports:
       - "9090:9090"
     # Lets Prometheus scrape host-published services (e.g. the testnet relayer on
     # :3399, which runs in a separate compose project) via host.docker.internal.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: 512m
     restart: unless-stopped
 
   grafana:
@@ -68,10 +81,16 @@ services:
     volumes:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      # Home-dashboard preference, public-share tokens, and alerting state
+      # survive recreates. Supersedes the grafana-apply.sh ritual: run the
+      # script once after this volume first mounts to seed the state, then
+      # recreates keep it.
+      - bosphor-grafanadata:/var/lib/grafana
     ports:
       - "3001:3000"
     depends_on:
       - prometheus
+    mem_limit: 512m
     restart: unless-stopped
 
 # status.bosphor.xyz is served by Kener (see kener/), routed through the
@@ -79,3 +98,5 @@ services:
 
 volumes:
   bosphor-pgdata:
+  bosphor-promdata:
+  bosphor-grafanadata:

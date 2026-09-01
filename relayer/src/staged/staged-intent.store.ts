@@ -187,6 +187,8 @@ export class StagedIntentStore {
           AND received = true
           AND bytes IS NULL
           AND committed_blob_id IS NOT NULL
+          AND walrus_object_id IS NULL
+          AND store_digest IS NULL
           AND (deadline IS NULL OR deadline > $1)
           AND COALESCE(bytes_recovery_at, created_at + $2) <= $1
         ORDER BY created_at
