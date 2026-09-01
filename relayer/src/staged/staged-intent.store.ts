@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
 import { Injectable, Logger } from '@nestjs/common';
 import {
   ByteRecoveryCandidate,
@@ -19,6 +21,20 @@ export interface PgQueryable {
 
 const TABLE = 'staged_intent';
 
+/** Default claim lease: 10 minutes, 5x the per-attempt store timeout. */
+export const DEFAULT_LEASE_MS = 600_000;
+
+/**
+ * Tuning knobs for the claim lease. `claimant` identifies this process in
+ * `claimed_by` (defaults to hostname plus a random suffix, generated once per
+ * store instance, i.e. once per process). `leaseMs` is how long a claim stays
+ * exclusive without renewal (STORE_LEASE_MS).
+ */
+export interface StagedStoreOptions {
+  claimant?: string;
+  leaseMs?: number;
+}
+
 /**
  * Postgres-backed durable store queue. One row per intent; the raw bytes live in
  * a BYTEA column until the blob is safely on Walrus and recorded on Sui, then are
@@ -34,12 +50,29 @@ const TABLE = 'staged_intent';
  * Real data only: query failures propagate. Every mutating upsert is guarded
  * `WHERE state='active'` so a backfilled event can never resurrect a terminal
  * intent (replaces the old processedIntents dedup Map). All times are epoch ms.
+ *
+ * Single-writer is enforced HERE, by a database lease, not by deployment
+ * discipline: drainDue() atomically claims the rows it returns (claimed_by +
+ * lease_expires_at, FOR UPDATE SKIP LOCKED), so two relayer processes provably
+ * get disjoint rows. A claimant re-claiming its own rows renews the lease; an
+ * expired lease (crashed process) is claimable by anyone; reschedule() releases
+ * the lease early. Terminal transitions keep claimed_by as a historical record,
+ * the `state='active'` guard already excludes them from every claim.
  */
 @Injectable()
 export class StagedIntentStore {
   private readonly logger = new Logger(StagedIntentStore.name);
+  /** This process's lease identity, recorded in claimed_by on every claim. */
+  readonly claimant: string;
+  private readonly leaseMs: number;
 
-  constructor(private readonly pool: PgQueryable) {}
+  constructor(
+    private readonly pool: PgQueryable,
+    options: StagedStoreOptions = {},
+  ) {
+    this.claimant = options.claimant ?? `${hostname()}-${randomBytes(4).toString('hex')}`;
+    this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  }
 
   async init(): Promise<void> {
     await this.pool.query(`
@@ -70,6 +103,12 @@ export class StagedIntentStore {
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS delivery_digest TEXT`);
     // Additive migration: gate for the byte-recovery sweep (next allowed attempt).
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bytes_recovery_at BIGINT`);
+    // Additive migration: claim lease (single-writer enforcement). Nullable, so
+    // existing rows are untouched and immediately claimable (claimed_by IS NULL).
+    // lease_expires_at is epoch ms (BIGINT), matching every other timestamp in
+    // this table and keeping the injected `now` the single clock source.
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT`);
     // Drives the claim/drain query: active rows that are due, oldest first.
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${TABLE}_drain_idx ON ${TABLE} (state, next_attempt_at, created_at)`,
@@ -170,22 +209,43 @@ export class StagedIntentStore {
   }
 
   /**
-   * Active rows that are due (`next_attempt_at <= now`), oldest first. Returns
-   * metadata only - never the BYTEA payload - so the poll stays cheap.
+   * Claim the active rows that are due (`next_attempt_at <= now`), oldest first.
+   * Returns metadata only - never the BYTEA payload - so the poll stays cheap.
+   *
+   * This is the single-writer boundary: one atomic UPDATE stamps claimed_by and
+   * lease_expires_at on the rows it returns. The subselect takes row locks with
+   * FOR UPDATE SKIP LOCKED, so two processes claiming concurrently get disjoint
+   * rows; a row already leased to a live foreign claimant is filtered out. Three
+   * kinds of rows are claimable:
+   *   unclaimed        claimed_by IS NULL (fresh rows, pre-lease rows)
+   *   our own          claimed_by = claimant (re-claim renews the lease, which is
+   *                    how an in-flight store longer than the lease stays covered:
+   *                    the owning process re-drains every claim tick)
+   *   expired          lease_expires_at < now (the claimant died mid-store;
+   *                    takeover, and per-step idempotency makes the resume safe)
    */
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     const { rows } = await this.pool.query(
-      `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
+      `UPDATE ${TABLE}
+          SET claimed_by = $3, lease_expires_at = $1 + $4, updated_at = $1
+        WHERE intent_id IN (
+          SELECT intent_id
+            FROM ${TABLE}
+           WHERE state = 'active' AND next_attempt_at <= $1
+             AND (claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1)
+           ORDER BY created_at
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING intent_id, committed_blob_id, size, deadline, src_eid, received,
               delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
               walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
-              state, attempts, next_attempt_at, last_error, created_at, updated_at
-         FROM ${TABLE}
-        WHERE state = 'active' AND next_attempt_at <= $1
-        ORDER BY created_at
-        LIMIT $2`,
-      [now, limit],
+              state, attempts, next_attempt_at, last_error, created_at, updated_at,
+              claimed_by, lease_expires_at`,
+      [now, limit, this.claimant, this.leaseMs],
     );
-    return rows.map((r) => this.mapRow(r));
+    // RETURNING does not guarantee the subselect's order; restore oldest-first.
+    return rows.map((r) => this.mapRow(r)).sort((a, b) => a.createdAt - b.createdAt);
   }
 
   /** Fetch the raw bytes for `intentId` (only when actually storing it). */
@@ -231,7 +291,11 @@ export class StagedIntentStore {
     );
   }
 
-  /** Terminal success: bytes freed, row settled. */
+  /**
+   * Terminal success: bytes freed, row settled. claimed_by stays as a historical
+   * record of who processed the row; the `state='active'` guard in the claim
+   * query is what keeps terminal rows out of every future claim.
+   */
   async markDone(intentId: string): Promise<void> {
     await this.pool.query(
       `UPDATE ${TABLE} SET state = 'done', bytes = NULL, updated_at = $2 WHERE intent_id = $1`,
@@ -249,7 +313,11 @@ export class StagedIntentStore {
     );
   }
 
-  /** Transient retry: bump attempts and gate the next claim behind a backoff. */
+  /**
+   * Transient retry: bump attempts and gate the next claim behind a backoff.
+   * Also releases the claim lease, so once the backoff elapses ANY process may
+   * pick the row up; nobody waits out a lease the owner is no longer using.
+   */
   async reschedule(
     intentId: string,
     attempts: number,
@@ -258,7 +326,8 @@ export class StagedIntentStore {
   ): Promise<void> {
     await this.pool.query(
       `UPDATE ${TABLE}
-          SET attempts = $2, next_attempt_at = $3, last_error = $4, updated_at = $5
+          SET attempts = $2, next_attempt_at = $3, last_error = $4, updated_at = $5,
+              claimed_by = NULL, lease_expires_at = NULL
         WHERE intent_id = $1`,
       [intentId, attempts, nextAttemptAt, lastError, Date.now()],
     );
@@ -329,7 +398,8 @@ export class StagedIntentStore {
       `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
               delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
               walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
-              state, attempts, next_attempt_at, last_error, created_at, updated_at
+              state, attempts, next_attempt_at, last_error, created_at, updated_at,
+              claimed_by, lease_expires_at
          FROM ${TABLE} WHERE intent_id = $1`,
       [intentId],
     );
@@ -358,6 +428,8 @@ export class StagedIntentStore {
       state: row.state as StagedIntentRow['state'],
       attempts: Number(row.attempts ?? 0),
       nextAttemptAt: Number(row.next_attempt_at),
+      claimedBy: str(row.claimed_by),
+      leaseExpiresAt: num(row.lease_expires_at),
       lastError: str(row.last_error),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),

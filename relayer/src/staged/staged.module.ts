@@ -22,7 +22,11 @@ import { StagedReaper } from './staged-reaper.service';
       useFactory: (config: ConfigService): StagedIntentStore | null => {
         const url = config.get<string>('DATABASE_URL');
         if (url) {
-          return new StagedIntentStore(new Pool({ connectionString: url }));
+          // The claimant identity defaults inside the store (hostname + random
+          // suffix, once per process); only the lease duration is configurable.
+          return new StagedIntentStore(new Pool({ connectionString: url }), {
+            leaseMs: config.get<number>('STORE_LEASE_MS'),
+          });
         }
         new Logger('StagedModule').warn(
           'DATABASE_URL not set - durable store queue disabled (in-memory dev only)',

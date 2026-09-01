@@ -42,9 +42,12 @@ const ALREADY_RECORDED = 'already-recorded';
  *   POST /blob (ingest)              ->  staged_intent.upsertBytes()
  *   this loop (@CLAIM_INTERVAL_MS)   ->  drainDue() -> store() each ready row
  *
- * Single-writer: one process, bounded concurrency (STORE_CONCURRENCY), no
- * SKIP LOCKED / lease. The only in-memory state is `inProcess`, a guard so the
- * loop never double-starts the same intent within this process.
+ * Single-writer is enforced by the store, not by deployment discipline:
+ * drainDue() atomically claims the rows it returns (claimed_by + lease,
+ * FOR UPDATE SKIP LOCKED), so concurrent relayer processes get disjoint rows
+ * and this loop only ever sees rows leased to this process. `inProcess` stays
+ * as an in-memory fast path so the loop never double-starts the same intent
+ * within this process, but it is no longer the correctness boundary.
  *
  * store() is per-step idempotent: the persisted walrus_object_id / store_digest
  * make a crash or retry re-run only the unfinished steps, so a slow or restarted

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 (2026-09-01)
+
+### Features
+
+- feat(relayer): make the claim lease duration configurable via STORE_LEASE_MS
+- feat(relayer): enforce single-writer with a claim lease in the staged store
+
 ## 0.8.0 (2026-09-01)
 
 ### Features

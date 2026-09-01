@@ -1,12 +1,15 @@
+import { hostname } from 'node:os';
 import { StagedIntentStore, PgQueryable } from './staged-intent.store';
 
 /**
  * A behavioural in-memory stand-in for a pg Pool that understands the query
  * shapes StagedIntentStore issues. It models rows in a Map and applies the same
  * semantics real Postgres would (ON CONFLICT with the `state='active'` guard,
- * the drain filter, SUM over rows that still hold bytes, expiry, purge), so the
- * tests assert behaviour, not SQL strings. Mirrors the FakePool pattern in
- * pg-intent-lifecycle.store.spec.ts.
+ * the atomic claim filter with its lease predicate, SUM over rows that still
+ * hold bytes, expiry, purge), so the tests assert behaviour, not SQL strings.
+ * Each query() call is atomic, mirroring how the single claim UPDATE (FOR
+ * UPDATE SKIP LOCKED) serialises concurrent claimers in real Postgres. Mirrors
+ * the FakePool pattern in pg-intent-lifecycle.store.spec.ts.
  */
 type Row = Record<string, unknown> & { bytes: Buffer | null };
 
@@ -86,17 +89,6 @@ class FakePool implements PgQueryable {
       return { rows: due };
     }
 
-    if (sql.includes('next_attempt_at <=')) {
-      const now = params[0] as number;
-      const limit = params[1] as number;
-      const due = [...this.rows.values()]
-        .filter((r) => r.state === 'active' && (r.next_attempt_at as number) <= now)
-        .sort((a, b) => (a.created_at as number) - (b.created_at as number))
-        .slice(0, limit)
-        .map((r) => this.project(r));
-      return { rows: due };
-    }
-
     if (sql.includes('where intent_id = $1')) {
       const r = this.rows.get(params[0] as string);
       return { rows: r ? [this.project(r)] : [] };
@@ -157,6 +149,8 @@ class FakePool implements PgQueryable {
       state: 'active',
       attempts: 0,
       next_attempt_at: now,
+      claimed_by: null,
+      lease_expires_at: null,
       last_error: null,
       created_at: now,
       updated_at: now,
@@ -192,6 +186,35 @@ class FakePool implements PgQueryable {
       return { rows: expired };
     }
 
+    // The atomic drain claim: filter with the lease predicate, stamp the lease
+    // on the claimed rows, and RETURNING them - all in one call, as the single
+    // UPDATE ... FOR UPDATE SKIP LOCKED statement does in real Postgres.
+    if (sql.includes('claimed_by = $3')) {
+      const now = params[0] as number;
+      const limit = params[1] as number;
+      const claimant = params[2] as string;
+      const leaseMs = params[3] as number;
+      const claimed = [...this.rows.values()]
+        .filter(
+          (r) =>
+            r.state === 'active' &&
+            (r.next_attempt_at as number) <= now &&
+            // SQL: claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1
+            // (a NULL lease_expires_at makes the comparison false, as in SQL).
+            (r.claimed_by == null ||
+              r.claimed_by === claimant ||
+              (r.lease_expires_at != null && (r.lease_expires_at as number) < now)),
+        )
+        .sort((a, b) => (a.created_at as number) - (b.created_at as number))
+        .slice(0, limit);
+      for (const r of claimed) {
+        r.claimed_by = claimant;
+        r.lease_expires_at = now + leaseMs;
+        r.updated_at = now;
+      }
+      return { rows: claimed.map((r) => this.project(r)) };
+    }
+
     const r = this.rows.get(params[0] as string);
     if (!r) return { rows: [] };
 
@@ -220,6 +243,9 @@ class FakePool implements PgQueryable {
       r.next_attempt_at = params[2] as number;
       r.last_error = params[3] as string;
       r.updated_at = params[4] as number;
+      // reschedule() releases the claim lease alongside the backoff.
+      r.claimed_by = null;
+      r.lease_expires_at = null;
     } else if (sql.includes('bytes_recovery_at = $2')) {
       r.bytes_recovery_at = params[1] as number;
       r.updated_at = params[2] as number;
@@ -368,6 +394,95 @@ describe('StagedIntentStore', () => {
 
     const limited = await store.drainDue(5000, 1);
     expect(limited.map((r) => r.intentId)).toEqual(['0xold']);
+  });
+
+  describe('claim lease (single-writer enforcement)', () => {
+    const LEASE = 60_000;
+
+    /** Two stores over the SAME pool = two relayer processes on one database. */
+    const twoClaimers = async () => {
+      const pool = new FakePool();
+      const a = new StagedIntentStore(pool, { claimant: 'proc-a', leaseMs: LEASE });
+      const b = new StagedIntentStore(pool, { claimant: 'proc-b', leaseMs: LEASE });
+      clock = 1000;
+      await a.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b1', size: 1 });
+      clock = 2000;
+      await a.upsertBytes('0x2', { bytes: bytes('b'), blobId: 'b2', size: 1 });
+      return { pool, a, b };
+    };
+
+    it('derives a per-process claimant identity: hostname plus a random suffix', () => {
+      const s1 = new StagedIntentStore(new FakePool());
+      const s2 = new StagedIntentStore(new FakePool());
+      expect(s1.claimant.startsWith(`${hostname()}-`)).toBe(true);
+      expect(s1.claimant.slice(hostname().length + 1)).toMatch(/^[0-9a-f]{8}$/);
+      expect(s1.claimant).not.toBe(s2.claimant); // two processes never collide
+    });
+
+    it('gives two concurrent claimers disjoint rows', async () => {
+      const { a, b } = await twoClaimers();
+
+      const claimedA = await a.drainDue(5000, 1);
+      const claimedB = await b.drainDue(5000, 10);
+
+      expect(claimedA.map((r) => r.intentId)).toEqual(['0x1']);
+      expect(claimedB.map((r) => r.intentId)).toEqual(['0x2']); // 0x1 is leased out
+      expect(claimedA[0].claimedBy).toBe('proc-a');
+      expect(claimedB[0].claimedBy).toBe('proc-b');
+      expect(claimedA[0].leaseExpiresAt).toBe(5000 + LEASE);
+
+      // No matter how often B re-drains, A's live lease keeps 0x1 off-limits.
+      const again = await b.drainDue(6000, 10);
+      expect(again.map((r) => r.intentId)).toEqual(['0x2']);
+    });
+
+    it('renews the lease when the owner re-claims its own rows', async () => {
+      const { a, b } = await twoClaimers();
+
+      await a.drainDue(5000, 10);
+      const renewed = await a.drainDue(30_000, 10); // next claim tick, same owner
+      expect(renewed.map((r) => r.intentId)).toEqual(['0x1', '0x2']);
+      expect(renewed[0].leaseExpiresAt).toBe(30_000 + LEASE);
+
+      // The renewal pushed the horizon: B still gets nothing past the ORIGINAL expiry.
+      expect(await b.drainDue(5000 + LEASE + 1, 10)).toHaveLength(0);
+    });
+
+    it('lets another process take over an expired lease (crashed owner)', async () => {
+      const { a, b } = await twoClaimers();
+
+      await a.drainDue(5000, 10); // leases expire at 65_000
+      expect(await b.drainDue(65_000, 10)).toHaveLength(0); // not yet: strict <
+      const taken = await b.drainDue(65_001, 10);
+      expect(taken.map((r) => r.intentId)).toEqual(['0x1', '0x2']);
+      expect(taken.every((r) => r.claimedBy === 'proc-b')).toBe(true);
+    });
+
+    it('reschedule releases the lease so any process may claim after the backoff', async () => {
+      const { a, b } = await twoClaimers();
+
+      await a.drainDue(5000, 10);
+      await a.reschedule('0x1', 1, 8000, 'transient failure');
+      expect((await a.get('0x1'))?.claimedBy).toBeUndefined();
+
+      expect(await b.drainDue(7999, 10)).toHaveLength(0); // backoff still gates it
+      const claimed = await b.drainDue(8000, 10); // well before the old lease expiry
+      expect(claimed.map((r) => r.intentId)).toEqual(['0x1']);
+      expect(claimed[0].claimedBy).toBe('proc-b');
+    });
+
+    it('never re-claims completed or dead-lettered intents, even past lease expiry', async () => {
+      const { a, b } = await twoClaimers();
+
+      await a.drainDue(5000, 10);
+      await a.markDone('0x1');
+      await a.markDead('0x2', 'attempts exhausted');
+
+      expect(await b.drainDue(999_999_999, 10)).toHaveLength(0);
+      expect(await a.drainDue(999_999_999, 10)).toHaveLength(0); // not even the owner
+      expect((await a.get('0x1'))?.state).toBe('done');
+      expect((await a.get('0x2'))?.state).toBe('dead');
+    });
   });
 
   it('persists per-step results for idempotent retry and fetches/frees bytes', async () => {

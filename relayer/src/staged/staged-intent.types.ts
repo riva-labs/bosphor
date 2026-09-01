@@ -57,6 +57,14 @@ export interface StagedIntentRow {
   attempts: number;
   /** Earliest epoch ms this row may be claimed again (backoff gate). */
   nextAttemptAt: number;
+  /**
+   * Process identity that currently holds (or last held) the claim lease.
+   * Set atomically by the claim query; cleared when the row is rescheduled.
+   * On terminal rows it is left as a historical record of who processed them.
+   */
+  claimedBy?: string;
+  /** Epoch ms the current claim lease expires; past it, any process may claim. */
+  leaseExpiresAt?: number;
   lastError?: string;
   createdAt: number;
   updatedAt: number;
