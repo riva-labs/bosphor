@@ -80,10 +80,13 @@ export class IntentIngest {
       );
     }
 
-    // Aggregate backpressure: shed load before the CPU-heavy blob-id recompute
-    // (and before buffering) when the durable queue is already near its byte
-    // ceiling. Sourced from a live SUM over staged rows, never an in-memory
-    // counter (which drifts and is wrong across restart/multi-instance).
+    // Aggregate backpressure, fast path: shed load before the CPU-heavy blob-id
+    // recompute (and before buffering) when the durable queue is already near its
+    // byte ceiling. Sourced from a live SUM over staged rows, never an in-memory
+    // counter (which drifts and is wrong across restart/multi-instance). This is
+    // only a fast rejection; the AUTHORITATIVE cap check happens atomically inside
+    // upsertBytes below, so two concurrent ingests can never both slip past the
+    // ceiling in the window between this read and the write.
     if (this.staged) {
       const stagedBytes = await this.staged.stagedBytesTotal();
       if (stagedBytes + bytes.length > this.maxStagedBytes) {
@@ -109,8 +112,25 @@ export class IntentIngest {
     }
 
     // Durably write the accepted bytes to the store queue: the single source of
-    // truth for pending stores, so an accepted upload survives a crash.
-    await this.staged?.upsertBytes(intentId, { bytes, blobId, size: bytes.length });
+    // truth for pending stores, so an accepted upload survives a crash. The cap is
+    // enforced atomically HERE (not by the fast-path read above), so admission can
+    // never exceed MAX_STAGED_BYTES under concurrency: if another ingest committed
+    // bytes in the meantime and this write would breach the ceiling, it is refused
+    // and mapped to the same transient backpressure rejection.
+    if (this.staged) {
+      const outcome = await this.staged.upsertBytes(
+        intentId,
+        { bytes, blobId, size: bytes.length },
+        this.maxStagedBytes,
+      );
+      if (outcome === 'backpressure') {
+        return this.reject(
+          intentId,
+          'backpressure',
+          `staged bytes + ${bytes.length} would exceed MAX_STAGED_BYTES ${this.maxStagedBytes}`,
+        );
+      }
+    }
     this.logger.log(
       `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (staged for store)`,
     );
