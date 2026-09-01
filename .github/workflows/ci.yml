@@ -14,6 +14,7 @@ jobs:
       solana: ${{ steps.filter.outputs.solana }}
       relayer_image: ${{ steps.filter.outputs.relayer_image }}
       canary_image: ${{ steps.filter.outputs.canary_image }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@v7
 
@@ -31,6 +32,12 @@ jobs:
               - 'canary/**'
               - 'sdk/**'
               - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            e2e:
+              - 'contracts/**'
+              - 'relayer/**'
+              - 'sdk/**'
+              - 'scripts/**'
               - '.github/workflows/ci.yml'
 
   forge-tests:
