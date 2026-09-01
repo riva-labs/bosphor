@@ -85,7 +85,10 @@ function makeGetObjectMock(authorizedRelayer: string = FAKE_RELAYER_ADDRESS) {
 }
 
 /** Simulation response for the validation PTB (effective send configs). */
-function validationSimResponse(executor: string = EXECUTOR_CAP, requiredDvns: string[] = [DVN_CAP]) {
+function validationSimResponse(
+  executor: string = EXECUTOR_CAP,
+  requiredDvns: string[] = [DVN_CAP],
+) {
   const execBytes = ExecutorConfigBcs.serialize({
     max_message_size: 10000n,
     executor,
@@ -470,9 +473,9 @@ describe('SuiLzService relayer authority validation', () => {
   it('rejects the send before signing when the config authorizes another address', async () => {
     await setup(DEPLOYER);
 
-    await expect(
-      lzService.lzSendProof(intentId, blobId, 100, 40161, 110_000_000n),
-    ).rejects.toThrow(/LZ relayer authority mismatch/);
+    await expect(lzService.lzSendProof(intentId, blobId, 100, 40161, 110_000_000n)).rejects.toThrow(
+      /LZ relayer authority mismatch/,
+    );
     // Nothing was resolved or executed on chain.
     expect(mockSimulate).not.toHaveBeenCalled();
     expect(mockExecute).not.toHaveBeenCalled();
