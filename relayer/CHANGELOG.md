@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 (2026-09-01)
+
+### Bug Fixes
+
+- fix(relayer): cast size/cap params to bigint in the atomic upsert
+
 ## 0.10.0 (2026-09-01)
 
 ### Features
