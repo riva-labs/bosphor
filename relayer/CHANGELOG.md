@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3 (2026-09-01)
+
+### Bug Fixes
+
+- fix(relayer): serialize EVM sends and rebuild on nonce conflicts
+- fix(relayer): add nonce-conflict classifier and fee-bump helpers
+
 ## 0.9.2 (2026-09-01)
 
 ### Bug Fixes

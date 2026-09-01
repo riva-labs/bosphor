@@ -13,6 +13,13 @@ describe('EvmService', () => {
   beforeEach(async () => {
     mockProvider = {
       getBlockNumber: jest.fn().mockResolvedValue(1000),
+      // confirmExecution seeds fees from the network and allocates a pending
+      // nonce; a mutable counter lets a test observe sequential allocation.
+      getFeeData: jest.fn().mockResolvedValue({
+        maxFeePerGas: 100n,
+        maxPriorityFeePerGas: 10n,
+      }),
+      getTransactionCount: jest.fn().mockResolvedValue(3700),
     };
     mockReporter = { captureException: jest.fn() };
 
@@ -47,6 +54,7 @@ describe('EvmService', () => {
     // Skip onModuleInit, set internal dependencies directly
     (service as any).provider = mockProvider;
     (service as any).adapter = mockAdapter;
+    (service as any).wallet = { address: '0x' + '11'.repeat(20) };
   });
 
   afterEach(() => {
@@ -224,27 +232,31 @@ describe('EvmService', () => {
   });
 
   describe('confirmExecution', () => {
-    it('should send transaction and return hash', async () => {
-      const mockTx = {
-        wait: jest.fn().mockResolvedValue({ hash: '0xtxhash' }),
-      };
-      mockAdapter.confirmExecution.mockResolvedValue(mockTx);
+    const proof = '0x' + '00'.repeat(64);
 
-      const hash = await service.confirmExecution('0xintentid', '0x' + '00'.repeat(64));
+    /** Build a mined-tx stub whose receipt carries a distinguishable hash. */
+    const minedTx = (hash = '0xtxhash') => ({ wait: jest.fn().mockResolvedValue({ hash }) });
+
+    it('should send transaction with an explicit pending nonce and return hash', async () => {
+      mockAdapter.confirmExecution.mockResolvedValue(minedTx());
+
+      const hash = await service.confirmExecution('0xintentid', proof);
 
       expect(hash).toBe('0xtxhash');
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(1);
+      // The tx is built with the freshly fetched pending nonce, not left to
+      // ethers' implicit allocation.
+      const overrides = mockAdapter.confirmExecution.mock.calls[0][2];
+      expect(overrides.nonce).toBe(3700);
+      expect(overrides.maxFeePerGas).toBe(100n);
     });
 
     it('should retry on transient failure and succeed', async () => {
-      const mockTx = {
-        wait: jest.fn().mockResolvedValue({ hash: '0xtxhash' }),
-      };
       mockAdapter.confirmExecution
-        .mockRejectedValueOnce(new Error('nonce too low'))
-        .mockResolvedValueOnce(mockTx);
+        .mockRejectedValueOnce(new Error('request timeout'))
+        .mockResolvedValueOnce(minedTx());
 
-      const hash = await service.confirmExecution('0xintentid', '0x' + '00'.repeat(64));
+      const hash = await service.confirmExecution('0xintentid', proof);
 
       expect(hash).toBe('0xtxhash');
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(2);
@@ -253,11 +265,93 @@ describe('EvmService', () => {
     it('should throw after max retries', async () => {
       mockAdapter.confirmExecution.mockRejectedValue(new Error('persistent error'));
 
-      await expect(service.confirmExecution('0xintentid', '0x' + '00'.repeat(64))).rejects.toThrow(
+      await expect(service.confirmExecution('0xintentid', proof)).rejects.toThrow(
         'persistent error',
       );
 
       expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(3);
     }, 10_000);
+
+    it('rebuilds with a fresh nonce and bumped fees on REPLACEMENT_UNDERPRICED, not a resend', async () => {
+      // Attempt 1 collides in the mempool; the retry must NOT resend the same
+      // tx (the #364 loop) but rebuild with a refreshed nonce and higher fee.
+      mockProvider.getTransactionCount
+        .mockResolvedValueOnce(3700) // initial build
+        .mockResolvedValueOnce(3701); // refreshed after the conflict
+      const conflict = Object.assign(new Error('replacement transaction underpriced'), {
+        code: 'REPLACEMENT_UNDERPRICED',
+      });
+      mockAdapter.confirmExecution.mockRejectedValueOnce(conflict).mockResolvedValueOnce(minedTx());
+
+      const hash = await service.confirmExecution('0xintentid', proof);
+
+      expect(hash).toBe('0xtxhash');
+      expect(mockAdapter.confirmExecution).toHaveBeenCalledTimes(2);
+
+      const first = mockAdapter.confirmExecution.mock.calls[0][2];
+      const second = mockAdapter.confirmExecution.mock.calls[1][2];
+      // Fresh nonce, not the stale one.
+      expect(first.nonce).toBe(3700);
+      expect(second.nonce).toBe(3701);
+      // Fee bumped >= 10% (12% here) so the replacement clears the floor.
+      expect(second.maxFeePerGas).toBeGreaterThanOrEqual((first.maxFeePerGas * 110n) / 100n);
+      expect(second.maxPriorityFeePerGas).toBeGreaterThanOrEqual(
+        (first.maxPriorityFeePerGas * 110n) / 100n,
+      );
+    });
+
+    it('refreshes the nonce on NONCE_EXPIRED', async () => {
+      mockProvider.getTransactionCount.mockResolvedValueOnce(3700).mockResolvedValueOnce(3701);
+      const expired = Object.assign(new Error('nonce expired'), { code: 'NONCE_EXPIRED' });
+      mockAdapter.confirmExecution.mockRejectedValueOnce(expired).mockResolvedValueOnce(minedTx());
+
+      const hash = await service.confirmExecution('0xintentid', proof);
+
+      expect(hash).toBe('0xtxhash');
+      expect(mockProvider.getTransactionCount).toHaveBeenCalledTimes(2);
+      expect(mockAdapter.confirmExecution.mock.calls[1][2].nonce).toBe(3701);
+    });
+
+    it('serializes concurrent confirm calls so each gets a distinct sequential nonce', async () => {
+      // Two return legs fire together (the Promise.allSettled processor tick).
+      // Without serialization both would read the same pending nonce and
+      // collide; the send queue must hand them out one at a time.
+      let next = 3700;
+      mockProvider.getTransactionCount.mockImplementation(async () => next++);
+
+      const seenNonces: number[] = [];
+      mockAdapter.confirmExecution.mockImplementation(
+        async (_id: string, _proof: unknown, overrides: { nonce: number }) => {
+          seenNonces.push(overrides.nonce);
+          // Yield so a non-serialized implementation would interleave here.
+          await new Promise((r) => setTimeout(r, 0));
+          return minedTx('0x' + overrides.nonce.toString(16));
+        },
+      );
+
+      const results = await Promise.all([
+        service.confirmExecution('0xa', proof),
+        service.confirmExecution('0xb', proof),
+        service.confirmExecution('0xc', proof),
+      ]);
+
+      expect(results).toHaveLength(3);
+      // Distinct and sequential: no two sends shared a nonce.
+      expect(seenNonces).toEqual([3700, 3701, 3702]);
+      expect(new Set(seenNonces).size).toBe(3);
+    });
+
+    it('keeps the wallet usable after a failed send (queue tail advances on rejection)', async () => {
+      mockProvider.getTransactionCount.mockResolvedValue(3700);
+      mockAdapter.confirmExecution
+        .mockRejectedValueOnce(new Error('persistent error'))
+        .mockRejectedValueOnce(new Error('persistent error'))
+        .mockRejectedValueOnce(new Error('persistent error'))
+        .mockResolvedValue(minedTx());
+
+      await expect(service.confirmExecution('0xa', proof)).rejects.toThrow('persistent error');
+      // A following send still runs rather than deadlocking on the failed one.
+      await expect(service.confirmExecution('0xb', proof)).resolves.toBe('0xtxhash');
+    }, 15_000);
   });
 });
