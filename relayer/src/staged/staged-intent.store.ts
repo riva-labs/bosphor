@@ -8,6 +8,7 @@ import {
   StagedIntentRow,
   StagedStats,
   UploadResult,
+  UpsertOutcome,
 } from './staged-intent.types';
 
 /**
@@ -120,21 +121,80 @@ export class StagedIntentStore {
    * Buffer accepted out-of-band bytes for `intentId`. Creates the row if the
    * IntentReceived event has not landed yet, otherwise merges the bytes onto the
    * existing active row. No-op on a terminal row (`WHERE state='active'`).
+   *
+   * Admission control is ATOMIC. When `maxStagedBytes` is passed, the backpressure
+   * cap is enforced INSIDE the same statement as the write: the current staged
+   * total (SUM of `size` over rows that still hold bytes) is read and the write is
+   * gated on `total + this blob <= cap`, all under a single serialised statement.
+   * This closes the TOCTOU window a separate SELECT-then-INSERT leaves open, where
+   * two concurrent ingests both read a total under the cap and then both write,
+   * together breaching it (harmless single-instance, a real double-admit under
+   * payments / multi-instance). The row's own current contribution is excluded
+   * from the total so re-buffering the same intent's bytes is not counted twice.
+   *
+   * Returns whether the bytes were admitted:
+   *   'accepted'     the bytes were buffered (row created or merged).
+   *   'backpressure' the cap would be exceeded; nothing was written.
+   *   'terminal'     the row exists but is terminal (done/dead/expired); no-op.
+   * With no cap the write always reports 'accepted' (or 'terminal'), preserving
+   * the prior unconditional-upsert behaviour for callers that do not admit-control.
    */
-  async upsertBytes(intentId: string, blob: StagedBytes): Promise<void> {
+  async upsertBytes(
+    intentId: string,
+    blob: StagedBytes,
+    maxStagedBytes?: number,
+  ): Promise<UpsertOutcome> {
     const now = Date.now();
-    await this.pool.query(
-      `INSERT INTO ${TABLE}
+    // A single statement does read + write. The CTE `capacity` computes the
+    // staged total EXCLUDING this intent's current size (so a re-buffer of the
+    // same row is not double-counted), and every branch of the upsert is gated on
+    // it. Postgres evaluates the CTE once against a consistent snapshot and the
+    // ON CONFLICT path takes a row lock, so two concurrent callers are serialised:
+    // the second sees the first's committed bytes in the SUM and is rejected if
+    // that pushes the total over the cap.
+    const capped = maxStagedBytes !== undefined;
+    const cap = maxStagedBytes ?? 0;
+    const { rows } = await this.pool.query(
+      `WITH capacity AS (
+         SELECT COALESCE(SUM(size), 0) AS staged
+           FROM ${TABLE}
+          WHERE bytes IS NOT NULL AND intent_id <> $1
+       )
+       INSERT INTO ${TABLE}
          (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $5, $5)
+       SELECT $1, $2, $3, $4, $5, $5, $5
+         FROM capacity
+        WHERE $6 = false OR capacity.staged + $4 <= $7
        ON CONFLICT (intent_id) DO UPDATE SET
          bytes = EXCLUDED.bytes,
          blob_id = EXCLUDED.blob_id,
          size = EXCLUDED.size,
          updated_at = EXCLUDED.updated_at
-       WHERE ${TABLE}.state = 'active'`,
-      [intentId, blob.bytes, blob.blobId, blob.size, now],
+       WHERE ${TABLE}.state = 'active'
+         AND ($6 = false
+              OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7)
+       RETURNING intent_id`,
+      [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap],
     );
+    if (rows.length > 0) return 'accepted';
+    // No row written. Distinguish "cap would be breached" from "row is terminal"
+    // so the caller can report the right reason; on a fresh row only the cap can
+    // block, on an existing row it is the cap or a terminal state.
+    if (capped) {
+      const total = await this.stagedBytesTotalExcluding(intentId);
+      if (total + blob.size > cap) return 'backpressure';
+    }
+    return 'terminal';
+  }
+
+  /** Staged-bytes total excluding one intent's own contribution (see upsertBytes). */
+  private async stagedBytesTotalExcluding(intentId: string): Promise<number> {
+    const { rows } = await this.pool.query(
+      `SELECT COALESCE(SUM(size), 0) AS total
+         FROM ${TABLE} WHERE bytes IS NOT NULL AND intent_id <> $1`,
+      [intentId],
+    );
+    return Number(rows[0]?.total ?? 0);
   }
 
   /**

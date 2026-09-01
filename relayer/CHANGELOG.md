@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.0 (2026-09-01)
+
+### Features
+
+- feat(relayer): route ingest admission through the atomic upsert cap
+- feat(relayer): atomic backpressure cap inside the byte upsert
+
 ## 0.9.3 (2026-09-01)
 
 ### Bug Fixes
