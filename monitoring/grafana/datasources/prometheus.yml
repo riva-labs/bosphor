@@ -31,3 +31,23 @@ datasources:
       sslmode: disable
       postgresVersion: 1600
     editable: false
+
+  # The testnet relayer (api.bosphor.xyz/testnet) writes its live intent
+  # lifecycle to a separate database on the same server. This is where the
+  # active demo/canary traffic lands; the mainnet `bosphor` db above is stale
+  # until the M3 mainnet stack ships. The relayer dashboard's tx table reads
+  # from here.
+  - name: Bosphor Testnet Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: bosphor_testnet
+    user: bosphor
+    uid: bosphor-postgres-testnet
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      database: bosphor_testnet
+      sslmode: disable
+      postgresVersion: 1600
+    editable: false
