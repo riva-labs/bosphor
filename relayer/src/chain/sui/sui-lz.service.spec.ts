@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { Transaction } from '@mysten/sui/transactions';
+import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { SuiService } from './sui.service';
 import { SuiLzService, ExecutorConfigBcs, UlnConfigBcs } from './sui-lz.service';
 
@@ -33,6 +34,11 @@ const BOSPHOR = {
 
 // Raw 32-byte Ed25519 secret key in base64 (test only)
 const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
+// The Sui address FAKE_RELAYER_KEY derives; the LzReceiverConfig mock must
+// authorize it for the send path to proceed.
+const FAKE_RELAYER_ADDRESS = Ed25519Keypair.fromSecretKey(
+  Uint8Array.from(Buffer.from(FAKE_RELAYER_KEY, 'base64')),
+).toSuiAddress();
 
 // Dummy BCS bytes returned by Transaction.build() in tests.
 const DUMMY_TX_BYTES = new Uint8Array(64);
@@ -60,11 +66,17 @@ function workerObjectJson(capAddress: string) {
   });
 }
 
-/** getObject mock serving the messaging channel and both worker objects. */
-function makeGetObjectMock() {
+/**
+ * getObject mock serving the LzReceiverConfig, the messaging channel, and both
+ * worker objects. `authorizedRelayer` is the relayer address the on-chain
+ * config holds; defaults to the address our test key signs with.
+ */
+function makeGetObjectMock(authorizedRelayer: string = FAKE_RELAYER_ADDRESS) {
   return jest.fn().mockImplementation(({ objectId }: { objectId: string }) => {
     let json: unknown;
-    if (objectId === BOSPHOR.messagingChannel) json = protoStruct({ oapp: protoStr(OAPP_SENDER) });
+    if (objectId === BOSPHOR.configId) json = protoStruct({ relayer: protoStr(authorizedRelayer) });
+    else if (objectId === BOSPHOR.messagingChannel)
+      json = protoStruct({ oapp: protoStr(OAPP_SENDER) });
     else if (objectId === LZ_INFRA.executorObj) json = workerObjectJson(EXECUTOR_CAP);
     else if (objectId === LZ_INFRA.dvnObj) json = workerObjectJson(DVN_CAP);
     else throw new Error(`Unexpected getObject for ${objectId}`);
@@ -337,10 +349,10 @@ describe('SuiLzService.quoteLzFee', () => {
     await lzService.quoteLzFee(intentId, blobId, 100, 40161);
     await lzService.quoteLzFee(intentId, blobId, 100, 40161);
 
-    // 1 validation + 2 quotes; channel + executor + DVN reads happen once.
+    // 1 validation + 2 quotes; config + channel + executor + DVN reads happen once.
     expect(mockSimulate).toHaveBeenCalledTimes(3);
     const client = suiService.getClient();
-    expect((client.ledgerService.getObject as jest.Mock).mock.calls).toHaveLength(3);
+    expect((client.ledgerService.getObject as jest.Mock).mock.calls).toHaveLength(4);
   });
 });
 
@@ -400,6 +412,86 @@ describe('SuiLzService send-path config validation', () => {
 
     await expect(lzService.quoteLzFee(...quoteArgs)).rejects.toThrow(
       /Failed to read the effective LZ send config/,
+    );
+  });
+});
+
+describe('SuiLzService relayer authority validation', () => {
+  // The 2026-09-01 live failure behind issue #337: LzReceiverConfig.relayer
+  // initializes to the deployer at publish, nothing ever ran set_relayer, and
+  // every lz_send_proof signed by the operational relayer key aborted with
+  // EUnauthorizedRelayer (code 2) during transaction resolution.
+  const DEPLOYER = '0x' + 'de'.repeat(32);
+
+  let lzService: SuiLzService;
+  let mockSimulate: jest.Mock;
+  let mockExecute: jest.Mock;
+
+  async function setup(authorizedRelayer: string | undefined) {
+    mockSimulate = jest.fn().mockResolvedValue(validationSimResponse());
+    mockExecute = jest.fn().mockResolvedValue({
+      $kind: 'Transaction',
+      Transaction: { digest: 'fakedigest123', status: { success: true, error: null } },
+    });
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        SuiLzService,
+        { provide: ConfigService, useValue: makeConfigService() },
+      ],
+    }).compile();
+    const suiService = module.get<SuiService>(SuiService);
+    lzService = module.get<SuiLzService>(SuiLzService);
+    suiService.onModuleInit();
+    const client = suiService.getClient();
+    client.transactionExecutionService.simulateTransaction = mockSimulate;
+    client.core.executeTransaction = mockExecute;
+    const getObject =
+      authorizedRelayer === undefined
+        ? jest.fn().mockResolvedValue({ response: { object: { json: protoStruct({}) } } })
+        : makeGetObjectMock(authorizedRelayer);
+    (client.ledgerService as unknown as { getObject: jest.Mock }).getObject = getObject;
+    jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
+  }
+
+  const intentId = '0x' + 'ab'.repeat(32);
+  const blobId = 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0';
+
+  it('rejects the quote with an actionable error when the config authorizes another address', async () => {
+    await setup(DEPLOYER);
+
+    await expect(lzService.quoteLzFee(intentId, blobId, 100, 40161)).rejects.toThrow(
+      /LZ relayer authority mismatch: .* authorizes 0xde.* signs as .*set_relayer/s,
+    );
+    // The check fires before any PTB resolution: nothing was simulated.
+    expect(mockSimulate).not.toHaveBeenCalled();
+  });
+
+  it('rejects the send before signing when the config authorizes another address', async () => {
+    await setup(DEPLOYER);
+
+    await expect(
+      lzService.lzSendProof(intentId, blobId, 100, 40161, 110_000_000n),
+    ).rejects.toThrow(/LZ relayer authority mismatch/);
+    // Nothing was resolved or executed on chain.
+    expect(mockSimulate).not.toHaveBeenCalled();
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
+  it('proceeds when the config authorizes the signing address', async () => {
+    await setup(FAKE_RELAYER_ADDRESS);
+
+    const digest = await lzService.lzSendProof(intentId, blobId, 100, 40161, 110_000_000n);
+
+    expect(digest).toBe('fakedigest123');
+    expect(mockExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when the relayer field cannot be read from the config object', async () => {
+    await setup(undefined);
+
+    await expect(lzService.quoteLzFee(intentId, blobId, 100, 40161)).rejects.toThrow(
+      /Failed to read the authorized relayer from LzReceiverConfig/,
     );
   });
 });
