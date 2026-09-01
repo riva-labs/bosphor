@@ -850,6 +850,82 @@
       ]
     },
     {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Return mode split /h (proof vs fallback)",
+      "description": "How each return leg settled: proof = LayerZero lz_send_proof, fallback = owner confirmExecution. 100% fallback is the known state until #337 repairs the proof path.",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bosphor-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*fallback.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "sum by(job,mode)(increase(bosphor_relayer_return_mode_total[1h]))",
+          "legendFormat": "{{job}} {{mode}}"
+        }
+      ]
+    },
+    {
       "id": 15,
       "type": "row",
       "title": "Funding & balances \u2014 will anything run dry?",
@@ -858,7 +934,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 25
       },
       "panels": []
     },
@@ -870,7 +946,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -938,7 +1014,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -1006,7 +1082,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -1074,7 +1150,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -1142,7 +1218,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -1210,7 +1286,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 20
+        "y": 26
       },
       "datasource": {
         "type": "prometheus",
@@ -1271,7 +1347,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 30
       },
       "panels": []
     },
@@ -1283,7 +1359,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 25
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -1351,7 +1427,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 25
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -1411,7 +1487,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 25
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
@@ -1475,7 +1551,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 25
+        "y": 31
       },
       "datasource": {
         "type": "prometheus",
