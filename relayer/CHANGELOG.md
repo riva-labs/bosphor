@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3 (2026-09-01)
+
+### Bug Fixes
+
+- fix(relayer): validate LZ send worker config before building return PTBs
+
 ## 0.7.2 (2026-08-31)
 
 ### Bug Fixes

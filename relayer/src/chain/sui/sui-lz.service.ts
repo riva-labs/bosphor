@@ -1,15 +1,183 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Transaction } from '@mysten/sui/transactions';
+import { bcs } from '@mysten/sui/bcs';
 import { ethers } from 'ethers';
 import { SuiService } from './sui.service';
 import { DEFAULT_LZ_OPTIONS } from '../../common/constants';
 import { walrusBlobIdToField } from '../../common/walrus-blob-id';
 
+/** BCS layout of uln_302 ExecutorConfig (see LayerZero-v2 sui contracts). */
+export const ExecutorConfigBcs = bcs.struct('ExecutorConfig', {
+  max_message_size: bcs.u64(),
+  executor: bcs.Address,
+});
+
+/** BCS layout of uln_302 UlnConfig (see LayerZero-v2 sui contracts). */
+export const UlnConfigBcs = bcs.struct('UlnConfig', {
+  confirmations: bcs.u64(),
+  required_dvns: bcs.vector(bcs.Address),
+  optional_dvns: bcs.vector(bcs.Address),
+  optional_dvn_threshold: bcs.u8(),
+});
+
+/**
+ * Minimal shape of the protobuf JSON encoding returned by the gRPC
+ * ledgerService for Move object contents.
+ */
+interface ProtoValue {
+  kind?: {
+    oneofKind?: string;
+    stringValue?: string;
+    structValue?: { fields?: Record<string, ProtoValue> };
+  };
+}
+
+/** Read a nested struct field from the proto JSON encoding of a Move object. */
+function protoField(value: ProtoValue | undefined, ...path: string[]): ProtoValue | undefined {
+  let node = value;
+  for (const key of path) {
+    if (node?.kind?.oneofKind !== 'structValue') return undefined;
+    node = node.kind.structValue?.fields?.[key];
+  }
+  return node;
+}
+
+/** Read a string leaf from the proto JSON encoding of a Move object. */
+function protoString(value: ProtoValue | undefined, ...path: string[]): string | undefined {
+  const node = protoField(value, ...path);
+  return node?.kind?.oneofKind === 'stringValue' ? node.kind.stringValue : undefined;
+}
+
+/** Normalize a Sui address to lowercase 0x + 64 hex chars for comparison. */
+function normalizeAddress(addr: string): string {
+  return '0x' + addr.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+}
+
 @Injectable()
 export class SuiLzService {
   private readonly logger = new Logger(SuiLzService.name);
 
+  /** Destination eids whose send-path worker config already passed validation. */
+  private readonly validatedDstEids = new Set<number>();
+
   constructor(private readonly sui: SuiService) {}
+
+  /**
+   * Read the CallCap identity of a worker object (executor or DVN).
+   *
+   * LayerZero workers authenticate against the `Call` objects the ULN creates
+   * for them via their CallCap: a Package cap identifies as the worker's
+   * original package address, an Individual cap as the cap object's own id.
+   */
+  private async getWorkerCapAddress(objectId: string, label: string): Promise<string> {
+    const client = this.sui.getClient();
+    const { response } = await client.ledgerService.getObject({
+      objectId,
+      readMask: { paths: ['json'] },
+    });
+    const json = response.object?.json as ProtoValue | undefined;
+    const capType = protoString(json, 'worker', 'worker_cap', 'cap_type', '@variant');
+    const capAddress =
+      capType === 'Package'
+        ? protoString(json, 'worker', 'worker_cap', 'cap_type', 'pos0')
+        : protoString(json, 'worker', 'worker_cap', 'id');
+    if (!capAddress) {
+      throw new Error(`Failed to read the CallCap identity of ${label} object ${objectId}`);
+    }
+    return normalizeAddress(capAddress);
+  }
+
+  /**
+   * Verify that the effective on-chain send config for our OApp pathway
+   * matches the worker objects this service wires into the quote/send PTBs.
+   *
+   * The ULN records each configured worker address as the callee of the child
+   * call it creates. If a config entry holds any other address (for example a
+   * worker package id instead of the worker's CallCap identity, the root cause
+   * of issue #337), every quote/send aborts inside call::new_child_batch with
+   * the opaque abort code 10 (EUnauthorized). This preflight turns that into
+   * an actionable error naming the exact mismatch. The result is cached per
+   * destination eid for the lifetime of the process.
+   */
+  private async assertSendPathConfig(dstEid: number): Promise<void> {
+    if (this.validatedDstEids.has(dstEid)) return;
+
+    const infra = this.sui.getLzInfra();
+    const client = this.sui.getClient();
+
+    // The ULN keys OApp configs by the packet sender: the OApp's CallCap
+    // identity, recorded in the messaging channel at registration.
+    const channel = await client.ledgerService.getObject({
+      objectId: this.sui.getLzMessagingChannel(),
+      readMask: { paths: ['json'] },
+    });
+    const sender = protoString(channel.response.object?.json as ProtoValue, 'oapp');
+    if (!sender) {
+      throw new Error('Failed to read the OApp sender from the LZ messaging channel');
+    }
+
+    // Effective (OApp merged with default) send-side configs, straight from
+    // the ULN via a read-only simulation.
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${infra.uln302}::uln_302::get_effective_executor_config`,
+      arguments: [tx.object(infra.uln302Obj), tx.pure.address(sender), tx.pure.u32(dstEid)],
+    });
+    tx.moveCall({
+      target: `${infra.uln302}::uln_302::get_effective_send_uln_config`,
+      arguments: [tx.object(infra.uln302Obj), tx.pure.address(sender), tx.pure.u32(dstEid)],
+    });
+    tx.setSender(this.sui.getAddress());
+    const bytes = await tx.build({ client });
+    const { response } = await client.transactionExecutionService.simulateTransaction({
+      transaction: { bcs: { value: bytes } },
+      readMask: { paths: ['command_outputs.return_values'] },
+    });
+    const outputs = response.commandOutputs ?? [];
+    const execConfigBytes = outputs[0]?.returnValues?.[0]?.value?.value;
+    const ulnConfigBytes = outputs[1]?.returnValues?.[0]?.value?.value;
+    if (!execConfigBytes || !ulnConfigBytes) {
+      throw new Error(`Failed to read the effective LZ send config for dstEid ${dstEid}`);
+    }
+    const execConfig = ExecutorConfigBcs.parse(Uint8Array.from(execConfigBytes));
+    const ulnConfig = UlnConfigBcs.parse(Uint8Array.from(ulnConfigBytes));
+
+    // The worker identities the config must reference for our PTB to resolve.
+    const executorCap = await this.getWorkerCapAddress(infra.executorObj, 'executor');
+    const dvnCap = await this.getWorkerCapAddress(infra.dvnObj, 'DVN');
+
+    const configuredExecutor = normalizeAddress(execConfig.executor);
+    if (configuredExecutor !== executorCap) {
+      throw new Error(
+        `LZ send config mismatch for dstEid ${dstEid}: effective executor config points at ` +
+          `${configuredExecutor} but the configured executor object ${infra.executorObj} ` +
+          `identifies as ${executorCap}. The OApp executor config was likely set to a ` +
+          `package id instead of the worker CallCap identity. Repair it with ` +
+          `scripts/util/set-executor-config.ts (issue #337).`,
+      );
+    }
+
+    const requiredDvns = ulnConfig.required_dvns.map(normalizeAddress);
+    if (requiredDvns.length !== 1 || ulnConfig.optional_dvns.length !== 0) {
+      throw new Error(
+        `LZ send config mismatch for dstEid ${dstEid}: the send PTB wires exactly one DVN ` +
+          `but the effective ULN config requires [${requiredDvns.join(', ')}] with ` +
+          `${ulnConfig.optional_dvns.length} optional DVN(s)`,
+      );
+    }
+    if (requiredDvns[0] !== dvnCap) {
+      throw new Error(
+        `LZ send config mismatch for dstEid ${dstEid}: effective ULN config requires DVN ` +
+          `${requiredDvns[0]} but the configured DVN object ${infra.dvnObj} identifies as ${dvnCap}`,
+      );
+    }
+
+    this.validatedDstEids.add(dstEid);
+    this.logger.log(
+      `LZ send path config validated for dstEid ${dstEid} ` +
+        `(executor ${executorCap}, DVN ${dvnCap})`,
+    );
+  }
 
   /**
    * Quote the LZ messaging fee for sending a proof back to EVM.
@@ -38,6 +206,10 @@ export class SuiLzService {
     if (!infra.endpointV2 || !infra.uln302Obj) {
       throw new Error('LZ infrastructure not configured. Set all SUI_LZ_* env vars.');
     }
+
+    // Fail with an actionable error (instead of an opaque call::new_child_batch
+    // abort) when the on-chain send config does not match our worker objects.
+    await this.assertSendPathConfig(dstEid);
 
     const tx = new Transaction();
 
@@ -210,6 +382,10 @@ export class SuiLzService {
     if (!infra.endpointV2 || !infra.uln302Obj) {
       throw new Error('LZ infrastructure not configured. Set all SUI_LZ_* env vars.');
     }
+
+    // No-op when the quote already validated this eid in this process; guards
+    // direct send calls that did not go through quoteLzFee first.
+    await this.assertSendPathConfig(dstEid);
 
     const tx = new Transaction();
 

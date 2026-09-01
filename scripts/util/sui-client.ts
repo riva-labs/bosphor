@@ -84,8 +84,56 @@ export async function simulateWithOutputs(
   const result = await client.transactionExecutionService.simulateTransaction(
     {
       transaction: { bcs: { value: bytes } },
-      readMask: { paths: ["commandOutputs"] },
+      // FieldMask paths are proto field names (snake_case). The repeated
+      // command results only populate when the leaf path is requested
+      // explicitly; the camelCase parent "commandOutputs" returns empty.
+      readMask: { paths: ["command_outputs.return_values"] },
     },
   );
   return result.response.commandOutputs ?? [];
+}
+
+/**
+ * Read the CallCap identity of a LayerZero worker object (executor or DVN).
+ *
+ * Workers authenticate against the Call objects the ULN creates for them via
+ * their CallCap: a Package cap identifies as the worker's original package
+ * address, an Individual cap as the cap object's own id. ULN configs must
+ * reference this identity, never the worker's latest package id or object id.
+ */
+export async function getWorkerCapAddress(
+  client: SuiGrpcClient,
+  objectId: string,
+): Promise<string> {
+  const { response } = await client.ledgerService.getObject({
+    objectId,
+    readMask: { paths: ["json"] },
+  });
+  type ProtoValue = {
+    kind?: {
+      oneofKind?: string;
+      stringValue?: string;
+      structValue?: { fields?: Record<string, ProtoValue> };
+    };
+  };
+  const field = (node: ProtoValue | undefined, ...path: string[]): ProtoValue | undefined => {
+    for (const key of path) {
+      if (node?.kind?.oneofKind !== "structValue") return undefined;
+      node = node.kind.structValue?.fields?.[key];
+    }
+    return node;
+  };
+  const str = (node: ProtoValue | undefined): string | undefined =>
+    node?.kind?.oneofKind === "stringValue" ? node.kind.stringValue : undefined;
+
+  const json = response.object?.json as ProtoValue | undefined;
+  const capType = str(field(json, "worker", "worker_cap", "cap_type", "@variant"));
+  const capAddress =
+    capType === "Package"
+      ? str(field(json, "worker", "worker_cap", "cap_type", "pos0"))
+      : str(field(json, "worker", "worker_cap", "id"));
+  if (!capAddress) {
+    throw new Error(`Failed to read the worker CallCap identity of object ${objectId}`);
+  }
+  return capAddress;
 }
