@@ -1,14 +1,12 @@
-// NOTE: `sui move test` cannot run in this package. Its dependency graph mixes
-// two Sui framework revisions, one pulled in through the LayerZero packages
-// (via `bosphor_lz`) and one through Walrus (via `walrus`/`wal`). The compiler
-// tolerates that, but the Move test VM links the whole graph before running any
-// test and fails with `MISSING_DEPENDENCY` (code 1021) for every test, including
-// pure ones. Constructing a certified Walrus `Blob` in a unit test is separately
-// infeasible. The security-critical reference-verification logic that
-// `execute_store` applies is therefore unit-tested where it can run in CI, as
-// pure predicates in `bosphor_lz::reference` (see `sui/lz-receiver`). The tests
-// below document the executor's own behaviour and pass in isolation, but are not
-// exercised by CI for the reasons above.
+// NOTE: this suite needs `tests/linkage_shim.move` to run. The Move test VM in
+// sui 1.69 only records packages that the root package's modules reference
+// directly in its linkage table, so transitive-only packages (WAL, Call,
+// EndpointV2, Utils, Zro, PtbMoveCall) would otherwise fail every test with
+// `MISSING_DEPENDENCY` (code 1021). Constructing a certified Walrus `Blob` in a
+// unit test remains infeasible, so the reference-verification predicates that
+// `execute_store` applies are unit-tested as pure functions in
+// `bosphor_lz::reference` (see contracts/sui/lz-receiver) and exercised here
+// through the scalar `assert_reference` wrapper.
 #[test_only]
 module bosphor::walrus_executor_tests {
     use sui::event;

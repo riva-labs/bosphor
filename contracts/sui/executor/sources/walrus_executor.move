@@ -210,10 +210,10 @@ public fun is_executed(config: &ExecutorConfig, intent_id: vector<u8>): bool {
 ///      (`EInsufficientStorageEpochs`).
 ///
 /// The two pure predicates live in `bosphor_lz::reference`, alongside the module
-/// that records the committed reference, and are unit-tested there. They are kept
-/// out of this package because the executor's dependency graph mixes the
-/// LayerZero and Walrus Sui framework revisions, which the Move test VM refuses
-/// to link (`MISSING_DEPENDENCY`), so nothing in this package can `sui move test`.
+/// that records the committed reference, and are unit-tested there. This package
+/// also runs its own test suite (see `tests/`), which exercises this wrapper via
+/// scalar inputs since constructing a certified Walrus Blob in a unit test is
+/// infeasible.
 ///
 /// This wrapper maps each predicate to the executor's own abort code so the
 /// on-chain failure semantics are unchanged. It takes plain scalars so callers
