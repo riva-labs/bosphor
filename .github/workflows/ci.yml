@@ -276,6 +276,99 @@ jobs:
           cache-from: type=gha,scope=canary-image
           cache-to: type=gha,mode=max,scope=canary-image
 
+  # Cross-chain e2e gate: runs the full EVM -> LayerZero -> Sui/Walrus -> EVM
+  # round trip (npm run test:e2e) against the live testnet deployment on PRs
+  # that touch the cross-chain path. Docs, website, and monitoring changes
+  # never trigger it (see the e2e path filter above).
+  #
+  # Off by default. The owner enables it with:
+  #   1. Repository variable E2E_GATE_ENABLED set to 'true'.
+  #   2. Repository secret E2E_ENV_FILE: the full dotenv contents the e2e
+  #      script needs (EVM_RPC_URL, EVM_ADAPTER_ADDRESS, EVM_RELAYER_KEY,
+  #      RELAYER_URL, plus optional SUI_GRPC_URL, SUI_PACKAGE_ID,
+  #      SUI_LZ_PACKAGE_ID, SUI_EID, WALRUS_STORE_EPOCHS, LZ_OPTIONS).
+  #      The secret is written to a file and passed via BOSPHOR_ENV_FILE,
+  #      which scripts/test/e2e-test.ts already resolves through dotenv.
+  #   3. After one green soak run, make "Cross-Chain E2E (testnet)" a
+  #      required check in branch protection. Do not require it before the
+  #      secret is provisioned, or every cross-chain PR blocks on a skip.
+  #
+  # Emergency skip: add the 'skip-e2e' label to the PR. Label changes alone
+  # do not retrigger the workflow, so push a commit (or close and reopen the
+  # PR) after labeling.
+  #
+  # Fork safety: fork PRs cannot read secrets. The availability step below
+  # turns that into a clean skip with a notice instead of a failure.
+  #
+  # Serialization: the fixed concurrency group guarantees two PRs never run
+  # e2e simultaneously against the same testnet state. Runs queue, they are
+  # never cancelled mid-flight (a cancelled run would strand a live intent).
+  e2e-testnet:
+    name: Cross-Chain E2E (testnet)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.e2e == 'true' &&
+      vars.E2E_GATE_ENABLED == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-e2e')
+    concurrency:
+      group: e2e-testnet
+      cancel-in-progress: false
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # secrets.* cannot be used in a job-level if, so check availability in
+      # a step and gate everything after it on the output. This covers fork
+      # PRs and the window before the owner provisions the secret.
+      - name: Check e2e secret availability
+        id: gate
+        env:
+          E2E_ENV_FILE: ${{ secrets.E2E_ENV_FILE }}
+        run: |
+          if [ -n "$E2E_ENV_FILE" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::E2E_ENV_FILE is not available (fork PR, or the secret is not provisioned yet). Skipping the live testnet e2e run."
+          fi
+
+      - name: Setup Node.js
+        if: steps.gate.outputs.available == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            sdk/package-lock.json
+
+      - name: Install root dependencies
+        if: steps.gate.outputs.available == 'true'
+        run: npm ci
+
+      # The e2e script imports the SDK from source (sdk/src), which resolves
+      # its own dependencies from sdk/node_modules.
+      - name: Install SDK dependencies
+        if: steps.gate.outputs.available == 'true'
+        run: npm ci
+        working-directory: sdk
+
+      - name: Write e2e env file
+        if: steps.gate.outputs.available == 'true'
+        env:
+          E2E_ENV_FILE: ${{ secrets.E2E_ENV_FILE }}
+        run: |
+          umask 077
+          printf '%s\n' "$E2E_ENV_FILE" > "$RUNNER_TEMP/bosphor-e2e.env"
+
+      - name: Run cross-chain e2e against live testnet
+        if: steps.gate.outputs.available == 'true'
+        env:
+          BOSPHOR_ENV_FILE: ${{ runner.temp }}/bosphor-e2e.env
+        run: npm run test:e2e
+
   brand-check:
     name: Brand Check
     runs-on: ubuntu-latest
