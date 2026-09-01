@@ -452,6 +452,38 @@ async function setPeer(
   await exec(tx1, "set_peer");
 }
 
+// --- Step 6: Authorize the operational relayer ---
+async function setRelayer(packageId: string, configId: string, oappId: string, adminCapId: string) {
+  // LzReceiverConfig.relayer initializes to ctx.sender() at publish (the
+  // deployer). lz_send_proof asserts ctx.sender() == config.relayer, so a
+  // deploy that skips this step makes every relayer-signed proof send abort
+  // with code 2 (EUnauthorizedRelayer). Authorize the address SUI_RELAYER_KEY
+  // derives; without it the config keeps rejecting the operational relayer.
+  const relayerKey = process.env.SUI_RELAYER_KEY;
+  if (!relayerKey) {
+    console.log("\n=== Step 6: set_relayer SKIPPED (SUI_RELAYER_KEY not set) ===");
+    console.warn("  WARNING: LzReceiverConfig.relayer stays at the deployer address.");
+    console.warn("  The relayer's lz_send_proof will abort with EUnauthorizedRelayer (code 2).");
+    console.warn("  Repair with: npx tsx scripts/util/set-lz-relayer.ts --use-relayer-key");
+    return;
+  }
+  const relayerAddress = createSuiSigner(relayerKey).toSuiAddress();
+  if (relayerAddress === deployerAddress) {
+    console.log("\n=== Step 6: set_relayer SKIPPED (relayer key == deployer key) ===");
+    return;
+  }
+  console.log(`\n=== Step 6: set_relayer (${relayerAddress}) ===`);
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${packageId}::lz_receiver::set_relayer`,
+    arguments: [
+      tx.object(configId), tx.object(adminCapId), tx.object(oappId),
+      tx.pure.address(relayerAddress),
+    ],
+  });
+  await exec(tx, "set_relayer");
+}
+
 // --- Main ---
 async function main() {
   console.log("=== Bosphor Sui Deployment ===");
@@ -485,6 +517,9 @@ async function main() {
   if (messagingChannelId) {
     await setPeer(oappId, adminCapId, messagingChannelId);
   }
+
+  // Step 6: Authorize the operational relayer for lz_send_proof
+  await setRelayer(packageId, configId, oappId, adminCapId);
 
   // Write to .env
   const envUpdates: Record<string, string> = {
