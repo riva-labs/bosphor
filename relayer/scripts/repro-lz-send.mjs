@@ -1,6 +1,14 @@
-// Reproduction script for issue #337: lz_send_proof abort code 10 in call::new_child_batch.
-// Simulates both the quote PTB and the send PTB against Sui testnet, as the relayer address.
-// Read-only (simulateTransaction), no keys needed.
+// Reproduction and verification script for issue #337: lz_send_proof abort code 10
+// in call::new_child_batch.
+//
+// Modes:
+//   node repro-lz-send.mjs quote|send|both
+//     Simulates the quote and/or send PTB against Sui testnet as the relayer
+//     address. Read-only (simulateTransaction), no keys needed.
+//   node repro-lz-send.mjs send-live <intentIdHex> <blobFieldHex> <endEpoch>
+//     Quotes, then signs and executes the real send PTB for the given received
+//     intent. Requires SUI_RELAYER_KEY or SUI_DEPLOYER_KEY in the environment
+//     (load with BOSPHOR_ENV_FILE-style dotenv or node --env-file).
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 
@@ -30,12 +38,17 @@ const env = {
 };
 
 // Real received intent (nonce 73, src_eid 40161) from the on-chain table.
-const intentIdBytes = Array.from(Buffer.from('Mfm5pPnyfL9Hvz+HJCkDkU1+v8rkZ6twMtsX4NwFI7c=', 'base64'));
+// Override with INTENT_ID / BLOB_FIELD / END_EPOCH env vars.
+const intentIdBytes = process.env.INTENT_ID
+  ? Array.from(Buffer.from(process.env.INTENT_ID.replace(/^0x/, ''), 'hex'))
+  : Array.from(Buffer.from('Mfm5pPnyfL9Hvz+HJCkDkU1+v8rkZ6twMtsX4NwFI7c=', 'base64'));
 const blobIdBig = 92146816957036505747295261031584160009764083153295142224227900204435745163847n;
-const blobIdBytes = Array.from(Buffer.from(blobIdBig.toString(16).padStart(64, '0'), 'hex'));
-const endEpoch = 250;
+const blobIdBytes = process.env.BLOB_FIELD
+  ? Array.from(Buffer.from(process.env.BLOB_FIELD.replace(/^0x/, ''), 'hex'))
+  : Array.from(Buffer.from(blobIdBig.toString(16).padStart(64, '0'), 'hex'));
+let endEpoch = process.env.END_EPOCH ? Number(process.env.END_EPOCH) : 250;
 // Type-3 options: executor lzReceive gas (mirrors DEFAULT_LZ_OPTIONS in the relayer)
-const optionsBytes = Array.from(Buffer.from('0003010011010000000000000000000000000000ea60', 'hex'));
+const optionsBytes = Array.from(Buffer.from('00030100110100000000000000000000000000030d40', 'hex'));
 
 const client = new SuiGrpcClient({ network: 'testnet', baseUrl: 'https://fullnode.testnet.sui.io:443' });
 
@@ -216,6 +229,53 @@ async function simulate(name, tx) {
   }
 }
 
+async function sendLive(intentIdHex, blobFieldHex, endEpochArg) {
+  const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
+  const { decodeSuiPrivateKey } = await import('@mysten/sui/cryptography');
+  const key = process.env.SUI_RELAYER_KEY || process.env.SUI_DEPLOYER_KEY;
+  if (!key) throw new Error('send-live requires SUI_RELAYER_KEY or SUI_DEPLOYER_KEY');
+  const { secretKey } = decodeSuiPrivateKey(key);
+  const signer = Ed25519Keypair.fromSecretKey(secretKey);
+  if (signer.toSuiAddress() !== RELAYER) {
+    throw new Error(`key resolves to ${signer.toSuiAddress()}, expected relayer ${RELAYER}`);
+  }
+
+  const ids = Array.from(Buffer.from(intentIdHex.replace(/^0x/, ''), 'hex'));
+  const blob = Array.from(Buffer.from(blobFieldHex.replace(/^0x/, ''), 'hex'));
+  const epoch = Number(endEpochArg);
+  if (ids.length !== 32 || blob.length !== 32 || !Number.isFinite(epoch)) {
+    throw new Error('usage: send-live <intentIdHex:32B> <blobFieldHex:32B> <endEpoch>');
+  }
+
+  // Override the module-level intent fixture with the live intent.
+  intentIdBytes.length = 0;
+  intentIdBytes.push(...ids);
+  blobIdBytes.length = 0;
+  blobIdBytes.push(...blob);
+  endEpoch = epoch;
+
+  const quoteResp = await simulate('quote', buildQuoteTx());
+  const outputs = quoteResp?.commandOutputs ?? [];
+  const rv = outputs[outputs.length - 1]?.returnValues?.[0]?.value?.value;
+  if (!rv) throw new Error('quote simulation returned no fee');
+  const fee = Buffer.from(rv).readBigUInt64LE(0);
+  const feeWithBuffer = (fee * 11n) / 10n;
+  console.log(`quoted fee ${fee} MIST, sending with ${feeWithBuffer}`);
+
+  const tx = buildSendTx(feeWithBuffer);
+  tx.setSender(RELAYER);
+  const bytes = await tx.build({ client });
+  const { signature } = await signer.signTransaction(bytes);
+  const result = await client.core.executeTransaction({ transaction: bytes, signatures: [signature] });
+  if (result.$kind === 'FailedTransaction') {
+    throw new Error(`send failed: ${JSON.stringify(result.FailedTransaction?.status)}`);
+  }
+  const txn = result.Transaction ?? result.transaction;
+  console.log(`send-live status: ${JSON.stringify(txn?.status ?? txn?.effects?.status)}`);
+  console.log(`send-live digest: ${txn?.digest}`);
+}
+
 const mode = process.argv[2] ?? 'both';
 if (mode === 'quote' || mode === 'both') await simulate('quote', buildQuoteTx());
 if (mode === 'send' || mode === 'both') await simulate('send', buildSendTx(300_000_000n));
+if (mode === 'send-live') await sendLive(process.argv[3], process.argv[4], process.argv[5]);
