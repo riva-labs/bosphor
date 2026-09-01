@@ -73,7 +73,10 @@ function makeGetObjectMock() {
 }
 
 /** Simulation response for the validation PTB (effective send configs). */
-function validationSimResponse(executor: string = EXECUTOR_CAP, requiredDvns: string[] = [DVN_CAP]) {
+function validationSimResponse(
+  executor: string = EXECUTOR_CAP,
+  requiredDvns: string[] = [DVN_CAP],
+) {
   const execBytes = ExecutorConfigBcs.serialize({
     max_message_size: 10000n,
     executor,
