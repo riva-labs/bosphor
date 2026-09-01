@@ -162,7 +162,10 @@ describe('IntentIngest with the durable staged queue', () => {
   async function build(maxStagedBytes = 268_435_456): Promise<void> {
     encodeBlob = jest.fn().mockResolvedValue({ blobId: COMMITTED_BLOB_ID_B64URL });
     mockStore = { getCommitment: jest.fn().mockResolvedValue(makeCommitment()) };
-    staged = { stagedBytesTotal: jest.fn().mockResolvedValue(0), upsertBytes: jest.fn() };
+    staged = {
+      stagedBytesTotal: jest.fn().mockResolvedValue(0),
+      upsertBytes: jest.fn().mockResolvedValue('accepted'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -195,11 +198,12 @@ describe('IntentIngest with the durable staged queue', () => {
     const result = await ingest.ingest(INTENT_ID, bytes);
 
     expect(result).toEqual(expect.objectContaining({ ok: true }));
-    expect(staged.upsertBytes).toHaveBeenCalledWith(INTENT_ID, {
-      bytes,
-      blobId: COMMITTED_BLOB_ID_B64URL,
-      size: 5,
-    });
+    // The cap is passed so the write enforces it atomically (not the fast-path read).
+    expect(staged.upsertBytes).toHaveBeenCalledWith(
+      INTENT_ID,
+      { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5 },
+      268_435_456,
+    );
   });
 
   it('rejects with backpressure when the staged total plus this blob exceeds the ceiling', async () => {
@@ -212,6 +216,20 @@ describe('IntentIngest with the durable staged queue', () => {
     // Load is shed before the CPU-heavy recompute and without persisting anything.
     expect(encodeBlob).not.toHaveBeenCalled();
     expect(staged.upsertBytes).not.toHaveBeenCalled();
+  });
+
+  it('maps an atomic-write backpressure to a 503 rejection (TOCTOU: cap breached after the fast read)', async () => {
+    await build(100);
+    // Fast-path read sees headroom (0 + 5 <= 100), so ingest proceeds to the write.
+    staged.stagedBytesTotal.mockResolvedValue(0);
+    // But a concurrent ingest committed bytes first: the atomic upsert refuses.
+    staged.upsertBytes.mockResolvedValue('backpressure');
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'backpressure' }));
+    // The write was attempted (that is where the authoritative cap lives).
+    expect(staged.upsertBytes).toHaveBeenCalled();
   });
 
   it('accepts right at the ceiling boundary', async () => {

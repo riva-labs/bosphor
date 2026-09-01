@@ -22,7 +22,10 @@ class FakePool implements PgQueryable {
     if (sql.includes('create table') || sql.includes('create index') || sql.includes('alter table'))
       return { rows: [] };
 
-    if (sql.startsWith('insert into')) return this.upsert(sql, params);
+    // upsertBytes: a CTE-prefixed INSERT ... SELECT ... ON CONFLICT with an atomic
+    // cap guard. markReceived: a plain INSERT ... ON CONFLICT.
+    if (sql.startsWith('with capacity as') || sql.startsWith('insert into'))
+      return this.upsert(sql, params);
 
     if (sql.startsWith('delete from')) {
       const cutoff = params[0] as number;
@@ -58,6 +61,17 @@ class FakePool implements PgQueryable {
         if (r.bytes !== null && r.size != null) bytes += Number(r.size);
       }
       return { rows: [{ active, dead, bytes }] };
+    }
+
+    // stagedBytesTotalExcluding($1): SUM over rows with bytes, minus one intent.
+    if (sql.includes('sum(size)') && sql.includes('intent_id <> $1')) {
+      const exclude = params[0] as string;
+      let total = 0;
+      for (const r of this.rows.values()) {
+        if (r.intent_id === exclude) continue;
+        if (r.bytes !== null && r.size != null) total += Number(r.size);
+      }
+      return { rows: [{ total }] };
     }
 
     if (sql.includes('sum(size)')) {
@@ -106,7 +120,29 @@ class FakePool implements PgQueryable {
   private upsert(sql: string, params: unknown[]): { rows: Record<string, unknown>[] } {
     const id = params[0] as string;
     const existing = this.rows.get(id);
-    const isBytes = sql.includes('bytes,'); // upsertBytes column list carries `bytes`
+    // Only the CTE-guarded byte upsert carries the cap params; markReceived is a
+    // plain INSERT. `isBytes` here means "the byte-buffering upsert".
+    const isBytes = sql.startsWith('with capacity as');
+
+    // Atomic admission control (byte upsert only): the cap is evaluated against
+    // the staged total EXCLUDING this intent's current contribution, mirroring the
+    // real statement's `WHERE bytes IS NOT NULL AND intent_id <> $1`. When the cap
+    // would be breached, nothing is written and no row is RETURNINGed (=> the store
+    // reports backpressure). Each query() call is atomic, so this models the real
+    // single-statement serialisation exactly.
+    if (isBytes) {
+      const size = params[3] as number;
+      const capped = params[5] as boolean;
+      const cap = params[6] as number;
+      if (capped) {
+        let staged = 0;
+        for (const r of this.rows.values()) {
+          if (r.intent_id === id) continue; // exclude self, as the CTE does
+          if (r.bytes !== null && r.size != null) staged += Number(r.size);
+        }
+        if (staged + size > cap) return { rows: [] }; // cap breached: no write
+      }
+    }
 
     if (existing) {
       // ON CONFLICT ... WHERE state='active' - terminal rows are untouched.
@@ -116,20 +152,20 @@ class FakePool implements PgQueryable {
         existing.blob_id = params[2] as string;
         existing.size = params[3] as number;
         existing.updated_at = params[4] as number;
-      } else {
-        existing.received = true;
-        existing.src_eid = params[1] as number;
-        existing.committed_blob_id = params[2] as string;
-        existing.deadline = params[3] as number;
-        existing.updated_at = params[4] as number;
-        // COALESCE(EXCLUDED.delivery_digest, existing): a later event without a
-        // digest never clobbers one already captured.
-        existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
+        return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
       }
+      existing.received = true;
+      existing.src_eid = params[1] as number;
+      existing.committed_blob_id = params[2] as string;
+      existing.deadline = params[3] as number;
+      existing.updated_at = params[4] as number;
+      // COALESCE(EXCLUDED.delivery_digest, existing): a later event without a
+      // digest never clobbers one already captured.
+      existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
       return { rows: [] };
     }
 
-    const now = isBytes ? (params[4] as number) : (params[4] as number);
+    const now = params[4] as number;
     const base: Row = {
       intent_id: id,
       committed_blob_id: null,
@@ -159,13 +195,14 @@ class FakePool implements PgQueryable {
       base.bytes = params[1] as Buffer;
       base.blob_id = params[2] as string;
       base.size = params[3] as number;
-    } else {
-      base.received = true;
-      base.src_eid = params[1] as number;
-      base.committed_blob_id = params[2] as string;
-      base.deadline = params[3] as number;
-      base.delivery_digest = (params[5] as string | null) ?? null;
+      this.rows.set(id, base);
+      return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
     }
+    base.received = true;
+    base.src_eid = params[1] as number;
+    base.committed_blob_id = params[2] as string;
+    base.deadline = params[3] as number;
+    base.delivery_digest = (params[5] as string | null) ?? null;
     this.rows.set(id, base);
     return { rows: [] };
   }
@@ -482,6 +519,80 @@ describe('StagedIntentStore', () => {
       expect(await a.drainDue(999_999_999, 10)).toHaveLength(0); // not even the owner
       expect((await a.get('0x1'))?.state).toBe('done');
       expect((await a.get('0x2'))?.state).toBe('dead');
+    });
+  });
+
+  describe('atomic admission control (backpressure cap)', () => {
+    it('with no cap always accepts (unconditional upsert behaviour preserved)', async () => {
+      const store = new StagedIntentStore(new FakePool());
+      expect(await store.upsertBytes('0x1', { bytes: bytes('aa'), blobId: 'b', size: 100 })).toBe(
+        'accepted',
+      );
+    });
+
+    it('accepts right up to the cap and rejects the byte that would breach it', async () => {
+      const store = new StagedIntentStore(new FakePool());
+      const CAP = 100;
+
+      // 60 fits (0 + 60 <= 100).
+      expect(
+        await store.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b1', size: 60 }, CAP),
+      ).toBe('accepted');
+      // 40 fits exactly at the boundary (60 + 40 == 100).
+      expect(
+        await store.upsertBytes('0x2', { bytes: bytes('b'), blobId: 'b2', size: 40 }, CAP),
+      ).toBe('accepted');
+      // 1 more would breach (100 + 1 > 100): rejected, nothing written.
+      expect(
+        await store.upsertBytes('0x3', { bytes: bytes('c'), blobId: 'b3', size: 1 }, CAP),
+      ).toBe('backpressure');
+      expect(await store.get('0x3')).toBeUndefined();
+      expect(await store.stagedBytesTotal()).toBe(100);
+    });
+
+    it('excludes the intent’s own current bytes so a re-buffer is not double-counted', async () => {
+      const store = new StagedIntentStore(new FakePool());
+      const CAP = 100;
+
+      await store.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b1', size: 90 }, CAP);
+      // Re-buffering 0x1 at 90 must NOT be read as 90 + 90 = 180 > 100; its own
+      // current contribution is excluded, so 0 + 90 <= 100 and it is accepted.
+      expect(
+        await store.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b1', size: 90 }, CAP),
+      ).toBe('accepted');
+      expect(await store.stagedBytesTotal()).toBe(90);
+    });
+
+    // The core race: two ingests each pass a separate pre-check, then both write.
+    // With admission INSIDE the write, exactly one can win when both together would
+    // exceed the cap. Each FakePool query() is atomic, mirroring how Postgres
+    // serialises the single CTE-guarded INSERT (the second sees the first's SUM).
+    it('holds the cap under concurrent upserts: exactly one of two over-cap writes wins', async () => {
+      const store = new StagedIntentStore(new FakePool());
+      const CAP = 100;
+      // Two 60-byte writes: individually fine (0 + 60 <= 100), together 120 > 100.
+      const [a, b] = await Promise.all([
+        store.upsertBytes('0xA', { bytes: bytes('a'), blobId: 'bA', size: 60 }, CAP),
+        store.upsertBytes('0xB', { bytes: bytes('b'), blobId: 'bB', size: 60 }, CAP),
+      ]);
+
+      const outcomes = [a, b].sort();
+      expect(outcomes).toEqual(['accepted', 'backpressure']); // one wins, one shed
+      expect(await store.stagedBytesTotal()).toBe(60); // cap never breached
+      // Exactly one row was written.
+      const written = [await store.get('0xA'), await store.get('0xB')].filter(Boolean);
+      expect(written).toHaveLength(1);
+    });
+
+    it('a terminal row reports terminal, not backpressure, on re-upsert', async () => {
+      const store = new StagedIntentStore(new FakePool());
+      await store.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b', size: 10 }, 100);
+      await store.markDone('0x1'); // terminal, bytes freed
+      // Re-buffering a terminal intent is a no-op: not admitted, but not the cap.
+      expect(
+        await store.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b', size: 10 }, 100),
+      ).toBe('terminal');
+      expect((await store.get('0x1'))?.state).toBe('done');
     });
   });
 
