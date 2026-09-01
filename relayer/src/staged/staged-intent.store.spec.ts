@@ -94,6 +94,8 @@ class FakePool implements PgQueryable {
             r.received === true &&
             r.bytes === null &&
             r.committed_blob_id != null &&
+            r.walrus_object_id == null &&
+            r.store_digest == null &&
             (r.deadline == null || (r.deadline as number) > now) &&
             ((r.bytes_recovery_at as number | null) ?? (r.created_at as number) + grace) <= now,
         )
@@ -378,6 +380,33 @@ describe('StagedIntentStore', () => {
     await store.rescheduleByteRecovery('0xr2', t2 + 100_000);
     expect(await store.claimForByteRecovery(t2 + GRACE + 1, GRACE, 10)).toHaveLength(0);
     expect(await store.claimForByteRecovery(t2 + 100_001, GRACE, 10)).toHaveLength(1);
+  });
+
+  it('never sweeps a post-store row (return-retry): store done, only return pending', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+    const GRACE = 45_000;
+
+    // A pre-store row that never got bytes: still a recovery candidate.
+    await store.markReceived('0xpre', RX);
+    const pre = (await store.get('0xpre'))!.createdAt;
+    expect(await store.claimForByteRecovery(pre + GRACE + 1, GRACE, 10)).toEqual([
+      { intentId: '0xpre', committedBlobId: RX.committedBlobId },
+    ]);
+
+    // A row that stored (Walrus upload + execute_store done) and later purged its
+    // bytes while the return leg retries: it looks bytes-less, but the store step
+    // is complete, so there is nothing to recover. It must never be swept.
+    await store.markReceived('0xpost', RX);
+    await store.persistUpload('0xpost', {
+      walrusObjectId: '0xobj',
+      walrusBlobId: 'wb',
+      endEpoch: 100,
+    });
+    await store.persistStore('0xpost', '0xstoredigest');
+    const post = (await store.get('0xpost'))!.createdAt;
+    const due = await store.claimForByteRecovery(post + GRACE + 1, GRACE, 10);
+    expect(due.map((c) => c.intentId)).not.toContain('0xpost');
   });
 
   it('is order-independent: received event before bytes still ends up ready-shaped', async () => {
