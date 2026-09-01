@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-09-01)
+
+### Bug Fixes
+
+- fix(sui): commit intent deadline on-chain in IntentRecord
+
 ## 0.4.0 (2026-08-31)
 
 ### Features
