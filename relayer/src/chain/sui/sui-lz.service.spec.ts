@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { Transaction } from '@mysten/sui/transactions';
 import { SuiService } from './sui.service';
-import { SuiLzService } from './sui-lz.service';
+import { SuiLzService, ExecutorConfigBcs, UlnConfigBcs } from './sui-lz.service';
 
 // LZ infrastructure IDs (testnet, from verified TX)
 const LZ_INFRA = {
@@ -36,6 +36,63 @@ const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
 
 // Dummy BCS bytes returned by Transaction.build() in tests.
 const DUMMY_TX_BYTES = new Uint8Array(64);
+
+// Send-path validation fixtures: the OApp sender recorded in the messaging
+// channel and the CallCap identities of the configured worker objects.
+const OAPP_SENDER = '0x' + 'aa'.repeat(32);
+const EXECUTOR_CAP = '0x' + 'b1'.repeat(32);
+const DVN_CAP = '0x' + 'c1'.repeat(32);
+
+// --- proto JSON helpers (shape of ledgerService.getObject json field) ---
+function protoStr(value: string) {
+  return { kind: { oneofKind: 'stringValue', stringValue: value } };
+}
+function protoStruct(fields: Record<string, unknown>) {
+  return { kind: { oneofKind: 'structValue', structValue: { fields } } };
+}
+function workerObjectJson(capAddress: string) {
+  return protoStruct({
+    worker: protoStruct({
+      worker_cap: protoStruct({
+        cap_type: protoStruct({ '@variant': protoStr('Package'), pos0: protoStr(capAddress) }),
+      }),
+    }),
+  });
+}
+
+/** getObject mock serving the messaging channel and both worker objects. */
+function makeGetObjectMock() {
+  return jest.fn().mockImplementation(({ objectId }: { objectId: string }) => {
+    let json: unknown;
+    if (objectId === BOSPHOR.messagingChannel) json = protoStruct({ oapp: protoStr(OAPP_SENDER) });
+    else if (objectId === LZ_INFRA.executorObj) json = workerObjectJson(EXECUTOR_CAP);
+    else if (objectId === LZ_INFRA.dvnObj) json = workerObjectJson(DVN_CAP);
+    else throw new Error(`Unexpected getObject for ${objectId}`);
+    return Promise.resolve({ response: { object: { json } } });
+  });
+}
+
+/** Simulation response for the validation PTB (effective send configs). */
+function validationSimResponse(executor: string = EXECUTOR_CAP, requiredDvns: string[] = [DVN_CAP]) {
+  const execBytes = ExecutorConfigBcs.serialize({
+    max_message_size: 10000n,
+    executor,
+  }).toBytes();
+  const ulnBytes = UlnConfigBcs.serialize({
+    confirmations: 1n,
+    required_dvns: requiredDvns,
+    optional_dvns: [],
+    optional_dvn_threshold: 0,
+  }).toBytes();
+  return {
+    response: {
+      commandOutputs: [
+        { returnValues: [{ value: { value: execBytes } }] },
+        { returnValues: [{ value: { value: ulnBytes } }] },
+      ],
+    },
+  };
+}
 
 function makeConfigService(overrides: Record<string, string> = {}) {
   const defaultMap: Record<string, string> = {
@@ -105,6 +162,11 @@ describe('SuiLzService.lzSendProof', () => {
 
     const client = suiService.getClient();
     client.core.executeTransaction = mockExecuteTransaction;
+    // Send-path preflight: channel/worker objects and effective config reads.
+    (client.ledgerService as unknown as { getObject: jest.Mock }).getObject = makeGetObjectMock();
+    client.transactionExecutionService.simulateTransaction = jest
+      .fn()
+      .mockResolvedValue(validationSimResponse());
     jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
   });
 
@@ -184,7 +246,12 @@ describe('SuiLzService.quoteLzFee', () => {
     // Mirror server behavior: the gRPC FieldMask uses snake_case proto paths.
     // Command return values only populate when 'command_outputs.return_values'
     // is requested; the camelCase parent 'commandOutputs' yields an empty array.
+    // The first simulation per service instance is the send-path validation
+    // PTB (2 commands); subsequent simulations are the 16-command quote.
+    let simulateCalls = 0;
     mockSimulate = jest.fn().mockImplementation((req: { readMask?: { paths?: string[] } }) => {
+      simulateCalls += 1;
+      if (simulateCalls === 1) return Promise.resolve(validationSimResponse());
       const paths = req.readMask?.paths ?? [];
       const populated = paths.includes('command_outputs.return_values');
       return Promise.resolve({
@@ -221,6 +288,7 @@ describe('SuiLzService.quoteLzFee', () => {
 
     const client = suiService.getClient();
     client.transactionExecutionService.simulateTransaction = mockSimulate;
+    (client.ledgerService as unknown as { getObject: jest.Mock }).getObject = makeGetObjectMock();
     jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
   });
 
@@ -233,12 +301,13 @@ describe('SuiLzService.quoteLzFee', () => {
     const fee = await lzService.quoteLzFee(intentId, blobId, endEpoch, dstEid);
 
     expect(fee).toBe(100_000_000n);
-    expect(mockSimulate).toHaveBeenCalledTimes(1);
+    // First simulation validates the send-path config, second runs the quote.
+    expect(mockSimulate).toHaveBeenCalledTimes(2);
 
     // Verify readMask requests the snake_case leaf path. The camelCase parent
     // 'commandOutputs' is silently returned empty by the server, which would
     // drop the quote to the oversized hardcoded fallback fee.
-    const callArgs = mockSimulate.mock.calls[0][0];
+    const callArgs = mockSimulate.mock.calls[1][0];
     expect(callArgs.readMask?.paths).toContain('command_outputs.return_values');
     expect(callArgs.transaction?.bcs?.value).toBeDefined();
   });
@@ -246,9 +315,10 @@ describe('SuiLzService.quoteLzFee', () => {
   it('would fail to parse if the readMask used the camelCase parent path', async () => {
     // Regression guard: the original bug requested 'commandOutputs', which the
     // server returns empty. Proves the snake_case leaf path is load-bearing.
-    mockSimulate.mockImplementationOnce(() =>
-      Promise.resolve({ response: { commandOutputs: [] } }),
-    );
+    // Call 1 is the validation PTB; make the quote simulation (call 2) empty.
+    mockSimulate
+      .mockImplementationOnce(() => Promise.resolve(validationSimResponse()))
+      .mockImplementationOnce(() => Promise.resolve({ response: { commandOutputs: [] } }));
 
     await expect(
       lzService.quoteLzFee(
@@ -258,5 +328,78 @@ describe('SuiLzService.quoteLzFee', () => {
         40161,
       ),
     ).rejects.toThrow(/Failed to parse LZ fee quote/);
+  });
+
+  it('validates the send-path config once per destination eid', async () => {
+    const intentId = '0x' + 'ab'.repeat(32);
+    const blobId = 'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0';
+
+    await lzService.quoteLzFee(intentId, blobId, 100, 40161);
+    await lzService.quoteLzFee(intentId, blobId, 100, 40161);
+
+    // 1 validation + 2 quotes; channel + executor + DVN reads happen once.
+    expect(mockSimulate).toHaveBeenCalledTimes(3);
+    const client = suiService.getClient();
+    expect((client.ledgerService.getObject as jest.Mock).mock.calls).toHaveLength(3);
+  });
+});
+
+describe('SuiLzService send-path config validation', () => {
+  let lzService: SuiLzService;
+  let mockSimulate: jest.Mock;
+
+  async function setup(simFirstResponse: unknown) {
+    mockSimulate = jest.fn().mockResolvedValue(simFirstResponse);
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        SuiLzService,
+        { provide: ConfigService, useValue: makeConfigService() },
+      ],
+    }).compile();
+    const suiService = module.get<SuiService>(SuiService);
+    lzService = module.get<SuiLzService>(SuiLzService);
+    suiService.onModuleInit();
+    const client = suiService.getClient();
+    client.transactionExecutionService.simulateTransaction = mockSimulate;
+    (client.ledgerService as unknown as { getObject: jest.Mock }).getObject = makeGetObjectMock();
+    jest.spyOn(Transaction.prototype, 'build').mockResolvedValue(DUMMY_TX_BYTES);
+  }
+
+  const quoteArgs = [
+    '0x' + 'ab'.repeat(32),
+    'zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0',
+    100,
+    40161,
+  ] as const;
+
+  it('rejects with an actionable error when the executor config does not match', async () => {
+    // The issue #337 misconfiguration: the OApp executor config held the
+    // executor package id instead of the worker CallCap identity.
+    await setup(validationSimResponse(LZ_INFRA.executorPkg));
+
+    await expect(lzService.quoteLzFee(...quoteArgs)).rejects.toThrow(
+      /executor config points at .* was likely set to a package id/s,
+    );
+  });
+
+  it('rejects when the effective ULN config requires a different DVN', async () => {
+    await setup(validationSimResponse(EXECUTOR_CAP, ['0x' + 'd2'.repeat(32)]));
+
+    await expect(lzService.quoteLzFee(...quoteArgs)).rejects.toThrow(/requires DVN/);
+  });
+
+  it('rejects when the effective ULN config requires more than one DVN', async () => {
+    await setup(validationSimResponse(EXECUTOR_CAP, [DVN_CAP, '0x' + 'd2'.repeat(32)]));
+
+    await expect(lzService.quoteLzFee(...quoteArgs)).rejects.toThrow(/exactly one DVN/);
+  });
+
+  it('rejects when the effective config cannot be read', async () => {
+    await setup({ response: { commandOutputs: [] } });
+
+    await expect(lzService.quoteLzFee(...quoteArgs)).rejects.toThrow(
+      /Failed to read the effective LZ send config/,
+    );
   });
 });
