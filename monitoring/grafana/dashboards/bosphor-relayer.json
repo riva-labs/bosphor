@@ -490,7 +490,7 @@
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
-        "uid": "bosphor-postgres"
+        "uid": "bosphor-postgres-testnet"
       },
       "fieldConfig": {
         "defaults": {},
@@ -504,7 +504,7 @@
           "refId": "A",
           "datasource": {
             "type": "grafana-postgresql-datasource",
-            "uid": "bosphor-postgres"
+            "uid": "bosphor-postgres-testnet"
           },
           "format": "table",
           "editorMode": "code",
