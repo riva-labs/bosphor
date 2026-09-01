@@ -162,9 +162,9 @@ export class StagedIntentStore {
        )
        INSERT INTO ${TABLE}
          (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at)
-       SELECT $1, $2, $3, $4, $5, $5, $5
+       SELECT $1, $2, $3, $4::bigint, $5, $5, $5
          FROM capacity
-        WHERE $6 = false OR capacity.staged + $4 <= $7
+        WHERE $6 = false OR capacity.staged + $4::bigint <= $7::bigint
        ON CONFLICT (intent_id) DO UPDATE SET
          bytes = EXCLUDED.bytes,
          blob_id = EXCLUDED.blob_id,
@@ -172,7 +172,7 @@ export class StagedIntentStore {
          updated_at = EXCLUDED.updated_at
        WHERE ${TABLE}.state = 'active'
          AND ($6 = false
-              OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7)
+              OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7::bigint)
        RETURNING intent_id`,
       [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap],
     );
