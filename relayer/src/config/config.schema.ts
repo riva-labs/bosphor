@@ -117,6 +117,13 @@ export const configValidationSchema = Joi.object({
   // Upper bound on one store attempt; a hung Walrus/Sui call is aborted and the
   // row rescheduled instead of pinning the in-process slot forever.
   STORE_ATTEMPT_TIMEOUT_MS: Joi.number().integer().default(120000), // 2 min
+  // Claim lease duration (single-writer enforcement). A drained row is exclusive
+  // to the claiming process until the lease expires; the owner renews implicitly
+  // every claim tick by re-draining its own rows, so this only has to cover the
+  // window between a process crash and takeover, never a whole store. Kept
+  // generous (5x STORE_ATTEMPT_TIMEOUT_MS) so a live-but-slow store attempt is
+  // never taken over mid-flight even if the claim loop stalls for minutes.
+  STORE_LEASE_MS: Joi.number().integer().min(1).default(600000), // 10 min
   // Retention window for terminal rows (done/dead/expired). The reaper purges
   // rows older than this so the queue table does not grow without bound; the
   // durable evidence they carry lives in the intent_lifecycle feed regardless.

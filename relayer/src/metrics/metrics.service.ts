@@ -3,6 +3,7 @@ import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom
 
 type Result = 'success' | 'failure';
 type IntentPath = 'evm' | 'sui_lz';
+type ReturnMode = 'proof' | 'fallback';
 
 @Injectable()
 export class MetricsService {
@@ -19,6 +20,17 @@ export class MetricsService {
     name: 'bosphor_relayer_lz_send_total',
     help: 'LayerZero proof sends from the relayer, by result',
     labelNames: ['result'] as const,
+    registers: [this.registry],
+  });
+
+  // How each return leg actually settled: `proof` for the canonical LayerZero
+  // lz_send_proof path, `fallback` for the owner-gated confirmExecution hybrid.
+  // The fallback share is the proof-path degradation signal: until #337 lands
+  // the proof path is known-broken, so fallback sits at 100% by design.
+  private readonly returnMode = new Counter({
+    name: 'bosphor_relayer_return_mode_total',
+    help: 'Return legs settled by mode (proof = LayerZero, fallback = confirmExecution)',
+    labelNames: ['mode'] as const,
     registers: [this.registry],
   });
 
@@ -106,6 +118,11 @@ export class MetricsService {
     for (const result of ['success', 'failure', 'insufficient_sui'] as const) {
       this.walTopUp.inc({ result }, 0);
     }
+    // Same zero-init for the return-mode split, so the dashboard panel and the
+    // fallback-share alert see both series from boot instead of "No data".
+    for (const mode of ['proof', 'fallback'] as const) {
+      this.returnMode.inc({ mode }, 0);
+    }
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {
@@ -114,6 +131,11 @@ export class MetricsService {
 
   recordLzSend(result: Result): void {
     this.lzSend.inc({ result });
+  }
+
+  /** Record how a return leg settled: LayerZero proof or confirmExecution fallback. */
+  recordReturnMode(mode: ReturnMode): void {
+    this.returnMode.inc({ mode });
   }
 
   setCheckpointCursorLag(lag: number): void {
