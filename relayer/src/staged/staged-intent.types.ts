@@ -81,6 +81,14 @@ export interface ByteRecoveryCandidate {
   committedBlobId: string;
 }
 
+/**
+ * Outcome of a byte upsert under atomic admission control.
+ *   accepted     the bytes were buffered (row created or merged onto active row).
+ *   backpressure the staged-byte cap would be exceeded; nothing was written.
+ *   terminal     the row exists but is terminal (done/dead/expired); a no-op.
+ */
+export type UpsertOutcome = 'accepted' | 'backpressure' | 'terminal';
+
 /** Accepted out-of-band bytes bound to a commitment, awaiting store. */
 export interface StagedBytes {
   bytes: Buffer;
