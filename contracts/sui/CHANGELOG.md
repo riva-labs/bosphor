@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 (2026-08-31)
+
+### Features
+
+- feat(sui): add AdminCap-gated set_relayer to walrus executor
+
 ## 0.3.0 (2026-08-11)
 
 ### Breaking Changes
