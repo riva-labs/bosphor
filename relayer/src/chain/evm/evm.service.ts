@@ -8,6 +8,13 @@ import {
 } from '../../common';
 import { ErrorReporter } from '../../observability/error-reporter';
 import { isTransientRpcError } from '../../observability/transient-rpc-error';
+import {
+  bumpFeeOverrides,
+  FeeOverrides,
+  initialFeeOverrides,
+  isNonceConflictError,
+  MAX_FEE_BUMPS,
+} from './nonce-conflict';
 
 /** Blocks to stay behind head when querying logs, to tolerate load-balanced RPCs
  * whose nodes lag the one that answered getBlockNumber. */
@@ -62,6 +69,17 @@ export class EvmService implements OnModuleInit {
   private provider!: ethers.JsonRpcProvider;
   private wallet!: ethers.Wallet;
   private adapter!: ethers.Contract;
+
+  /**
+   * Per-wallet send serialization (#364). Every state-changing send from the
+   * relayer wallet chains off this promise so only one tx builds+sends at a
+   * time. Without it, concurrent return legs (Promise.allSettled in the
+   * processor tick) and any external tool sharing EVM_RELAYER_KEY allocate the
+   * same pending nonce and collide in the mempool (REPLACEMENT_UNDERPRICED),
+   * then the losing tx's nonce mines out from under it (NONCE_EXPIRED). The
+   * chain forces sequential nonce allocation in-process.
+   */
+  private sendQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly config: ConfigService,
@@ -262,20 +280,80 @@ export class EvmService implements OnModuleInit {
    * `IntentExecuted` proof decodes identically for consumers.
    */
   async confirmExecution(intentId: string, proof: string): Promise<string> {
+    return this.serialize(() => this.sendConfirmExecution(intentId, proof));
+  }
+
+  /**
+   * Run `task` after every previously-queued send from this wallet has settled,
+   * so nonces are allocated strictly in order (#364). The queue tail advances
+   * regardless of whether a task resolves or rejects, so one failed send never
+   * wedges the wallet.
+   */
+  private serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.sendQueue.then(task, task);
+    // Swallow the result on the tail so a rejection here is not an unhandled
+    // rejection; the caller still sees it through `run`.
+    this.sendQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Send the owner-gated confirmExecution and wait for it to mine. On a nonce
+   * conflict (REPLACEMENT_UNDERPRICED / NONCE_EXPIRED) it rebuilds the tx from
+   * scratch with a freshly fetched pending nonce and bumped EIP-1559 fees, never
+   * resending the cached signed bytes, because a byte-identical resend collides
+   * the same way (the #364 failure loop). Transient RPC errors keep the existing
+   * fixed backoff and reuse the current nonce/fees. Attempts and fee bumps are
+   * both capped.
+   */
+  private async sendConfirmExecution(intentId: string, proof: string): Promise<string> {
     const maxAttempts = 3;
     const delayMs = 2000;
+    const proofBytes = ethers.getBytes(proof);
+
+    let fees: FeeOverrides = await initialFeeOverrides(this.provider);
+    let nonce = await this.provider.getTransactionCount(this.wallet.address, 'pending');
+    let feeBumps = 0;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const tx = await this.adapter.confirmExecution(intentId, ethers.getBytes(proof));
+        const tx = await this.adapter.confirmExecution(intentId, proofBytes, {
+          nonce,
+          maxFeePerGas: fees.maxFeePerGas,
+          maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+        });
         const receipt = await tx.wait();
-        this.logger.log(`[${intentId}] EVM confirm tx: ${receipt.hash} (attempt ${attempt})`);
+        this.logger.log(
+          `[${intentId}] EVM confirm tx: ${receipt.hash} (attempt ${attempt}, nonce ${nonce})`,
+        );
         return receipt.hash;
       } catch (err) {
         this.logger.error(
-          `[${intentId}] EVM confirm attempt ${attempt}/${maxAttempts} failed: ${err}`,
+          `[${intentId}] EVM confirm attempt ${attempt}/${maxAttempts} failed ` +
+            `(nonce ${nonce}): ${err}`,
         );
         if (attempt === maxAttempts) throw err;
+
+        if (isNonceConflictError(err)) {
+          // Rebuild, never resend: refresh the pending nonce (a competitor may
+          // have mined) and bump fees so the replacement clears the client's
+          // replacement floor.
+          nonce = await this.provider.getTransactionCount(this.wallet.address, 'pending');
+          if (feeBumps < MAX_FEE_BUMPS) {
+            fees = bumpFeeOverrides(fees);
+            feeBumps++;
+          }
+          this.logger.warn(
+            `[${intentId}] nonce conflict; rebuilding with nonce ${nonce}, ` +
+              `maxFeePerGas ${fees.maxFeePerGas} (bump ${feeBumps}/${MAX_FEE_BUMPS})`,
+          );
+          // No fixed sleep: the collision is resolved by the rebuild, not by time.
+          continue;
+        }
+
         await new Promise((r) => setTimeout(r, delayMs));
       }
     }
