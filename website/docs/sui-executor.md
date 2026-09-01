@@ -30,7 +30,10 @@ A shared object created at module initialization. Holds the authorized relayer a
 | `relayer` | `address` | The only address allowed to call `execute_store` |
 | `executed_intents` | `Table<vector<u8>, bool>` | Tracks which intent IDs have been executed |
 
-The deployer is set as the initial relayer. Use `update_relayer` to change it.
+The deployer is set as the initial relayer. Two functions can change it:
+
+- `update_relayer(config, new_relayer)`: callable by the current relayer only.
+- `set_relayer(config, admin_cap, oapp, new_relayer)`: callable by the OApp admin, proven by the `AdminCap` from the Bosphor LayerZero OApp. This is the recovery path for rotating a lost or compromised relayer key without republishing the package. The new relayer must not be the zero address. Emits a `RelayerChanged` event.
 
 ## execute_store flow
 
@@ -70,6 +73,8 @@ An on-chain object transferred to the original sender as proof of execution.
 
 **ConfigCreated**: Emitted once at module initialization with the config object ID and initial relayer address.
 
+**RelayerChanged**: Emitted when the authorized relayer changes via `set_relayer`. Contains `old_relayer` and `new_relayer`.
+
 ## Error codes
 
 | Code | Constant | Meaning |
@@ -78,6 +83,9 @@ An on-chain object transferred to the original sender as proof of execution.
 | 1 | `EBlobNotCertified` | Blob has not been certified by Walrus |
 | 2 | `EIntentAlreadyExecuted` | This intent ID was already executed |
 | 3 | `EDeadlineExpired` | Current time exceeds the intent deadline |
+| 4 | `EBlobIdMismatch` | Certified blob id does not match the committed reference |
+| 5 | `EInsufficientStorageEpochs` | Blob does not cover the committed storage epochs |
+| 6 | `EZeroAddress` | New relayer address must not be the zero address |
 
 ## Trust assumptions
 

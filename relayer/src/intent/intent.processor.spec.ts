@@ -98,6 +98,7 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     observeWalrusUpload: jest.fn(),
     recordWalStorageCost: jest.fn(),
     recordLzSend: jest.fn(),
+    recordReturnMode: jest.fn(),
     recordDeadLetter: jest.fn(),
   };
   const lifecycle = {
@@ -215,6 +216,39 @@ describe('IntentProcessor durable queue', () => {
     expect(suiLz.lzSendProof).toHaveBeenCalledTimes(1);
     expect(staged.markReturned).toHaveBeenCalledWith('0xintent');
     expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
+  it('counts a return settled over the LayerZero proof path as mode=proof', async () => {
+    const { proc, suiLz, evm, metrics } = build([makeRow()]);
+    await proc.tick();
+
+    expect(suiLz.lzSendProof).toHaveBeenCalledTimes(1);
+    expect(evm.confirmExecution).not.toHaveBeenCalled();
+    expect(metrics.recordReturnMode).toHaveBeenCalledWith('proof');
+    expect(metrics.recordReturnMode).not.toHaveBeenCalledWith('fallback');
+  });
+
+  it('counts a return settled via the confirmExecution fallback as mode=fallback', async () => {
+    const { proc, staged, suiLz, evm, metrics } = build([makeRow()]);
+    // LZ send path is unavailable -> the owner-gated confirmExecution fallback
+    // settles the return leg (the current known state until #337 lands).
+    suiLz.lzSendProof.mockRejectedValue(new Error('lz down'));
+    await proc.tick();
+
+    expect(evm.confirmExecution).toHaveBeenCalledTimes(1);
+    expect(metrics.recordReturnMode).toHaveBeenCalledWith('fallback');
+    expect(metrics.recordReturnMode).not.toHaveBeenCalledWith('proof');
+    expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
+  it('records no return mode when both return paths fail', async () => {
+    const { proc, suiLz, evm, metrics } = build([makeRow()]);
+    suiLz.lzSendProof.mockRejectedValue(new Error('lz down'));
+    evm.confirmExecution.mockRejectedValue(new Error('evm down'));
+    await proc.tick();
+
+    // Nothing settled, so neither mode counts (the retry will count it later).
+    expect(metrics.recordReturnMode).not.toHaveBeenCalled();
   });
 
   it('is idempotent: a row with a prior upload + store never re-uploads or re-records', async () => {

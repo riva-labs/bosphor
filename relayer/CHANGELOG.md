@@ -1,11 +1,24 @@
 # Changelog
 
-## 0.8.0 (2026-09-01)
+## 0.9.0 (2026-09-01)
 
 ### Features
 
 - feat(relayer): make the claim lease duration configurable via STORE_LEASE_MS
 - feat(relayer): enforce single-writer with a claim lease in the staged store
+
+## 0.8.0 (2026-09-01)
+
+### Features
+
+- feat(relayer): count return-leg settlement mode in the intent processor
+- feat(relayer): add return-mode counter to the metrics service
+
+## 0.7.3 (2026-09-01)
+
+### Bug Fixes
+
+- fix(relayer): validate LZ send worker config before building return PTBs
 
 ## 0.7.2 (2026-08-31)
 

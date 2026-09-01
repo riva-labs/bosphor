@@ -126,15 +126,17 @@ describe("simulateWithOutputs", () => {
       1,
     );
 
-    // Verify the request includes transaction and readMask with commandOutputs
+    // Verify the request includes transaction and the snake_case leaf path.
+    // The camelCase parent "commandOutputs" is silently returned empty by the
+    // real server, so the leaf path is load-bearing.
     const callArgs =
       fakeClient.transactionExecutionService.simulateTransaction.mock.calls[0].arguments;
     const request = callArgs[0];
     assert.ok(request.transaction?.bcs?.value, "should pass transaction bcs bytes");
     assert.ok(request.readMask, "should pass readMask");
     assert.ok(
-      request.readMask.paths.includes("commandOutputs"),
-      "readMask paths should include commandOutputs",
+      request.readMask.paths.includes("command_outputs.return_values"),
+      "readMask paths should include command_outputs.return_values",
     );
   });
 });

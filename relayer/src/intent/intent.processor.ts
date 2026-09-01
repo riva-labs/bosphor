@@ -479,6 +479,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         feeAmount,
       );
       this.metrics.recordLzSend('success');
+      this.metrics.recordReturnMode('proof');
       this.logger.log(`[${intentId}] LZ proof sent: ${lzDigest}`);
       await this.trackHop(intentId, 'proof_sent', { txHash: lzDigest });
     } catch (lzErr) {
@@ -495,6 +496,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         [canonicalBlobIdHex, BigInt(endEpoch)],
       );
       const evmDigest = await this.evm.confirmExecution(intentId, proof);
+      this.metrics.recordReturnMode('fallback');
       this.logger.log(`[${intentId}] Return confirmed via confirmExecution: ${evmDigest}`);
       await this.trackHop(intentId, 'proof_sent', { txHash: evmDigest });
     }

@@ -23,7 +23,7 @@ config({ path: ENV_PATH });
 
 import { Transaction } from "@mysten/sui/transactions";
 import { bcs } from "@mysten/sui/bcs";
-import { createSuiClient, createSuiSigner, signAndExecute } from "../util/sui-client.js";
+import { createSuiClient, createSuiSigner, signAndExecute, getWorkerCapAddress } from "../util/sui-client.js";
 
 // --- LZ Infrastructure (from .env) ---
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
@@ -31,7 +31,7 @@ const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
 const ULN302 = process.env.SUI_LZ_ULN302!;
 const ULN302_OBJ = process.env.SUI_LZ_ULN302_OBJ!;
 const LZ_DVN_SUI = process.env.SUI_LZ_DVN_PKG!;
-const LZ_EXECUTOR_SUI = process.env.SUI_LZ_EXECUTOR_PKG!;
+const LZ_EXECUTOR_OBJ = process.env.SUI_LZ_EXECUTOR_OBJ!;
 const CLOCK = "0x6";
 
 const EVM_EID = Number(process.env.EVM_EID) || 40161;
@@ -41,7 +41,7 @@ const SUI_GRPC_URL = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
 
-const requiredEnv = ["SUI_DEPLOYER_KEY", "SUI_LZ_ENDPOINT_V2_OBJ", "SUI_LZ_OAPP_PKG", "SUI_LZ_ULN302", "SUI_LZ_ULN302_OBJ", "SUI_LZ_DVN_PKG", "SUI_LZ_EXECUTOR_PKG", "SUI_LZ_BYTES32_PKG"];
+const requiredEnv = ["SUI_DEPLOYER_KEY", "SUI_LZ_ENDPOINT_V2_OBJ", "SUI_LZ_OAPP_PKG", "SUI_LZ_ULN302", "SUI_LZ_ULN302_OBJ", "SUI_LZ_DVN_PKG", "SUI_LZ_EXECUTOR_PKG", "SUI_LZ_EXECUTOR_OBJ", "SUI_LZ_BYTES32_PKG"];
 for (const k of requiredEnv) {
   if (!process.env[k]) { console.error(`Missing ${k} in .env`); process.exit(1); }
 }
@@ -399,9 +399,21 @@ async function setLzConfig(oappId: string, adminCapId: string) {
   tx2.moveCall({ target: `${ULN302}::uln_302::set_config`, arguments: [tx2.object(ULN302_OBJ), call2] });
   await exec(tx2, "set_send_uln_config");
 
-  // Executor config (type 1)
+  // Executor config (type 1).
+  //
+  // The ULN records this address as the callee of the executor child call,
+  // and the executor worker authenticates with its CallCap identity (its
+  // original package address), never its latest package id. Pinning the
+  // package id here is exactly the misconfig that made every lz_send_proof
+  // abort in call::new_child_batch with code 10 (issue #337). In default
+  // mode we write zeros so the config inherits the ULN default executor and
+  // self-heals across LZ executor rotations; otherwise we resolve the cap
+  // identity from the live executor object.
   const tx3 = new Transaction();
-  const execConfig = encodeExecutorConfig(10000n, LZ_EXECUTOR_SUI);
+  const useDefaultExecutor = (process.env.LZ_USE_DEFAULT_DVNS ?? "false") === "true";
+  const execConfig = useDefaultExecutor
+    ? encodeExecutorConfig(0n, "0x" + "0".repeat(64))
+    : encodeExecutorConfig(10000n, await getWorkerCapAddress(suiClient, LZ_EXECUTOR_OBJ));
   const [call3] = tx3.moveCall({
     target: `${OAPP_PKG}::endpoint_calls::set_config`,
     arguments: [
