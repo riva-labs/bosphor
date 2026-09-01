@@ -74,6 +74,13 @@ public struct IntentRecord has store {
     committed_blob_id: u256,
     /// Committed number of storage epochs the blob must remain available for.
     committed_storage_epochs: u32,
+    /// Committed intent execution deadline as a unix timestamp in seconds.
+    ///
+    /// Fixed from the commitment at intent time so `execute_store` can enforce the
+    /// deadline against the committed value rather than a relayer-supplied argument.
+    /// The commitment carries the deadline in seconds (EVM `block.timestamp`); a
+    /// consumer comparing against `Clock::timestamp_ms()` must scale by 1000.
+    committed_deadline: u64,
     /// LayerZero endpoint ID of the source chain (e.g. 40161 for Sepolia).
     src_eid: u32,
     /// LayerZero message nonce for ordering and replay protection.
@@ -188,6 +195,7 @@ public fun lz_receive(
     config.received_intents.add(intent_id, IntentRecord {
         committed_blob_id,
         committed_storage_epochs: storage_epochs,
+        committed_deadline: deadline,
         src_eid,
         nonce,
     });
@@ -390,6 +398,22 @@ public fun committed_storage_epochs(config: &LzReceiverConfig, intent_id: vector
     config.received_intents.borrow(intent_id).committed_storage_epochs
 }
 
+/// Returns the committed intent deadline (unix seconds) for a received intent.
+///
+/// The value was fixed at intent time from the LZ commitment. `execute_store`
+/// should enforce the deadline against this committed value rather than a
+/// relayer-supplied argument. The deadline is in seconds; a consumer comparing
+/// against `Clock::timestamp_ms()` must scale by 1000.
+///
+/// * `config` - Shared LzReceiverConfig object.
+/// * `intent_id` - 32-byte intent identifier.
+///
+/// Aborts with `EIntentNotReceived` if the intent has not been received.
+public fun committed_deadline(config: &LzReceiverConfig, intent_id: vector<u8>): u64 {
+    assert!(config.received_intents.contains(intent_id), EIntentNotReceived);
+    config.received_intents.borrow(intent_id).committed_deadline
+}
+
 /// Returns the OApp CallCap ID. Used by the PTB builder for constructing
 /// executor move calls.
 ///
@@ -510,12 +534,14 @@ public fun record_intent_for_testing(
     intent_id: vector<u8>,
     committed_blob_id: u256,
     committed_storage_epochs: u32,
+    committed_deadline: u64,
     src_eid: u32,
     nonce: u64,
 ) {
     config.received_intents.add(intent_id, IntentRecord {
         committed_blob_id,
         committed_storage_epochs,
+        committed_deadline,
         src_eid,
         nonce,
     });

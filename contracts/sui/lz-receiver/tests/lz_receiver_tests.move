@@ -69,17 +69,20 @@ fun test_committed_accessors_return_recorded_values() {
         let intent_id = x"0000000000000000000000000000000000000000000000000000000000000001";
         let blob_id: u256 = 0xDEADBEEF;
         let storage_epochs: u32 = 12;
+        let deadline: u64 = 1700000000;
         lz_receiver::record_intent_for_testing(
             &mut config,
             intent_id,
             blob_id,
             storage_epochs,
+            deadline,
             40161,
             7,
         );
         assert!(lz_receiver::is_received(&config, intent_id), 0);
         assert!(lz_receiver::committed_blob_id(&config, intent_id) == blob_id, 1);
         assert!(lz_receiver::committed_storage_epochs(&config, intent_id) == storage_epochs, 2);
+        assert!(lz_receiver::committed_deadline(&config, intent_id) == deadline, 3);
         test_scenario::return_shared(config);
     };
     scenario.end();
@@ -112,6 +115,22 @@ fun test_committed_storage_epochs_aborts_when_absent() {
     {
         let config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
         lz_receiver::committed_storage_epochs(&config, b"missing_intent_id");
+        test_scenario::return_shared(config);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = lz_receiver::EIntentNotReceived)]
+fun test_committed_deadline_aborts_when_absent() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    {
+        lz_receiver::init_for_testing(scenario.ctx());
+    };
+    scenario.next_tx(ADMIN);
+    {
+        let config = scenario.take_shared<lz_receiver::LzReceiverConfig>();
+        lz_receiver::committed_deadline(&config, b"missing_intent_id");
         test_scenario::return_shared(config);
     };
     scenario.end();
