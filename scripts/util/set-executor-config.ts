@@ -158,9 +158,12 @@ async function main() {
   });
   tx.moveCall({ target: `${ULN302}::uln_302::set_config`, arguments: [tx.object(ULN302_OBJ), call] });
 
-  const result = await signAndExecute(client, tx, keypair);
-  if (!result?.effects?.status?.success) {
-    throw new Error(`set_config failed: ${JSON.stringify(result?.effects?.status)}`);
+  const result: any = await signAndExecute(client, tx, keypair);
+  const ok = result?.effects?.status?.success ?? result?.status?.success;
+  if (!ok) {
+    throw new Error(
+      `set_config failed: ${JSON.stringify(result?.effects?.status ?? result?.status)}`,
+    );
   }
   console.log(`\n[OK] set_executor_config TX: ${result.digest}`);
 }
