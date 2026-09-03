@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3 (2026-09-03)
+
+### Bug Fixes
+
+- fix(relayer): zero-init intents/lz-send/dead-letter counters for dashboards
+
 ## 0.10.2 (2026-09-03)
 
 ### Bug Fixes
