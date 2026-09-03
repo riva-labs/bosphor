@@ -238,7 +238,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build relayer image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: relayer
           file: relayer/Dockerfile
@@ -261,7 +261,7 @@ jobs:
       # the sibling sdk/ and the root tsconfig.base.json (same as the compose
       # files build it).
       - name: Build canary image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: canary/Dockerfile
