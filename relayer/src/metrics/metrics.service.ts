@@ -123,6 +123,19 @@ export class MetricsService {
     for (const mode of ['proof', 'fallback'] as const) {
       this.returnMode.inc({ mode }, 0);
     }
+    // Zero-init the remaining labelled counters so the Mission Control panels
+    // (intents processed, LZ proof sends, dead-letters) render 0 from boot
+    // instead of "No data" on a fresh instance that has not processed an intent
+    // yet. prom-client only emits a labelled series after its first increment.
+    for (const result of ['success', 'failure'] as const) {
+      this.lzSend.inc({ result }, 0);
+      for (const path of ['evm', 'sui_lz'] as const) {
+        this.intentsProcessed.inc({ result, path }, 0);
+      }
+    }
+    for (const phase of ['pre_store', 'return'] as const) {
+      this.storeDeadLetter.inc({ phase }, 0);
+    }
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {
