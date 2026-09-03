@@ -21,7 +21,14 @@ import { PublicController } from './public.controller';
       useFactory: (config: ConfigService): IntentLifecycleStore => {
         const url = config.get<string>('DATABASE_URL');
         if (url) {
-          return new PgIntentLifecycleStore(new Pool({ connectionString: url }));
+          return new PgIntentLifecycleStore(
+            new Pool({
+              connectionString: url,
+              max: config.get<number>('DB_POOL_MAX') ?? 20,
+              connectionTimeoutMillis: 10_000,
+              idleTimeoutMillis: 30_000,
+            }),
+          );
         }
         new Logger('LifecycleModule').warn(
           'DATABASE_URL not set - using in-memory intent store (not durable)',
