@@ -24,9 +24,19 @@ import { StagedReaper } from './staged-reaper.service';
         if (url) {
           // The claimant identity defaults inside the store (hostname + random
           // suffix, once per process); only the lease duration is configurable.
-          return new StagedIntentStore(new Pool({ connectionString: url }), {
-            leaseMs: config.get<number>('STORE_LEASE_MS'),
-          });
+          return new StagedIntentStore(
+            new Pool({
+              connectionString: url,
+              max: config.get<number>('DB_POOL_MAX') ?? 20,
+              // Never block a query forever on a leaked/exhausted pool: fail fast
+              // so the caller's timeout/catch fires instead of the tick wedging.
+              connectionTimeoutMillis: 10_000,
+              idleTimeoutMillis: 30_000,
+            }),
+            {
+              leaseMs: config.get<number>('STORE_LEASE_MS'),
+            },
+          );
         }
         new Logger('StagedModule').warn(
           'DATABASE_URL not set - durable store queue disabled (in-memory dev only)',

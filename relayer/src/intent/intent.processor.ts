@@ -76,7 +76,15 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   private readonly bytesRecoveryBackoffMs: number;
   private recovering = false;
   private stopped = false;
-  private ticking = false;
+  // Epoch ms when the current tick started, or null when idle. A timestamp, not
+  // a boolean, so a tick that hangs forever (a zombie query holding a pool
+  // connection) cannot wedge the loop permanently: once it has been in flight
+  // longer than the watchdog, the next tick proceeds anyway. This is safe
+  // because drainDue claims rows under a DB lease (claimed_by + FOR UPDATE SKIP
+  // LOCKED) and inProcess guards the same-process set, so overlapping ticks get
+  // disjoint rows and never double-store.
+  private tickStartedAt: number | null = null;
+  private readonly tickWatchdogMs: number;
 
   constructor(
     private readonly evm: EvmService,
@@ -104,6 +112,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.maxStoreAttempts = this.config.get<number>('MAX_STORE_ATTEMPTS') ?? 8;
     this.returnMaxAttempts = this.config.get<number>('RETURN_MAX_ATTEMPTS') ?? 20;
     this.attemptTimeoutMs = this.config.get<number>('STORE_ATTEMPT_TIMEOUT_MS') ?? 120000;
+    // A tick is presumed hung once it exceeds one full store attempt plus a
+    // margin; after that the next tick is allowed to proceed so the loop
+    // self-heals from a wedged (never-resolving) await.
+    this.tickWatchdogMs = this.attemptTimeoutMs * 2;
     this.shutdownDrainMs = this.config.get<number>('SHUTDOWN_DRAIN_MS') ?? 30000;
     // Give the client's normal blob delivery a head start before self-healing.
     this.bytesRecoveryGraceMs = this.config.get<number>('BYTES_RECOVERY_GRACE_MS') ?? 45000;
@@ -177,15 +189,24 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Claim loop: drain due rows, store the ready ones with bounded concurrency.
-   * A single non-reentrant tick (guarded by `ticking`) - a long store carries
-   * over ticks via `inProcess`, it does not stack.
+   * A single non-reentrant tick (guarded by `tickStartedAt` + watchdog) - a long
+   * store carries over ticks via `inProcess`, it does not stack.
    */
   @Interval(CLAIM_INTERVAL_MS)
   async tick(): Promise<void> {
-    if (this.stopped || !this.staged || this.ticking) return;
-    this.ticking = true;
+    if (this.stopped || !this.staged) return;
+    // Skip only while a recent tick is still in flight. A tick that has run
+    // longer than the watchdog is presumed hung (a zombie await), so let this
+    // one proceed; the DB lease makes overlapping ticks safe.
+    const now = Date.now();
+    if (this.tickStartedAt !== null && now - this.tickStartedAt < this.tickWatchdogMs) return;
+    if (this.tickStartedAt !== null) {
+      this.logger.warn(
+        `Previous claim tick still in flight after ${now - this.tickStartedAt}ms; proceeding (presumed hung)`,
+      );
+    }
+    this.tickStartedAt = now;
     try {
-      const now = Date.now();
       const rows = await this.staged.drainDue(now, this.batchSize);
       const ready: { row: StagedIntentRow; sender: string; commitment: IntentCommitment | null }[] =
         [];
@@ -207,7 +228,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`Claim tick failed: ${err}`);
       this.errorReporter.captureException(err);
     } finally {
-      this.ticking = false;
+      // Only clear if this tick still owns the slot. If the watchdog let a newer
+      // tick start (this one was presumed hung), that newer tick owns tickStartedAt
+      // and must not be cleared by this straggler finishing late.
+      if (this.tickStartedAt === now) this.tickStartedAt = null;
     }
   }
 
