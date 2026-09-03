@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 (2026-09-03)
+
+### Bug Fixes
+
+- fix(relayer): self-heal the claim tick and bound the pg pool
+
 ## 0.10.0 (2026-09-01)
 
 ### Features
