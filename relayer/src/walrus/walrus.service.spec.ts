@@ -8,17 +8,21 @@ describe('WalrusService', () => {
   let mockSui: Partial<SuiService>;
   let mockWriteBlob: jest.Mock;
   let mockReset: jest.Mock;
+  let mockSystemState: jest.Mock;
   let mockConfigGet: jest.Mock;
 
   beforeEach(async () => {
     mockWriteBlob = jest.fn();
     mockReset = jest.fn();
+    // Default: no system state available -> cost is unknown (undefined), never a
+    // fabricated zero. The cost-population test overrides this with live prices.
+    mockSystemState = jest.fn().mockRejectedValue(new Error('no system state in test'));
     mockConfigGet = jest.fn((_key: string, defaultValue?: any) => defaultValue);
 
     mockSui = {
       getAddress: jest.fn().mockReturnValue('0xrelayeraddr'),
       getWalrusClient: jest.fn().mockReturnValue({
-        walrus: { writeBlob: mockWriteBlob, reset: mockReset },
+        walrus: { writeBlob: mockWriteBlob, reset: mockReset, systemState: mockSystemState },
       }),
       getSigner: jest.fn().mockReturnValue('mock-signer'),
     };
@@ -69,6 +73,40 @@ describe('WalrusService', () => {
         signer: 'mock-signer',
         owner: '0xrelayeraddr',
       });
+    });
+
+    it('should populate the real WAL cost (FROST) from live system state', async () => {
+      // Metering hook for the M4 user-pays model: the store cost is recomputed
+      // from the same fresh on-chain prices the write paid against, never faked.
+      mockSystemState.mockResolvedValue({
+        committee: { n_shards: 1000 },
+        storage_price_per_unit_size: '100000',
+        write_price_per_unit_size: '20000',
+      });
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blobCost',
+        blobObject: { id: '0xcost', storage: { end_epoch: 90 } },
+      });
+
+      // 1 MiB blob at the default 5 epochs -> 67 storage units.
+      const result = await service.upload(Buffer.alloc(1024 * 1024));
+
+      // storage 67*100000*5 + write 67*20000 = 33_500_000 + 1_340_000
+      expect(result.walCostMist).toBe(34_840_000n);
+      expect(mockSystemState).toHaveBeenCalled();
+    });
+
+    it('should leave WAL cost undefined (unknown) when live state is unavailable', async () => {
+      // No fabricated zero: if the cost cannot be computed, callers must see
+      // undefined and treat it as unknown, not free.
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blobNoCost',
+        blobObject: { id: '0xnocost', storage: { end_epoch: 91 } },
+      });
+
+      const result = await service.upload(Buffer.from('data'));
+
+      expect(result.walCostMist).toBeUndefined();
     });
 
     it('should reset the SDK cache before every upload so payment uses live state', async () => {
