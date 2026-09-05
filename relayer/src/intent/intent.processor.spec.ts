@@ -46,7 +46,11 @@ function makeRow(o: Partial<StagedIntentRow> = {}): StagedIntentRow {
   };
 }
 
-function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number> = {}) {
+function build(
+  rows: StagedIntentRow[] = [],
+  cfgOverrides: Record<string, unknown> = {},
+  guardDeps: { breakEven?: unknown; reconciler?: unknown; escrowReader?: unknown } = {},
+) {
   const staged = {
     markReceived: jest.fn().mockResolvedValue(undefined),
     drainDue: jest.fn().mockResolvedValue(rows),
@@ -131,7 +135,8 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     ...cfgOverrides,
   };
   const config = {
-    get: jest.fn((k: string) => cfg[k]),
+    // Mirror ConfigService.get(key, default): fall back to the default when unset.
+    get: jest.fn((k: string, d?: unknown) => cfg[k] ?? d),
     getOrThrow: jest.fn((k: string) => {
       if (k === 'EVM_DST_EID') return 40161;
       throw new Error(`missing ${k}`);
@@ -151,6 +156,10 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
     errorReporter as never,
     staged as never,
     ingest as never,
+    undefined as never, // waker
+    (guardDeps.breakEven ?? undefined) as never,
+    (guardDeps.reconciler ?? undefined) as never,
+    (guardDeps.escrowReader ?? undefined) as never,
   );
   return { proc, staged, walrus, sui, suiLz, evm, solana, metrics, lifecycle, ingest };
 }
@@ -222,6 +231,84 @@ describe('IntentProcessor durable queue', () => {
     expect(suiLz.lzSendProof).toHaveBeenCalledTimes(1);
     expect(staged.markReturned).toHaveBeenCalledWith('0xintent');
     expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
+  it('break-even guard skips the WAL spend when escrow does not cover cost', async () => {
+    const breakEven = {
+      check: jest.fn().mockResolvedValue({
+        proceed: false,
+        reason: 'escrow below cost + margin',
+        escrowUsd: 1.0,
+        costUsd: 1.5,
+        requiredUsd: 1.65,
+        marginUsd: -0.5,
+        marginRatio: -0.33,
+      }),
+    };
+    const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
+    const escrowReader = {
+      getEscrow: jest.fn().mockResolvedValue({ escrowNative: 400_000_000_000_000n, originToken: 'ETH' }),
+    };
+    const { proc, staged, walrus } = build(
+      [makeRow()],
+      { BREAK_EVEN_GUARD_ENABLED: 'true' },
+      { breakEven, reconciler, escrowReader },
+    );
+
+    await proc.tick();
+
+    expect(escrowReader.getEscrow).toHaveBeenCalledWith('0xintent', 40161);
+    expect(breakEven.check).toHaveBeenCalled();
+    // No WAL spent; the row is settled without a store and the skip is booked.
+    expect(walrus.upload).not.toHaveBeenCalled();
+    expect(staged.markDead).toHaveBeenCalledWith('0xintent', expect.stringContaining('break-even'));
+    expect(reconciler.recordSkip).toHaveBeenCalledWith('0xintent', 'escrow below cost + margin');
+    expect(reconciler.recordCompletion).not.toHaveBeenCalled();
+  });
+
+  it('break-even guard proceeds and books the per-intent P&L on completion', async () => {
+    const breakEven = {
+      check: jest.fn().mockResolvedValue({
+        proceed: true,
+        reason: 'ok',
+        escrowUsd: 2.05,
+        costUsd: 1.42,
+        requiredUsd: 1.56,
+        marginUsd: 0.63,
+        marginRatio: 0.44,
+      }),
+    };
+    const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
+    const escrowReader = {
+      getEscrow: jest.fn().mockResolvedValue({ escrowNative: 800_000_000_000_000n, originToken: 'ETH' }),
+    };
+    const { proc, staged, walrus } = build(
+      [makeRow()],
+      { BREAK_EVEN_GUARD_ENABLED: 'true' },
+      { breakEven, reconciler, escrowReader },
+    );
+
+    await proc.tick();
+
+    expect(walrus.upload).toHaveBeenCalledTimes(1);
+    expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+    expect(reconciler.recordCompletion).toHaveBeenCalledWith('0xintent', {
+      collectedUsd: 2.05,
+      spentUsd: 1.42,
+    });
+  });
+
+  it('leaves the store path unchanged when the break-even guard is disabled', async () => {
+    const breakEven = { check: jest.fn() };
+    const escrowReader = { getEscrow: jest.fn() };
+    const { proc, walrus } = build([makeRow()], {}, { breakEven, escrowReader });
+
+    await proc.tick();
+
+    // Guard is off by default: neither the reader nor the guard is consulted.
+    expect(escrowReader.getEscrow).not.toHaveBeenCalled();
+    expect(breakEven.check).not.toHaveBeenCalled();
+    expect(walrus.upload).toHaveBeenCalledTimes(1);
   });
 
   it('counts a return settled over the LayerZero proof path as mode=proof', async () => {
