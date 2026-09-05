@@ -126,17 +126,36 @@ export class WalrusService implements OnModuleInit {
     walrusClient: ReturnType<SuiService['getWalrusClient']>,
   ): Promise<bigint | undefined> {
     try {
-      const sys = await walrusClient.walrus.systemState();
-      const state: WalrusSystemState = {
-        nShards: Number(sys.committee.n_shards),
-        storagePricePerUnitSize: BigInt(sys.storage_price_per_unit_size),
-        writePricePerUnitSize: BigInt(sys.write_price_per_unit_size),
-      };
+      const state = await this.readSystemState(walrusClient);
       return computeWalCost(dataLength, this.storeEpochs, state).totalCostFrost;
     } catch (err) {
       this.logger.warn(`Could not compute WAL storage cost (recording unknown): ${err}`);
       return undefined;
     }
+  }
+
+  /**
+   * Estimate the WAL storage cost (FROST) for a blob of the given size WITHOUT
+   * storing it, against fresh on-chain state. Used by the quote engine. Unlike
+   * the metering hook this fails loud: a quote must never be built on a fabricated
+   * or unknown cost.
+   */
+  async estimateWalCostFrost(byteLength: number, epochs?: number): Promise<bigint> {
+    const walrusClient = this.sui.getWalrusClient();
+    walrusClient.walrus.reset();
+    const state = await this.readSystemState(walrusClient);
+    return computeWalCost(byteLength, epochs ?? this.storeEpochs, state).totalCostFrost;
+  }
+
+  private async readSystemState(
+    walrusClient: ReturnType<SuiService['getWalrusClient']>,
+  ): Promise<WalrusSystemState> {
+    const sys = await walrusClient.walrus.systemState();
+    return {
+      nShards: Number(sys.committee.n_shards),
+      storagePricePerUnitSize: BigInt(sys.storage_price_per_unit_size),
+      writePricePerUnitSize: BigInt(sys.write_price_per_unit_size),
+    };
   }
 
   /**

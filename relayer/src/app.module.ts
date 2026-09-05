@@ -5,6 +5,7 @@ import { EvmModule } from './chain/evm/evm.module';
 import { SuiModule } from './chain/sui/sui.module';
 import { SolanaModule } from './chain/solana/solana.module';
 import { WalrusModule } from './walrus/walrus.module';
+import { PricingModule } from './pricing/pricing.module';
 import { IntentModule } from './intent/intent.module';
 import { IngestModule } from './ingest/ingest.module';
 import { HealthModule } from './health/health.module';
@@ -25,6 +26,7 @@ import { ObservabilityModule } from './observability/observability.module';
     SuiModule,
     SolanaModule,
     WalrusModule,
+    PricingModule,
     IngestModule,
     IntentModule,
     HealthModule,

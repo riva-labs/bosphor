@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { WalrusModule } from '../walrus/walrus.module';
 import { PriceOracle } from './price-oracle';
 import { PriceOracleConfig, SanityBounds } from './price-oracle.types';
+import { QuoteService } from './quote.service';
+import { QuoteController } from './quote.controller';
 
 export const PRICE_ORACLE = 'PRICE_ORACLE';
 
@@ -35,8 +38,10 @@ const DEFAULT_SANITY_BOUNDS: SanityBounds = {
  * surfaces as a thrown error rather than a bad quote.
  */
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, WalrusModule],
+  controllers: [QuoteController],
   providers: [
+    QuoteService,
     {
       provide: PRICE_ORACLE,
       inject: [ConfigService],
@@ -66,6 +71,6 @@ const DEFAULT_SANITY_BOUNDS: SanityBounds = {
       },
     },
   ],
-  exports: [PRICE_ORACLE],
+  exports: [PRICE_ORACLE, QuoteService],
 })
 export class PricingModule {}
