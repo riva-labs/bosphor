@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.0 (2026-09-05)
+
+### Features
+
+- feat(contracts): add USDC/CCTP payment path behind mocks (live wiring deferred)
+- feat(relayer): event-driven store-queue drain + processing-latency benchmark
+- feat(relayer): add BreakEvenGuard, SettlementReconciler, per-intent P&L
+- feat(relayer): add full-stack QuoteEngine + quote endpoint, SDK priced quote
+- feat(relayer): add multi-source PriceOracle with staleness and sanity bounds
+- feat(relayer): add pure WalCostCalculator and surface real WAL cost
+
 ## 0.10.2 (2026-09-03)
 
 ### Bug Fixes

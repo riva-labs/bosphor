@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0 (2026-09-05)
+
+### Features
+
+- feat(sdk): add priced store flow (quote + pay + await-proof) for EVM and Solana
+- feat(relayer): add full-stack QuoteEngine + quote endpoint, SDK priced quote
+
 ## 0.10.0 (2026-08-30)
 
 ### Features

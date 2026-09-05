@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-09-05)
+
+### Features
+
+- feat(sui): add Solana escrow vault with proof-gated release and refund
+
 ## 0.4.1 (2026-09-01)
 
 ### Bug Fixes
