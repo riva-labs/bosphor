@@ -1,0 +1,20 @@
+{
+  "parsed": [
+    {
+      "id": "eba0732395fae9dec4bae12e52760b35fc1c5671e2da8b449c9af4efe5d54341",
+      "price": { "price": "2690000", "conf": "1200", "expo": -8, "publish_time": 1757030400 }
+    },
+    {
+      "id": "23d7315113f5b1d3ba7a83604c44b94d79f4fd69af77f804fc7f920a6dc65744",
+      "price": { "price": "78600000", "conf": "40000", "expo": -8, "publish_time": 1757030400 }
+    },
+    {
+      "id": "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "price": { "price": "245869000000", "conf": "12000000", "expo": -8, "publish_time": 1757030400 }
+    },
+    {
+      "id": "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d",
+      "price": { "price": "10254000000", "conf": "5000000", "expo": -8, "publish_time": 1757030400 }
+    }
+  ]
+}
