@@ -1,12 +1,8 @@
 import { PriceSet, PriceToken } from './price-oracle.types';
+import { FROST_DECIMALS, MIST_DECIMALS, NATIVE_DECIMALS, amountToUsd, usdToNative } from './pricing-math';
 
 /** Native token of the origin chain the user pays on. */
 export type OriginToken = 'ETH' | 'SOL';
-
-// Smallest-unit decimals per token.
-const FROST_DECIMALS = 9; // WAL
-const MIST_DECIMALS = 9; // SUI
-const NATIVE_DECIMALS: Record<OriginToken, number> = { ETH: 18, SOL: 9 };
 
 export interface QuoteBuffers {
   /** Buffer on the volatile SUI return leg (heaviest). */
@@ -99,12 +95,12 @@ export class QuoteEngine {
     const suiPrice = this.priceOf(prices, 'SUI');
 
     // Raw USD per component.
-    const walCostUsd = frostToUnits(inputs.walCostFrost, FROST_DECIMALS) * walPrice;
-    const returnLzUsd = frostToUnits(inputs.returnLzFeeMist, MIST_DECIMALS) * suiPrice;
-    const suiGasUsd = frostToUnits(inputs.suiGasMist, MIST_DECIMALS) * suiPrice;
+    const walCostUsd = amountToUsd(inputs.walCostFrost, FROST_DECIMALS, walPrice);
+    const returnLzUsd = amountToUsd(inputs.returnLzFeeMist, MIST_DECIMALS, suiPrice);
+    const suiGasUsd = amountToUsd(inputs.suiGasMist, MIST_DECIMALS, suiPrice);
     const originDecimals = NATIVE_DECIMALS[inputs.originToken];
-    const forwardLzUsd = frostToUnits(inputs.forwardLzFeeNative, originDecimals) * originPrice;
-    const originGasUsd = frostToUnits(inputs.originGasNative, originDecimals) * originPrice;
+    const forwardLzUsd = amountToUsd(inputs.forwardLzFeeNative, originDecimals, originPrice);
+    const originGasUsd = amountToUsd(inputs.originGasNative, originDecimals, originPrice);
 
     const { buffers, serviceMarginRatio, minChargeUsd } = this.config;
     // Buffer the relayer-fronted bucket: WAL barely, SUI return leg + gas heavily,
@@ -160,22 +156,4 @@ export class QuoteEngine {
     }
     return p;
   }
-}
-
-/** Convert a smallest-unit bigint to whole token units (Number, quote-grade). */
-function frostToUnits(amount: bigint, decimals: number): number {
-  return Number(amount) / 10 ** decimals;
-}
-
-/**
- * Convert a USD amount to the origin native smallest unit, rounding UP so the
- * escrow never under-covers (over-charge is acceptable per the never-lose-money
- * directive). Fixed-point via 1e9 sub-units keeps precision without float dust.
- */
-function usdToNative(usd: number, priceUsd: number, decimals: number): bigint {
-  const wholeUnits = usd / priceUsd;
-  const SUBUNIT = 9;
-  const sub = BigInt(Math.ceil(wholeUnits * 10 ** SUBUNIT));
-  const scale = 10n ** BigInt(decimals - SUBUNIT);
-  return decimals >= SUBUNIT ? sub * scale : sub / 10n ** BigInt(SUBUNIT - decimals);
 }

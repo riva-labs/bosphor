@@ -9,6 +9,8 @@ import {
   walrusEpochRolloverScenario,
   gasSpikeCanarySkipScenario,
   deadlineExpiryScenario,
+  adverseFxBreakEvenSkipScenario,
+  spentWalNoProofScenario,
   allScenarios,
 } from './scenarios.ts';
 
@@ -32,6 +34,9 @@ function makeFakeDeps(overrides: Partial<ChaosDeps> = {}): ChaosDeps {
     forceWalrusEpochRollover: async () => {},
     setGasPriceGwei: async () => {},
     getCanarySkipCount: async () => 0,
+    setFxAdverse: async () => {},
+    getBreakEvenSkipCount: async () => 0,
+    getNegativeMarginCount: async () => 0,
     ...overrides,
   };
 }
@@ -149,7 +154,54 @@ test('deadline-expiry: fails (flags a bug) when an expired intent executes', asy
   assert.match(outcome.error ?? '', /instead of skipped/);
 });
 
-test('allScenarios returns the seven scenarios in order', () => {
+test('adverse-fx: passes when the guard skips and the intent is not fulfilled', async () => {
+  let skips = 0;
+  const deps = makeFakeDeps({
+    setFxAdverse: async (adverse) => {
+      if (adverse) skips = 1;
+    },
+    getBreakEvenSkipCount: async () => skips,
+    isFulfilled: async () => false,
+  });
+  const outcome = await adverseFxBreakEvenSkipScenario(deps, FAST).run();
+  assert.equal(outcome.recovered, true);
+  assert.ok(outcome.evidence.some((e) => /break-even skips: 0 -> 1/.test(e)));
+});
+
+test('adverse-fx: fails (flags a loss) when the intent is fulfilled anyway', async () => {
+  const deps = makeFakeDeps({
+    getBreakEvenSkipCount: async () => 1,
+    isFulfilled: async () => true,
+  });
+  const outcome = await adverseFxBreakEvenSkipScenario(deps, FAST).run();
+  assert.equal(outcome.recovered, false);
+});
+
+test('spent-wal-no-proof: passes when no negative-margin loss is booked', async () => {
+  const deps = makeFakeDeps({
+    getNegativeMarginCount: async () => 0,
+    isFulfilled: async () => false,
+  });
+  const outcome = await spentWalNoProofScenario(deps, FAST).run();
+  assert.equal(outcome.recovered, true);
+  assert.ok(outcome.evidence.some((e) => /negative-margin alerts: 0 -> 0/.test(e)));
+});
+
+test('spent-wal-no-proof: fails when a stuck return books a negative margin', async () => {
+  let neg = 0;
+  const deps = makeFakeDeps({
+    submitIntent: async () => {
+      neg = 1; // simulate a (buggy) booked loss
+      return { intentId: '0xloss' };
+    },
+    getNegativeMarginCount: async () => neg,
+    isFulfilled: async () => false,
+  });
+  const outcome = await spentWalNoProofScenario(deps, FAST).run();
+  assert.equal(outcome.recovered, false);
+});
+
+test('allScenarios returns the nine scenarios in order', () => {
   const names = allScenarios(makeFakeDeps(), FAST).map((s) => s.name);
   assert.deepEqual(names, [
     'relayer-crash-midflight',
@@ -159,5 +211,7 @@ test('allScenarios returns the seven scenarios in order', () => {
     'walrus-epoch-rollover',
     'gas-spike-canary-skip',
     'deadline-expiry-skip',
+    'adverse-fx-break-even-skip',
+    'spent-wal-no-proof-no-loss',
   ]);
 });

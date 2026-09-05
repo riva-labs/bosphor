@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ethers } from 'ethers';
 import type { ChaosDeps } from './deps.ts';
-import { parseCanarySkipCount } from './metrics-parse.ts';
+import { parseCanarySkipCount, parseCounter } from './metrics-parse.ts';
 
 const exec = promisify(execFile);
 
@@ -69,6 +69,13 @@ export function makeRealDeps(): ChaosDeps {
   const dstEid = Number(process.env.SUI_EID) || 40378;
   const deadlineSeconds = Number(process.env.CHAOS_DEADLINE_SECONDS) || 14_400;
   const canaryMetricsUrl = process.env.CANARY_METRICS_URL || 'http://localhost:9300/metrics';
+  const relayerMetricsUrl = process.env.RELAYER_METRICS_URL || 'http://localhost:9090/metrics';
+
+  async function readRelayerCounter(metricName: string): Promise<number> {
+    const res = await fetch(relayerMetricsUrl);
+    if (!res.ok) throw new Error(`relayer /metrics returned ${res.status}`);
+    return parseCounter(await res.text(), metricName);
+  }
 
   const provider = new ethers.JsonRpcProvider(rpcUrl, undefined, { staticNetwork: true });
   const wallet = new ethers.Wallet(key, provider);
@@ -111,6 +118,14 @@ export function makeRealDeps(): ChaosDeps {
       if (!res.ok) throw new Error(`canary /metrics returned ${res.status}`);
       return parseCanarySkipCount(await res.text());
     },
+
+    // Never-lose-money fault injection + observation. FX skew is host-specific
+    // (a price-override endpoint or a pinned fixture), so it dispatches to an
+    // operator-supplied command; the counters come from the relayer's /metrics.
+    setFxAdverse: (adverse) =>
+      runShell(requireCmd('CHAOS_SET_FX_ADVERSE_CMD'), adverse ? 'on' : 'off').then(() => undefined),
+    getBreakEvenSkipCount: () => readRelayerCounter('bosphor_relayer_wal_spend_skipped_total'),
+    getNegativeMarginCount: () => readRelayerCounter('bosphor_relayer_intent_negative_margin_total'),
   };
 }
 

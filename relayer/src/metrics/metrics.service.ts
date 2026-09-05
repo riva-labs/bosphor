@@ -110,6 +110,42 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Never-lose-money accounting (M4). `intentNetMargin` is the net USD margin of
+  // the most recently settled intent (collected - spent); `intentSettled` counts
+  // settlements by result (completed vs skipped-by-guard); `negativeMargin` is the
+  // alert series that MUST stay flat at zero (a completed intent should never net
+  // negative given the break-even guard). `walSpendSkipped` counts guard skips.
+  private readonly intentNetMargin = new Gauge({
+    name: 'bosphor_relayer_intent_net_margin_usd',
+    help: 'Net USD margin (collected - spent) of the most recently settled intent',
+    registers: [this.registry],
+  });
+
+  private readonly intentMarginTotal = new Counter({
+    name: 'bosphor_relayer_intent_margin_usd_total',
+    help: 'Cumulative net USD margin across all completed intents',
+    registers: [this.registry],
+  });
+
+  private readonly intentSettled = new Counter({
+    name: 'bosphor_relayer_intent_settled_total',
+    help: 'Intents settled by the never-lose-money accounting, by result',
+    labelNames: ['result'] as const,
+    registers: [this.registry],
+  });
+
+  private readonly negativeMargin = new Counter({
+    name: 'bosphor_relayer_intent_negative_margin_total',
+    help: 'Completed intents that netted negative (alert: must stay 0)',
+    registers: [this.registry],
+  });
+
+  private readonly walSpendSkipped = new Counter({
+    name: 'bosphor_relayer_wal_spend_skipped_total',
+    help: 'Intents whose WAL spend was skipped by the break-even guard',
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -170,6 +206,25 @@ export class MetricsService {
   /** Record a durable-queue dead-letter (pre-store) or return-budget exhaustion. */
   recordDeadLetter(phase: 'pre_store' | 'return'): void {
     this.storeDeadLetter.inc({ phase });
+  }
+
+  /**
+   * Record the P&L of a completed intent: its net USD margin (collected - spent).
+   * Sets the last-margin gauge, adds to the cumulative counter, and trips the
+   * negative-margin alert if the intent somehow netted below zero.
+   */
+  recordIntentMargin(netUsd: number): void {
+    if (!Number.isFinite(netUsd)) return;
+    this.intentNetMargin.set(netUsd);
+    this.intentSettled.inc({ result: 'completed' });
+    if (netUsd >= 0) this.intentMarginTotal.inc(netUsd);
+    else this.negativeMargin.inc();
+  }
+
+  /** Record that the break-even guard skipped an intent's WAL spend (no loss, no charge). */
+  recordWalSpendSkipped(): void {
+    this.walSpendSkipped.inc();
+    this.intentSettled.inc({ result: 'skipped' });
   }
 
   /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */
