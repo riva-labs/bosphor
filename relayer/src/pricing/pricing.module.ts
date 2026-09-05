@@ -5,8 +5,11 @@ import { PriceOracle } from './price-oracle';
 import { PriceOracleConfig, SanityBounds } from './price-oracle.types';
 import { QuoteService } from './quote.service';
 import { QuoteController } from './quote.controller';
+import { PRICE_ORACLE } from './pricing.tokens';
 
-export const PRICE_ORACLE = 'PRICE_ORACLE';
+// Re-exported for back-compat; consumers should import from './pricing.tokens'
+// to avoid the module<->service import cycle.
+export { PRICE_ORACLE } from './pricing.tokens';
 
 // Chain-agnostic Pyth feed ids (hex, no 0x), pinned 2026-09-05.
 const DEFAULT_PYTH_FEEDS = {

@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WalrusService } from '../walrus/walrus.service';
-import { PRICE_ORACLE } from './pricing.module';
+import { PRICE_ORACLE } from './pricing.tokens';
 import { PriceOracle } from './price-oracle';
 import { OriginToken, Quote, QuoteConfig, QuoteEngine } from './quote-engine';
 

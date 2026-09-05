@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { MetricsService } from '../metrics/metrics.service';
 import { PnlEntry, PnlLedger, PnlSummary } from './pnl-ledger';
 
@@ -23,7 +23,9 @@ export class SettlementReconciler {
 
   constructor(
     private readonly metrics: MetricsService,
-    private readonly clock: () => number = () => Date.now(),
+    // Injectable clock for deterministic tests. @Optional so Nest does not try to
+    // resolve the bare Function type as a provider; the default applies at runtime.
+    @Optional() private readonly clock: () => number = () => Date.now(),
   ) {}
 
   /** Book a completed (proof-released) intent and its P&L. */

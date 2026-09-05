@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WalrusService } from '../walrus/walrus.service';
-import { PRICE_ORACLE } from '../pricing/pricing.module';
+import { PRICE_ORACLE } from '../pricing/pricing.tokens';
 import { PriceOracle } from '../pricing/price-oracle';
 import { evaluateBreakEven, BreakEvenDecision } from '../pricing/break-even-guard';
 import { OriginToken } from '../pricing/quote-engine';
