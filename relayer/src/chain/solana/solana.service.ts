@@ -20,6 +20,8 @@ import {
 const STORE_SEED = Buffer.from('store');
 /** PDA seed prefix for a per-intent IntentState account: `[b"intent", intentId]`. */
 const INTENT_SEED = Buffer.from('intent');
+/** PDA seed prefix for a per-intent EscrowVault account: `[b"escrow", intentId]`. */
+const ESCROW_SEED = Buffer.from('escrow');
 
 /** An `IntentSubmitted` event with the Solana transaction signature it came from. */
 export interface SolanaSubmittedEvent extends SolanaIntentSubmitted {
@@ -172,6 +174,32 @@ export class SolanaService implements OnModuleInit {
    * flag sits at byte offset 96. Returns false if the account is missing or the
    * read fails (caller then surfaces the original error).
    */
+  /**
+   * Read an intent's escrow vault (lamports escrowed + status) for the break-even
+   * guard. The EscrowVault account is
+   * `disc(8) ++ payer(32) ++ beneficiary(32) ++ amount(u64) ++ deadline(u64) ++
+   * status(u8) ++ bump(u8)`, so `amount` is at byte 72 and `status` at byte 88.
+   * Returns null when the vault does not exist (unpriced intent) or status is None,
+   * so the guard is simply not applied rather than failing the intent.
+   */
+  async getEscrow(intentId: string): Promise<{ amount: bigint; status: number } | null> {
+    if (!this.connection || !this.program) return null;
+    try {
+      const [escrowPda] = PublicKey.findProgramAddressSync(
+        [ESCROW_SEED, Buffer.from(getBytes(intentId))],
+        this.program,
+      );
+      const acc = await this.connection.getAccountInfo(escrowPda, 'confirmed');
+      if (!acc || acc.data.length < 90) return null;
+      const amount = acc.data.readBigUInt64LE(72);
+      const status = acc.data[88];
+      if (status === 0) return null; // None
+      return { amount, status };
+    } catch {
+      return null;
+    }
+  }
+
   private async isIntentExecuted(intentPda: PublicKey): Promise<boolean> {
     try {
       const acc = await this.connection!.getAccountInfo(intentPda, 'confirmed');
