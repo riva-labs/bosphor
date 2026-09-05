@@ -37,10 +37,10 @@ interface FakeChainOptions {
 function makeFakeChain(opts: FakeChainOptions = {}): {
   chain: SolanaChain;
   calls: { submit: number; read: number };
-  lastSubmit: { dstEid?: number; nativeFee?: bigint };
+  lastSubmit: { dstEid?: number; nativeFee?: bigint; escrowAmount?: bigint };
 } {
   const calls = { submit: 0, read: 0 };
-  const lastSubmit: { dstEid?: number; nativeFee?: bigint } = {};
+  const lastSubmit: { dstEid?: number; nativeFee?: bigint; escrowAmount?: bigint } = {};
   let readPolls = 0;
 
   const chain: SolanaChain = {
@@ -48,6 +48,7 @@ function makeFakeChain(opts: FakeChainOptions = {}): {
       calls.submit += 1;
       lastSubmit.dstEid = fields.dstEid;
       lastSubmit.nativeFee = fields.nativeFee;
+      if (fields.escrowAmount !== undefined) lastSubmit.escrowAmount = fields.escrowAmount;
       return { intentId: INTENT_ID, signature: SIGNATURE };
     },
     async readIntent(): Promise<SolanaIntentState | null> {
@@ -345,4 +346,57 @@ test("awaitProof() rejects with the abort reason when the signal fires mid-poll"
     () => client.awaitProof(INTENT_ID, { pollMs: 2, timeoutMs: 60_000, signal: ac.signal }),
     /stop waiting/,
   );
+});
+
+// --- Priced store flow (M4) -------------------------------------------------
+
+const SOL_QUOTE_BODY = JSON.stringify({
+  originToken: "SOL",
+  escrowNative: "20000000", // 0.02 SOL escrow bucket (lamports)
+  forwardNative: "5000",
+  totalNative: "20005000",
+  breakdown: {
+    walCostUsd: 0.001,
+    returnLzUsd: 1.4,
+    suiGasUsd: 0.008,
+    forwardLzUsd: 0.0005,
+    originGasUsd: 0,
+    bufferedEscrowUsd: 1.78,
+    serviceMarginUsd: 0.27,
+    escrowUsd: 2.05,
+    forwardUsd: 0.0005,
+    totalUsd: 2.05,
+    floorApplied: false,
+  },
+});
+
+function makePricedFetch(): FetchLike {
+  return async (url) => {
+    const isQuote = url.endsWith("/quote");
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return isQuote ? SOL_QUOTE_BODY : "";
+      },
+    };
+  };
+}
+
+test("storePriced() (Solana) surfaces the quote and escrows the bucket at submit", async () => {
+  const { chain, lastSubmit } = makeFakeChain();
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makePricedFetch(),
+  });
+
+  const result = await client.storePriced(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+
+  assert.equal(result.intentId, INTENT_ID);
+  assert.equal(result.quote.escrowNative, 20000000n);
+  // The escrow amount was passed to submit_intent (deposited into the vault).
+  assert.equal(lastSubmit.escrowAmount, 20000000n);
 });

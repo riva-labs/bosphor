@@ -86,9 +86,31 @@ result. Every step is verified against on-chain state before `store()` resolves.
 Nothing is fabricated: a relayer rejection throws `RelayerUploadError` with the
 relayer's reason, and an intent that never executes throws `ProofTimeoutError`.
 
+### Paying for storage
+
+`storePriced()` is the user-pays flow: it fetches a single all-in origin-native
+quote from the relayer (WAL + Sui gas + return leg, buffered, plus the forward LZ
+fee), surfaces the USD breakdown, pays the escrow plus the forward fee at submit,
+and awaits the proof that releases the escrow to the relayer. If the proof never
+lands, the deposit refunds to the payer after the deadline.
+
+```ts
+// Preview the quote, then pay in one call. Works the same on EVM and Solana.
+const encoded = await client.encode(fileBytes, { epochs: 5 });
+const quote = await client.priceQuote(encoded);
+console.log(quote.totalNative, quote.breakdown.totalUsd);
+
+const { intentId, blobId, endEpoch, quote: used } = await client.storePriced(
+  fileBytes,
+  { epochs: 5 },
+);
+```
+
+See `examples/store-file-priced.evm.ts` and `examples/store-file-priced.solana.ts`.
+
 ### Lower-level escape hatches
 
-The steps `store()` orchestrates are all public:
+The steps `store()` and `storePriced()` orchestrate are all public:
 
 ```ts
 const encoded = await client.encode(fileBytes, { epochs: 5 });
@@ -99,6 +121,7 @@ const { blobId, endEpoch } = await client.awaitProof(intentId, {
   timeoutMs: 300_000,
   pollMs: 3_000,
 });
+// Or, for the priced path: priceQuote() -> submitPaid() -> upload() -> awaitProof().
 ```
 
 ### Blob-id computation

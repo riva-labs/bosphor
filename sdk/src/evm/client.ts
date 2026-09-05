@@ -14,6 +14,7 @@
 import type { ComputeBlob, Hex, StoreResult } from "../types.js";
 import { createDefaultComputeBlob, type WalrusNetwork } from "../blob.js";
 import { ProofTimeoutError } from "../errors.js";
+import { fetchQuote, type PricedQuote } from "../quote.js";
 import {
   DEFAULT_EPOCHS,
   DEFAULT_DEADLINE_SECONDS,
@@ -199,11 +200,56 @@ export class BosphorEvmClient {
   }
 
   /**
+   * Fetch an all-in priced quote from the relayer for this intent: the forward
+   * LayerZero fee (read from the adapter) plus the relayer-fronted escrow bucket,
+   * as one origin-native amount with a full USD breakdown. This is the number the
+   * user pays; the escrow adapter keeps only the LZ fee and escrows the rest.
+   */
+  async priceQuote(
+    encoded: EncodedIntent,
+    opts: { signal?: AbortSignal | undefined } = {},
+  ): Promise<PricedQuote> {
+    const fee = await this.quote(encoded);
+    return fetchQuote(
+      this.relayerUrl,
+      {
+        sizeBytes: encoded.size,
+        epochs: encoded.storageEpochs,
+        originToken: "ETH",
+        // The forward LZ fee is user-direct (spent by _lzSend). Origin gas is the
+        // tx gas the wallet pays separately, NOT msg.value, so it is not included.
+        forwardLzFeeNative: fee.nativeFee,
+      },
+      { fetch: this.fetchFn, ...(opts.signal ? { signal: opts.signal } : {}) },
+    );
+  }
+
+  /**
+   * Submit the intent on-chain paying the all-in priced quote: `msg.value` is the
+   * escrow bucket plus the forward LZ fee. The escrow adapter forwards only the
+   * LZ fee to the endpoint and escrows the surplus, keyed by intent id.
+   */
+  async submitPaid(
+    encoded: EncodedIntent,
+    quote: PricedQuote,
+  ): Promise<{ intentId: Hex; txHash: string }> {
+    return this.submitWithValue(encoded, quote.escrowNative + quote.forwardNative);
+  }
+
+  /**
    * Submit the intent on-chain, attaching `fee.nativeFee` as native value. Returns
    * the intent id read from the `IntentSubmitted` event and the origin transaction
    * hash. Fails loudly if the receipt yields no intent id.
    */
   async submit(encoded: EncodedIntent, fee: MessagingFee): Promise<{ intentId: Hex; txHash: string }> {
+    return this.submitWithValue(encoded, fee.nativeFee);
+  }
+
+  /** Shared submit path: attach `value` as native and extract the intent id. */
+  private async submitWithValue(
+    encoded: EncodedIntent,
+    value: bigint,
+  ): Promise<{ intentId: Hex; txHash: string }> {
     const tx = await this.adapter.submitIntent(
       this.dstEid,
       encoded.blobId,
@@ -212,7 +258,7 @@ export class BosphorEvmClient {
       encoded.storageEpochs,
       encoded.deadline,
       this.options,
-      { value: fee.nativeFee },
+      { value },
     );
 
     const receipt = await tx.wait();
@@ -305,6 +351,26 @@ export class BosphorEvmClient {
     await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
     return { intentId, blobId, endEpoch, txHash };
+  }
+
+  /**
+   * One-call PRICED flow (the M4 user-pays path):
+   *   encode -> priceQuote -> submitPaid -> upload -> awaitProof
+   * The user pays the single all-in quote at submit; the escrow releases to the
+   * relayer only on the proof. Returns the verified result plus the `quote` used,
+   * so a caller can surface the breakdown. Every step fails loudly.
+   */
+  async storePriced(
+    data: Uint8Array,
+    opts: EncodeOptions & AwaitProofOptions = {},
+  ): Promise<StoreResult & { quote: PricedQuote }> {
+    opts.signal?.throwIfAborted();
+    const encoded = await this.encode(data, opts);
+    const quote = await this.priceQuote(encoded, { signal: opts.signal });
+    const { intentId, txHash } = await this.submitPaid(encoded, quote);
+    await this.upload(intentId, data, { signal: opts.signal });
+    const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    return { intentId, blobId, endEpoch, txHash, quote };
   }
 
   /**
