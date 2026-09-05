@@ -27,6 +27,7 @@ const sidebars: SidebarsConfig = {
       label: 'Integrate',
       collapsed: false,
       items: [
+        'payment-flow',
         'contract-interface',
         'integration-checklist',
         'dapp-tutorial',

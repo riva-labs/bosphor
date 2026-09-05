@@ -74,6 +74,41 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 
 The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
 
+## Quote (pricing)
+
+From Milestone 4 a store is paid. The relayer is the single pricing source of
+truth (contracts hold no oracle), exposed as a quote endpoint. See the
+[payment flow](./payment-flow.md) for the full model.
+
+### `POST {relayerBaseUrl}/quote`
+
+Body (JSON): `sizeBytes` (number), `originToken` (`"ETH"` or `"SOL"`), and
+optional `epochs`, `forwardLzFeeNative` (decimal string, from the on-chain
+adapter quote), `originGasNative` (decimal string).
+
+```bash
+curl -s https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1048576,"originToken":"ETH","forwardLzFeeNative":"1211000000000000"}'
+```
+
+Response, bigint amounts are decimal strings so no precision is lost:
+
+```json
+{
+  "originToken": "ETH",
+  "escrowNative": "821243000000000",
+  "forwardNative": "1211000000000000",
+  "totalNative": "2032243000000000",
+  "breakdown": { "escrowUsd": 2.05, "totalUsd": 5.18, "floorApplied": false }
+}
+```
+
+`totalNative` is your `msg.value` at submit (`escrowNative + forwardNative`). If
+every price source fails or a price is stale/implausible, the endpoint fails loud
+rather than returning a fabricated quote. The SDK wraps this as
+`client.priceQuote()` / `client.storePriced()`.
+
 ## Blob ingest (out-of-band)
 
 This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.

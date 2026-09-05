@@ -4,6 +4,36 @@ title: Changelog
 
 # Changelog
 
+## Milestone 4: Payment Flow & Integration Hardening
+
+Storing becomes a paid operation: the relayer stops fronting the Walrus cost, and
+users escrow payment on the origin chain, released by the trustless LayerZero
+proof.
+
+### Added
+
+- **Origin-chain payment flow**: the EVM `BosphorEscrowAdapter` and a Solana
+  escrow vault escrow the user's payment at submit, release it to the relayer on
+  a genuine proof, and refund the payer after a deadline. See [Payment flow](payment-flow.md)
+  and the [contract interface](contract-interface.md).
+
+- **Off-chain quoting**: a relayer `POST /quote` endpoint and the SDK
+  `client.storePriced()` / `priceQuote()` surface a single all-in origin-native
+  amount plus a USD breakdown, priced from a multi-source oracle (Pyth Hermes +
+  CoinGecko) with staleness and sanity bounds. See [Public API](public-api.md).
+
+- **Never lose money**: a relayer break-even guard recomputes cost at live prices
+  before any WAL spend and skips unprofitable intents (which then refund), with a
+  per-intent profit-and-loss ledger and a negative-margin alert.
+
+- **Sub-3s processing + benchmarks**: an event-driven store-queue drain and a
+  benchmark harness reporting p50/p95/p99 relayer processing latency (distinct
+  from the LayerZero round-trip).
+
+- **USDC/CCTP scaffolding**: an opt-in USDC deposit via a Permit2 witness bound to
+  the intent id, with CCTP settlement scaffolding behind mocks (live wiring is a
+  fast-follow).
+
 ## v0.2.0, Milestone 2: Proof Validation & System Stabilization
 
 Operational hardening of the cross-chain pipeline: live monitoring, continuous validation, a public data surface, and resilience improvements.
