@@ -41,3 +41,14 @@ pub struct IntentExecuted {
     /// Source LayerZero endpoint id the proof arrived from.
     pub src_eid: u32,
 }
+
+/// Emitted when an intent's escrow is refunded to its payer after the deadline.
+#[event]
+pub struct EscrowRefunded {
+    /// Canonical intent id whose escrow was refunded.
+    pub intent_id: [u8; 32],
+    /// The payer who received the refund.
+    pub payer: Pubkey,
+    /// Escrowed lamports returned (excludes the vault rent, also returned).
+    pub amount: u64,
+}

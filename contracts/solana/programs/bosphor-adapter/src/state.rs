@@ -88,3 +88,28 @@ pub struct IntentState {
     /// Bump for the intent PDA.
     pub bump: u8,
 }
+
+/// Per-intent escrow vault PDA (`[b"escrow", intent_id]`).
+///
+/// A program-owned account that custodies the user's SOL payment for one intent.
+/// The escrowed lamports sit on top of the account's own rent; a release or
+/// refund moves exactly `amount` and leaves the rent, which is returned when the
+/// account is closed. Release is gated on a genuine proof (recorded in
+/// `lz_receive` after the endpoint clear); refund is permissionless after the
+/// deadline. The status makes both transitions one-shot (no double release/refund).
+#[account]
+#[derive(InitSpace)]
+pub struct EscrowVault {
+    /// The account that funded the escrow and receives any refund.
+    pub payer: Pubkey,
+    /// The relayer beneficiary credited on a proof-driven release.
+    pub beneficiary: Pubkey,
+    /// Escrowed lamports (excludes the account's rent).
+    pub amount: u64,
+    /// Deadline as unix seconds; after it, anyone may refund the payer.
+    pub deadline: u64,
+    /// 0 = Pending, 1 = Released, 2 = Refunded (see escrow status constants).
+    pub status: u8,
+    /// Bump for the escrow PDA.
+    pub bump: u8,
+}

@@ -1,13 +1,15 @@
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use bosphor_commitment_codec::{derive_intent_id, Commitment};
 use oapp::endpoint::{instructions::SendParams as EndpointSendParams, MessagingReceipt};
 
 use crate::{
-    constants::{INTENT_SEED, NONCE_SEED, PEER_SEED, STORE_SEED},
+    constants::{ESCROW_SEED, INTENT_SEED, NONCE_SEED, PEER_SEED, STORE_SEED},
     error::BosphorError,
+    escrow::ESCROW_PENDING,
     events::IntentSubmitted,
     message::encode_forward,
-    state::{IntentState, Peer, SenderNonce, Store},
+    state::{EscrowVault, IntentState, Peer, SenderNonce, Store},
 };
 
 /// Builds the canonical commitment from raw instruction args.
@@ -86,6 +88,28 @@ pub struct SubmitIntent<'info> {
     )]
     pub intent: Account<'info, IntentState>,
 
+    /// Per-intent escrow vault PDA. Holds the user's SOL payment (deposited from
+    /// `payer`) until release on a proof or refund after the deadline.
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + EscrowVault::INIT_SPACE,
+        seeds = [
+            ESCROW_SEED,
+            &compute_intent_id(
+                blob_id,
+                size,
+                encoding_type,
+                storage_epochs,
+                deadline,
+                &payer.key(),
+                sender_nonce.nonce
+            )
+        ],
+        bump
+    )]
+    pub escrow: Account<'info, EscrowVault>,
+
     /// The OApp store; it is the LayerZero "sender" and PDA-signs the endpoint
     /// `send` CPI.
     #[account(
@@ -124,6 +148,7 @@ pub fn handle_submit_intent(
     dst_eid: u32,
     options: Vec<u8>,
     native_fee: u64,
+    escrow_amount: u64,
 ) -> Result<()> {
     let sender = ctx.accounts.payer.key();
     let nonce = ctx.accounts.sender_nonce.nonce;
@@ -147,6 +172,31 @@ pub fn handle_submit_intent(
     let sender_nonce = &mut ctx.accounts.sender_nonce;
     sender_nonce.nonce = nonce.checked_add(1).ok_or(BosphorError::NonceOverflow)?;
     sender_nonce.bump = ctx.bumps.sender_nonce;
+
+    // Record the escrow (Pending) and deposit the payment into its vault. The
+    // beneficiary is the store admin (the relayer authority); release is gated on
+    // a genuine proof in `lz_receive`, never on this address.
+    {
+        let escrow = &mut ctx.accounts.escrow;
+        escrow.payer = sender;
+        escrow.beneficiary = ctx.accounts.store.admin;
+        escrow.amount = escrow_amount;
+        escrow.deadline = deadline;
+        escrow.status = ESCROW_PENDING;
+        escrow.bump = ctx.bumps.escrow;
+    }
+    if escrow_amount > 0 {
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.payer.to_account_info(),
+                    to: ctx.accounts.escrow.to_account_info(),
+                },
+            ),
+            escrow_amount,
+        )?;
+    }
 
     // Dispatch the forward leg via the LayerZero v2 endpoint. The Store PDA is the
     // sender and PDA-signs the CPI.

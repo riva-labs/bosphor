@@ -38,3 +38,11 @@ pub const LZ_RECEIVE_TYPES_SEED: &[u8] = oapp::LZ_RECEIVE_TYPES_SEED;
 /// Sui testnet LayerZero endpoint id. The Sui receiver peer is registered here.
 #[constant]
 pub const SUI_TESTNET_EID: u32 = 40378;
+
+/// Seed prefix for the per-intent `EscrowVault` PDA: `[b"escrow", intent_id]`.
+///
+/// The vault is a program-owned account keyed by the canonical intent id. It
+/// holds the user's SOL payment (on top of its own rent) from submit until the
+/// intent is released on a genuine proof or refunded after the deadline.
+#[constant]
+pub const ESCROW_SEED: &[u8] = b"escrow";
