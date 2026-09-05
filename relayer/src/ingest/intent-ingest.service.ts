@@ -5,6 +5,7 @@ import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { StagedIntentStore } from '../staged/staged-intent.store';
 import { IngestRejected, IngestResult } from './intent-ingest.types';
 import { blobIdMatches } from '../common/walrus-blob-id';
+import { StoreQueueWaker } from '../common/store-queue-waker';
 
 /**
  * Binds out-of-band bytes to an on-chain commitment.
@@ -34,6 +35,9 @@ export class IntentIngest {
     // nowhere durable to persist, and the processor is likewise inert. Explicit
     // @Inject token because the `| null` union erases DI type metadata.
     @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
+    // Nudge the store queue to drain as soon as bytes land, instead of waiting
+    // for the poll. Optional: without it the poll still drains the queue.
+    @Optional() @Inject(StoreQueueWaker) private readonly waker: StoreQueueWaker | null = null,
   ) {
     this.maxIngestBytes = this.config.get<number>('MAX_INGEST_BLOB_BYTES') ?? 10_485_760;
     this.maxStagedBytes = this.config.get<number>('MAX_STAGED_BYTES') ?? 268_435_456;
@@ -130,6 +134,9 @@ export class IntentIngest {
           `staged bytes + ${bytes.length} would exceed MAX_STAGED_BYTES ${this.maxStagedBytes}`,
         );
       }
+      // Bytes are staged: nudge the processor to drain now (the row is ready if
+      // IntentReceived already fired). A no-op if received is not in yet.
+      this.waker?.wake();
     }
     this.logger.log(
       `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (staged for store)`,

@@ -96,6 +96,7 @@ function build(rows: StagedIntentRow[] = [], cfgOverrides: Record<string, number
   const metrics = {
     recordIntentProcessed: jest.fn(),
     observeWalrusUpload: jest.fn(),
+    observeProcessingLatency: jest.fn(),
     recordWalStorageCost: jest.fn(),
     recordLzSend: jest.fn(),
     recordReturnMode: jest.fn(),
@@ -168,6 +169,11 @@ describe('IntentProcessor durable queue', () => {
       srcEid: 40161,
       nonce: 1n,
     } as never);
+
+    // Event-driven wake: IntentReceived schedules a prompt drain rather than
+    // waiting out the poll interval.
+    await new Promise((r) => setImmediate(r));
+    expect(staged.drainDue).toHaveBeenCalled();
 
     expect(staged.markReceived).toHaveBeenCalledWith('0xintent', {
       srcEid: 40161,

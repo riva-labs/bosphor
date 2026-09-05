@@ -14,11 +14,13 @@ import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
 import { StagedModule } from './staged/staged.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { WakerModule } from './common/waker.module';
 
 @Module({
   imports: [
     AppConfigModule,
     ScheduleModule.forRoot(),
+    WakerModule,
     ObservabilityModule,
     MetricsModule,
     LifecycleModule,

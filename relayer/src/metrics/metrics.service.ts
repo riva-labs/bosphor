@@ -146,6 +146,17 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Relayer PROCESSING latency per intent, in seconds: from when the relayer
+  // begins storing (observed ready) to store completion. This is the relayer's
+  // own reaction time, deliberately distinct from the full LayerZero round-trip
+  // (which is DVN/executor-bound, minutes). The M4 <3s target is measured here.
+  private readonly processingLatency = new Histogram({
+    name: 'bosphor_relayer_processing_latency_seconds',
+    help: 'Relayer processing latency (observe to work-complete), NOT the LZ round-trip',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 10, 30],
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -219,6 +230,15 @@ export class MetricsService {
     this.intentSettled.inc({ result: 'completed' });
     if (netUsd >= 0) this.intentMarginTotal.inc(netUsd);
     else this.negativeMargin.inc();
+  }
+
+  /**
+   * Record the relayer's processing latency for one intent, in seconds (observe
+   * to work-complete). This is the relayer's own reaction time, NOT the full
+   * cross-chain LayerZero round-trip.
+   */
+  observeProcessingLatency(seconds: number): void {
+    if (Number.isFinite(seconds) && seconds >= 0) this.processingLatency.observe(seconds);
   }
 
   /** Record that the break-even guard skipped an intent's WAL spend (no loss, no charge). */
