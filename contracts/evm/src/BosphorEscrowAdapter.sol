@@ -5,6 +5,7 @@ import { OApp, Origin, MessagingFee } from "@layerzerolabs/oapp-evm/contracts/oa
 import { IBosphorAdapter } from "./interfaces/IBosphorAdapter.sol";
 import { CommitmentCodec } from "./CommitmentCodec.sol";
 import { EscrowVault } from "./EscrowVault.sol";
+import { ISignatureTransfer } from "./interfaces/ISignatureTransfer.sol";
 
 /// @title BosphorEscrowAdapter
 /// @author Riva Labs
@@ -29,9 +30,19 @@ contract BosphorEscrowAdapter is OApp, EscrowVault, IBosphorAdapter {
     mapping(bytes32 => uint256) public intentDeadlines;
     mapping(address => uint256) public nonces;
 
+    /// @notice Permit2 for the opt-in USDC deposit path. Zero until configured;
+    ///         the native path is the default and never touches it.
+    ISignatureTransfer public permit2;
+
+    /// @notice Permit2 witness type string binding a deposit to its intent id.
+    string public constant PERMIT2_WITNESS_TYPE_STRING =
+        "BosphorIntent witness)BosphorIntent(bytes32 intentId)TokenPermissions(address token,uint256 amount)";
+
     // --- Errors ---
     /// @notice Thrown when msg.value does not cover the LayerZero messaging fee.
     error InsufficientPayment();
+    /// @notice Thrown when the USDC deposit path is used before Permit2 is configured.
+    error Permit2NotConfigured();
 
     // --- Constructor ---
     /// @param _endpoint Address of the LayerZero EndpointV2 on this chain.
@@ -128,6 +139,39 @@ contract BosphorEscrowAdapter is OApp, EscrowVault, IBosphorAdapter {
         } else {
             revert UnknownMessageType();
         }
+    }
+
+    // --- USDC deposit (opt-in, mocks now; live wiring deferred) ---
+    /// @notice Configure the Permit2 contract for the USDC deposit path.
+    function setPermit2(address _permit2) external onlyOwner {
+        permit2 = ISignatureTransfer(_permit2);
+    }
+
+    /// @notice Open a USDC escrow for an intent via a Permit2 witness transfer.
+    /// @dev The intent id is passed as the Permit2 witness, so the user's signature
+    ///      authorizes the pull ONLY for this intent. The pulled USDC is escrowed
+    ///      and released/refunded through the same proof-gated lifecycle as native.
+    ///      This is opt-in; the native path is the default. Live testnet wiring
+    ///      (a USDC submitIntent variant that also sends the LZ message) is deferred.
+    function depositUsdcWithPermit2(
+        bytes32 _intentId,
+        uint64 _deadline,
+        ISignatureTransfer.PermitTransferFrom calldata _permit,
+        bytes calldata _signature
+    ) external {
+        if (address(permit2) == address(0)) revert Permit2NotConfigured();
+        permit2.permitWitnessTransferFrom(
+            _permit,
+            ISignatureTransfer.SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: _permit.permitted.amount
+            }),
+            msg.sender,
+            _intentId,
+            PERMIT2_WITNESS_TYPE_STRING,
+            _signature
+        );
+        _openTokenEscrow(_intentId, msg.sender, _permit.permitted.token, _permit.permitted.amount, _deadline);
     }
 
     // --- Refund ---

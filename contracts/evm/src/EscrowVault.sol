@@ -2,6 +2,8 @@
 pragma solidity ^0.8.24;
 
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @title EscrowVault
 /// @author Riva Labs
@@ -15,6 +17,8 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuar
 ///      under a reentrancy guard. This slice whitelists the native token only;
 ///      the `token` field is carried for the USDC fast-follow.
 abstract contract EscrowVault is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     /// @notice Lifecycle of an escrowed payment.
     enum EscrowStatus {
         None,
@@ -41,6 +45,9 @@ abstract contract EscrowVault is ReentrancyGuard {
     /// @notice Native balance each address may `withdraw()` (pull payment).
     mapping(address => uint256) public withdrawable;
 
+    /// @notice ERC20 balance each address may `withdrawToken()` (token => addr => amount).
+    mapping(address => mapping(address => uint256)) public withdrawableToken;
+
     // --- Events ---
 
     /// @notice Emitted when a payment is escrowed at submit time.
@@ -54,6 +61,9 @@ abstract contract EscrowVault is ReentrancyGuard {
 
     /// @notice Emitted when an address withdraws its accrued native balance.
     event Withdrawn(address indexed to, uint256 amount);
+
+    /// @notice Emitted when an address withdraws an accrued ERC20 balance.
+    event WithdrawnToken(address indexed token, address indexed to, uint256 amount);
 
     // --- Errors ---
 
@@ -81,16 +91,33 @@ abstract contract EscrowVault is ReentrancyGuard {
         emit EscrowOpened(_intentId, _payer, NATIVE_TOKEN, _amount, _deadline);
     }
 
+    /// @notice Open an ERC20 escrow for an intent. The caller must already have
+    ///         received `amount` of `token` into this contract (e.g. via a Permit2
+    ///         witness transfer bound to the intent id).
+    function _openTokenEscrow(
+        bytes32 _intentId,
+        address _payer,
+        address _token,
+        uint256 _amount,
+        uint64 _deadline
+    ) internal {
+        if (_token == NATIVE_TOKEN) revert UnsupportedToken();
+        if (escrows[_intentId].status != EscrowStatus.None) revert EscrowAlreadyExists();
+        escrows[_intentId] =
+            Escrow({ payer: _payer, token: _token, amount: _amount, deadline: _deadline, status: EscrowStatus.Pending });
+        emit EscrowOpened(_intentId, _payer, _token, _amount, _deadline);
+    }
+
     /// @notice Release a pending escrow to a beneficiary (credited for pull withdrawal).
     /// @dev Effects (status + credit) happen before the event; no value moves here, so
-    ///      double-release is impossible once status leaves Pending.
+    ///      double-release is impossible once status leaves Pending. Native and ERC20
+    ///      escrows credit their respective pull-payment ledgers.
     function _releaseEscrow(bytes32 _intentId, address _to) internal {
         Escrow storage e = escrows[_intentId];
         if (e.status != EscrowStatus.Pending) revert EscrowNotPending();
         e.status = EscrowStatus.Released;
-        uint256 amount = e.amount;
-        withdrawable[_to] += amount;
-        emit EscrowReleased(_intentId, _to, amount);
+        _credit(e.token, _to, e.amount);
+        emit EscrowReleased(_intentId, _to, e.amount);
     }
 
     /// @notice Refund a pending escrow to its payer once the deadline has passed.
@@ -99,9 +126,14 @@ abstract contract EscrowVault is ReentrancyGuard {
         if (e.status != EscrowStatus.Pending) revert EscrowNotPending();
         if (block.timestamp <= e.deadline) revert DeadlineNotReached();
         e.status = EscrowStatus.Refunded;
-        uint256 amount = e.amount;
-        withdrawable[e.payer] += amount;
-        emit EscrowRefunded(_intentId, e.payer, amount);
+        _credit(e.token, e.payer, e.amount);
+        emit EscrowRefunded(_intentId, e.payer, e.amount);
+    }
+
+    /// @dev Credit the right pull-payment ledger for a native or ERC20 escrow.
+    function _credit(address _token, address _to, uint256 _amount) private {
+        if (_token == NATIVE_TOKEN) withdrawable[_to] += _amount;
+        else withdrawableToken[_token][_to] += _amount;
     }
 
     // --- Pull payment ---
@@ -115,6 +147,16 @@ abstract contract EscrowVault is ReentrancyGuard {
         (bool ok,) = payable(msg.sender).call{ value: amount }("");
         if (!ok) revert TransferFailed();
         emit Withdrawn(msg.sender, amount);
+    }
+
+    /// @notice Withdraw the caller's accrued balance of an ERC20 token.
+    /// @dev CEI under nonReentrant: zero the credit before the token transfer.
+    function withdrawToken(address _token) external nonReentrant {
+        uint256 amount = withdrawableToken[_token][msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
+        withdrawableToken[_token][msg.sender] = 0;
+        IERC20(_token).safeTransfer(msg.sender, amount);
+        emit WithdrawnToken(_token, msg.sender, amount);
     }
 
     // --- Views ---
