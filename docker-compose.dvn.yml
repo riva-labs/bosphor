@@ -2,11 +2,14 @@
 # scrape them by service name (dvn-evm:9301, dvn-solana:9302). The DVN lives in a
 # SEPARATE repo at ../bosphor-dvn (host-specific path + its own secrets), so this
 # overlay is only usable on a host that has it checked out, exactly like the
-# testnet-relayer overlay. One image, two entrypoints.
+# testnet-relayer overlay. One image, three entrypoints: two forward workers
+# (evm->sui, solana->sui) plus the sui->evm RETURN worker that verifies+executes
+# the relayer's lz_send_proof on Sepolia (required for M4 escrow release; M3 used
+# the owner confirmExecution fallback, which the M4 adapter makes non-releasing).
 #
 # Deploy alongside the rest of the stack so they share the network:
 #   docker compose -f docker-compose.yml -f docker-compose.hosting.yml \
-#     -f docker-compose.dvn.yml up -d --build dvn-evm dvn-solana
+#     -f docker-compose.dvn.yml up -d --build dvn-evm dvn-solana dvn-evm-return
 #
 # IMPORTANT: stop any host-process DVN first. Two DVNs on one pathway race to
 # verify+commit the same nonce and collide on Sui object versions.
@@ -39,6 +42,27 @@ services:
       - dvn-state:/data
     ports:
       - "9302:9302"
+    restart: unless-stopped
+
+  # Sui -> Sepolia RETURN worker. Watches the Sui endpoint's PacketSentEvent for
+  # the relayer's lz_send_proof, then verify + commitVerification + lzReceive on
+  # Sepolia (as DVN + executor, EOA 0x9665). This is what releases the M4 escrow.
+  # No metrics server and no cursor file: it re-scans Sui each poll and skips
+  # nonces < RETURN_MIN_NONCE (strict). RUN=1 makes it actually send (else
+  # dry-run). MIN_NONCE=2 skips the already-delivered return nonce 1 (re-touching
+  # an executed nonce re-sends a wasted verify tx every poll); bump it past the
+  # highest already-delivered return nonce after each manual one-shot recovery.
+  dvn-evm-return:
+    build: ../bosphor-dvn
+    container_name: bosphor-dvn-evm-return
+    command: ["npm", "run", "return"]
+    env_file: ../bosphor-dvn/.env
+    environment:
+      - DVN_STATE_DIR=/data
+      - RUN=1
+      - RETURN_MIN_NONCE=2
+    volumes:
+      - dvn-state:/data
     restart: unless-stopped
 
 volumes:
