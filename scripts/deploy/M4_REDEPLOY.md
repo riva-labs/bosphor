@@ -79,14 +79,30 @@ DVN's in-order queue (they fail `EOnlyPeer`, code 6, forever).
    adapter, keep it stopped until the end.
 2. **Point the DVN at the new adapter.** Set `EVM_ADAPTER_ADDRESS` = new adapter
    in `bosphor-dvn/.env` (it governs BOTH the forward watch and the return-leg
-   verify/execute), then restart both DVN workers. Rewind its EVM cursor
-   (`cursor-*.json` under `DVN_STATE_DIR`) if the first new intent predates the
-   restart.
+   verify/execute), then recreate both forward DVN workers (env_file is read at
+   container start, so `up -d --force-recreate`, not `restart`).
+   **Rewind the EVM forward cursor** (`/data/cursor-evm_sui.json` in the
+   `dvn-state` volume) to just before the new adapter's FIRST `PacketSent` block.
+   This is MANDATORY whenever the new adapter already emitted any packets before
+   the cursor (e.g. earlier failed deploy attempts): the Sui channel clears
+   inbound nonces strictly in order, so an unseen early nonce head-of-line-blocks
+   every later one with `messaging_channel::clear_payload` abort code 4
+   (`EInvalidNonce`) forever. Find the first block with
+   `IntentSubmitted` on the new adapter and set the cursor below it.
 3. **Set the new adapter's EVM receive-ULN required DVN** to the operator EOA
-   (`0x9665…`, `endpoint.setConfig` on `EVM_RECEIVE_ULN302`), matching the old
-   adapter, so return proofs (Sui -> EVM) are verifiable. Without this the escrow
-   never releases. (No ready script yet - this is the main gap in
-   `deploy-evm-escrow.ts`; write a `set-evm-receive-uln` helper.)
+   (`0x9665…`), matching the old adapter, so return proofs (Sui -> EVM) are
+   verifiable. Without this the escrow never releases. Use the helper (dry-run by
+   default, `--apply` to broadcast; it mirrors the old adapter's config exactly):
+   `BOSPHOR_ENV_FILE=relayer/.env.testnet npx tsx scripts/util/set-evm-receive-uln.ts [--apply]`
+3b. **Run the continuous Sui -> EVM RETURN worker** (`dvn-evm-return` in
+   `docker-compose.dvn.yml`, `npm run return` + `RUN=1`). CRITICAL and easy to
+   miss: the M4 adapter's `confirmExecution` is NON-releasing, so the escrow
+   releases ONLY on a genuine LZ `_lzReceive`. The relayer sends the proof via
+   `lz_send_proof` on Sui; this worker verifies + `commitVerification` +
+   `lzReceive` on Sepolia (EOA `0x9665`) to release it. M3 did not need this (its
+   `confirmExecution` released), so it was never containerized before M4. Set
+   `RETURN_MIN_NONCE` past the highest already-delivered return nonce to avoid a
+   wasted verify tx each poll. For a stuck one-off, `npm run return-one -- <sui-digest>`.
 4. **Sui side:** the OApp (`SUI_LZ_OAPP_ID`) is shared, so its send/receive ULN
    already uses our DVN - only the peer changes. Set `sui set_peer(40161, new
    adapter)` LAST, after the old queue is drained. (`npm run wire`.)
