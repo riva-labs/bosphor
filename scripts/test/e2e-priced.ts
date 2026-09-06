@@ -59,7 +59,10 @@ const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, { staticNetw
 const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
 const adapter = new ethers.Contract(ADAPTER_ADDRESS, ESCROW_ABI, wallet);
 (adapter as unknown as { queryProof?: unknown }).queryProof = async (intentId: Hex) => {
-  const logs = await adapter.queryFilter(adapter.filters.IntentExecuted(intentId));
+  // Bound the log scan to a recent window: public RPCs (e.g. publicnode Sepolia)
+  // reject eth_getLogs spanning more than 50000 blocks, and a fresh intent is
+  // always within the last few. Mirrors the SDK's fromEthersContract lookback.
+  const logs = await adapter.queryFilter(adapter.filters.IntentExecuted(intentId), -45000);
   const last = logs[logs.length - 1];
   return last ? ((adapter.interface.parseLog(last)?.args?.proof as Hex) ?? null) : null;
 };
