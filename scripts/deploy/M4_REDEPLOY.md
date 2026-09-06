@@ -64,13 +64,42 @@ No new PDAs are pre-created: escrow vault PDAs are created per intent at submit.
 Re-run `scripts/solana` `init-store` / `set-peer` only if the store/peer config
 was reset.
 
-## Step 4: Rewire peers, DVN, executor
+## Step 4: Rewire peers, DVN, executor  (CRITICAL - learned the hard way 2026-09-06)
 
-- EVM -> Sui peer: set in Step 2 (or `npm run wire`).
-- Sui -> EVM peer: set the Sui peer to the NEW `EVM_ESCROW_ADAPTER_ADDRESS`
-  (bytes32-padded) via the Sui set-peer path.
-- Solana <-> Sui peers: unchanged (same program id); re-verify with `scripts/solana` `set-peer` if needed.
-- DVN + executor: unchanged from M3 (self-DVN on testnet).
+The self-built DVN/executor is bound to a specific EVM adapter and does NOT fall
+back to LZ defaults (the LZ-Labs Sui-testnet DVN is dead). A fresh adapter has
+NO messaging config, so nothing verifies its packets until you wire all of this.
+Do it in THIS order, and do NOT flip the Sui receive-peer until the old pathway
+is quiet, or in-flight old-adapter messages orphan and head-of-line-block the
+DVN's in-order queue (they fail `EOnlyPeer`, code 6, forever).
+
+1. **Stop + repoint the canary FIRST.** The testnet canary submits to the old
+   adapter on an interval; leave it running and it keeps generating orphaned
+   messages. Stop `bosphor-canary-1`, set its `EVM_ADAPTER_ADDRESS` to the new
+   adapter, keep it stopped until the end.
+2. **Point the DVN at the new adapter.** Set `EVM_ADAPTER_ADDRESS` = new adapter
+   in `bosphor-dvn/.env` (it governs BOTH the forward watch and the return-leg
+   verify/execute), then restart both DVN workers. Rewind its EVM cursor
+   (`cursor-*.json` under `DVN_STATE_DIR`) if the first new intent predates the
+   restart.
+3. **Set the new adapter's EVM receive-ULN required DVN** to the operator EOA
+   (`0x9665…`, `endpoint.setConfig` on `EVM_RECEIVE_ULN302`), matching the old
+   adapter, so return proofs (Sui -> EVM) are verifiable. Without this the escrow
+   never releases. (No ready script yet - this is the main gap in
+   `deploy-evm-escrow.ts`; write a `set-evm-receive-uln` helper.)
+4. **Sui side:** the OApp (`SUI_LZ_OAPP_ID`) is shared, so its send/receive ULN
+   already uses our DVN - only the peer changes. Set `sui set_peer(40161, new
+   adapter)` LAST, after the old queue is drained. (`npm run wire`.)
+5. **EVM -> Sui peer** on the new adapter: set in Step 2 or `npm run wire`.
+6. **Solana <-> Sui peers:** unchanged (same program id); re-verify if needed.
+
+If you switched the Sui peer while the old canary was live and wedged the DVN:
+stop the canary, restore the Sui peer to the OLD adapter to drain the stuck
+messages, then repoint DVN + canary to the new adapter and switch the peer back.
+
+Also run `scripts/util/set-lz-relayer.ts --use-relayer-key` if lz_send_proof
+aborts `EUnauthorizedRelayer` (the config authorizes the deployer, not the
+operational relayer key).
 
 ## Step 5: Rewire the relayer
 

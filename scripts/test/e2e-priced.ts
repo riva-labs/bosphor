@@ -73,12 +73,41 @@ const bosphor = createBosphorClient({
   computeBlob: defaultComputeBlob,
 });
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function happyPath(): Promise<void> {
-  console.log("\n=== Priced happy path (storePriced) ===");
+  console.log("\n=== Priced happy path (quote -> pay -> upload -> await proof) ===");
   const data = ethers.toUtf8Bytes(`bosphor-m4-priced-${Date.now()}`);
-  const result = await bosphor.storePriced(data, { epochs: STORAGE_EPOCHS });
-  console.log(`  intentId: ${result.intentId}`);
-  console.log(`  quote:    escrow ${result.quote.escrowNative} wei ($${result.quote.breakdown.escrowUsd.toFixed(4)})`);
+
+  // Lower-level steps so the upload can retry while the relayer indexes the
+  // freshly-submitted IntentSubmitted event (event-watcher poll lag).
+  const encoded = await bosphor.encode(data, { epochs: STORAGE_EPOCHS });
+  const quote = await bosphor.priceQuote(encoded);
+  const { intentId } = await bosphor.submitPaid(encoded, quote);
+  console.log(`  intentId: ${intentId}`);
+  console.log(`  quote:    escrow ${quote.escrowNative} wei ($${quote.breakdown.escrowUsd.toFixed(4)})`);
+
+  for (let i = 0; ; i++) {
+    try {
+      await bosphor.upload(intentId, data);
+      break;
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 404 && i < 24) {
+        if (i === 0) console.log("  waiting for the relayer to index the intent, then upload...");
+        await sleep(6_000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  console.log("  blob uploaded; awaiting the return proof (releases the escrow)...");
+  const { blobId, endEpoch } = await bosphor.awaitProof(intentId, {
+    timeoutMs: 15 * 60_000,
+    pollMs: 5_000,
+  });
+  const result = { intentId, blobId, endEpoch };
+  void result;
 
   const relayerAddr: string = await adapter.trustedRelayer();
   const escrow = await adapter.getEscrow(result.intentId);
