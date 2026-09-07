@@ -12,6 +12,13 @@ proof lands. If the store never completes, the escrow refunds to the payer after
 a deadline. You always pay one all-in amount in the origin chain's native token
 (ETH on EVM, SOL on Solana), quoted off chain.
 
+:::info Availability
+The EVM (Sepolia) escrow flow is live on testnet and validated end to end,
+including the trustless proof-gated release and the deadline refund. The Solana
+origin-chain payment path (the escrow vault and its release) is being finalized;
+until then, use the EVM origin for paid stores.
+:::
+
 ## How it works
 
 ```
@@ -43,9 +50,10 @@ bucket, the relayer-fronted cost, is custodied.
 
 ## Pay in one call (SDK)
 
-The SDK adds `storePriced()`: quote, pay, upload, and await-proof in one call, on
-both EVM and Solana. It surfaces the full breakdown so you can show the user what
-they are paying before they sign.
+The SDK adds `storePriced()`: quote, pay, upload, and await-proof in one call. It
+surfaces the full breakdown so you can show the user what they are paying before
+they sign. The EVM origin is live; the Solana `storePriced()` shares the same
+shape and lands with the Solana release path (see Availability above).
 
 ```ts
 import { createBosphorClient } from "@bosphor/sdk/evm";

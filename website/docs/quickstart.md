@@ -9,8 +9,9 @@ Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
 
 :::tip Building an app? Use the SDK.
 This guide deploys the full protocol yourself. To **integrate** Bosphor into an
-app, you do not deploy anything, install `@bosphor/sdk` and call `store()`. See
-the SDK docs at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)** for the EVM and
+app, you do not deploy anything, install `@bosphor/sdk` and call `store()` (free
+tier) or `storePriced()` for the Milestone 4 [origin-chain payment flow](payment-flow.md).
+See the SDK docs at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)** for the EVM and
 Solana guides and the API reference.
 :::
 

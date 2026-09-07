@@ -14,8 +14,10 @@ proof.
 
 - **Origin-chain payment flow**: the EVM `BosphorEscrowAdapter` and a Solana
   escrow vault escrow the user's payment at submit, release it to the relayer on
-  a genuine proof, and refund the payer after a deadline. See [Payment flow](payment-flow.md)
-  and the [contract interface](contract-interface.md).
+  a genuine proof, and refund the payer after a deadline. The EVM (Sepolia) path
+  is live on testnet and validated end to end; the Solana release path is being
+  finalized. See [Payment flow](payment-flow.md) and the
+  [contract interface](contract-interface.md).
 
 - **Off-chain quoting**: a relayer `POST /quote` endpoint and the SDK
   `client.storePriced()` / `priceQuote()` surface a single all-in origin-native
