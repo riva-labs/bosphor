@@ -46,7 +46,7 @@ import {
   TransactionInstruction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import { UlnProgram } from "@layerzerolabs/lz-solana-sdk-v2";
+import { EndpointProgram, UlnProgram } from "@layerzerolabs/lz-solana-sdk-v2";
 import * as dotenv from "dotenv";
 import {
   BOSPHOR_PROGRAM_ID,
@@ -279,6 +279,13 @@ async function resolveLzReceiveAccounts(
   return metas;
 }
 
+/** Extract a useful error string, including Solana simulation logs when present. */
+function errText(e: unknown): string {
+  const msg = String((e as Error)?.message ?? e).split("\n")[0];
+  const logs = (e as { logs?: string[] })?.logs;
+  return logs?.length ? `${msg}\n     ${logs.join("\n     ")}` : msg;
+}
+
 /** Raw PacketV1 bytes = header(81) ++ guid(32) ++ message. Derived from the packet. */
 function packetBytes(pkt: LzPacket): Uint8Array {
   return Buffer.concat([
@@ -293,6 +300,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   const conn = connection();
   const worker = payer();
   const uln = new UlnProgram.Uln(ULN_ID);
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const bytes = packetBytes(pkt);
 
   // Build lz_receive params once (used both for account resolution and the ix).
@@ -305,8 +313,27 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     extraData: new Uint8Array(0),
   });
 
-  // 1) initVerify: creates the Confirmations PDA if it does not exist yet;
-  //    returns null when it already exists (idempotent). payer==dvn==our worker.
+  // 0) endpoint initVerify: allocates the endpoint's payload_hash PDA (keyed by
+  //    receiver/srcEid/sender/nonce). commitVerification's endpoint Verify CPI and
+  //    lz_receive's Clear CPI both require it to already exist. Idempotent (null if
+  //    present). sender = the Sui OApp bytes32 as a pubkey; receiver = our Store.
+  let epInitVerifyIx: TransactionInstruction | null = null;
+  try {
+    const raw = await endpoint.initVerify(
+      conn as never,
+      worker.publicKey as never,
+      new PublicKey(hexToBytes(pkt.sender)) as never,
+      storePda() as never,
+      SUI_TESTNET_EID,
+      pkt.nonce.toString(),
+    );
+    epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
+  } catch (e) {
+    console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
+  }
+
+  // 1) uln initVerify: creates the ULN Confirmations PDA if absent (idempotent,
+  //    returns null when present). payer==dvn==our worker.
   let initVerifyIx: TransactionInstruction | null = null;
   try {
     const raw = await uln.initVerify(
@@ -317,9 +344,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     );
     initVerifyIx = raw ? normalizeIx(raw as never) : null;
   } catch (e) {
-    console.log(
-      `  initVerify build skipped (${String((e as Error).message).split("\n")[0]})`,
-    );
+    console.log(`  uln.initVerify build skipped (${errText(e)})`);
   }
 
   // 2) verify (our DVN attests; the dvn keypair is the sole signer). RETURN_CONF
@@ -343,6 +368,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     // DRY RUN: simulate initVerify+verify (read-only) and print the resolved
     // lz_receive account metas. Nothing is broadcast.
     const tx = new Transaction();
+    if (epInitVerifyIx) tx.add(epInitVerifyIx);
     if (initVerifyIx) tx.add(initVerifyIx);
     tx.add(verifyIx);
     tx.feePayer = worker.publicKey;
@@ -380,6 +406,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   // 1+2) initVerify + verify in one tx (signer = worker keypair).
   try {
     const tx = new Transaction();
+    if (epInitVerifyIx) tx.add(epInitVerifyIx);
     if (initVerifyIx) tx.add(initVerifyIx);
     tx.add(verifyIx);
     const sig = await sendAndConfirmTransaction(conn, tx, [worker], {
@@ -405,9 +432,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     );
     console.log(`  commit   ${sig}`);
   } catch (e) {
-    console.log(
-      `  commit   skipped (${String((e as Error).message).split("\n")[0]})`,
-    );
+    console.log(`  commit   skipped (${errText(e)})`);
   }
 
   // 4) lz_receive -> escrow released, intent.executed = true.
@@ -429,9 +454,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     console.log(`  lzReceive ${sig} -> escrow released`);
     return "sent";
   } catch (e) {
-    console.log(
-      `  lzReceive skipped (${String((e as Error).message).split("\n")[0]})`,
-    );
+    console.log(`  lzReceive skipped (${errText(e)})`);
     return "skipped";
   }
 }
