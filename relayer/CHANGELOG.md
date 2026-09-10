@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 (2026-09-09)
+
+### Features
+
+- feat(relayer): send Solana return over genuine LZ (lz_send_proof to 40168)
+
 ## 0.11.0 (2026-09-05)
 
 ### Features

@@ -8,7 +8,9 @@
     "init-store": "tsx src/init-store.ts",
     "set-libraries": "tsx src/set-libraries.ts",
     "set-peer": "tsx src/set-peer.ts",
+    "set-receive-dvn": "tsx src/set-receive-dvn.ts",
     "submit-intent": "tsx src/submit-intent.ts",
+    "solana-return": "tsx src/solana-return.ts",
     "roundtrip-upload": "tsx src/roundtrip-upload.ts"
   },
   "dependencies": {

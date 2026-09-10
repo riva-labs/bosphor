@@ -545,8 +545,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     if (!row.returned) {
       try {
         if (row.srcEid === this.solanaSrcEid) {
-          const canonical = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
-          await this.returnToSolana(intentId, canonical, endEpoch);
+          await this.returnToSolana(intentId, walrusBlobId, endEpoch);
         } else {
           await this.returnToEvm(intentId, walrusBlobId, endEpoch);
         }
@@ -623,36 +622,74 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Solana-origin return leg: record the execution result on the origin
-   * IntentState via the adapter's owner-gated confirm_execution. The canonical LZ
-   * proof path is blocked by the same LZ testnet infra fault as the EVM leg
-   * (#272), so the trusted relayer confirms directly.
+   * Solana-origin return leg. Mirror the EVM path: deliver the execution proof
+   * over a genuine LayerZero send (Sui -> Solana, dstEid = solanaSrcEid = 40168).
+   * Our self-operated solana-return worker (scripts/solana) then verifies +
+   * commitVerification + runs lz_receive on Solana, which RELEASES the escrow.
+   * If the LZ send path is unavailable, fall back to the owner-gated
+   * confirm_execution, which marks the intent executed for observability but is
+   * NON-releasing (the escrow then only refunds on its deadline), the same trust
+   * model as the EVM confirmExecution fallback.
    */
   private async returnToSolana(
     intentId: string,
-    canonicalBlobIdHex: string,
+    walrusBlobId: string,
     endEpoch: number,
   ): Promise<void> {
-    if (!this.solana.canConfirm()) {
-      this.metrics.recordLzSend('failure');
-      throw new Error(
-        `[${intentId}] Solana-origin return leg requires a Solana signer ` +
-          `(set SOLANA_RELAYER_KEYPAIR); cannot confirm_execution`,
+    try {
+      const quotedFee = await this.suiLz.quoteLzFee(
+        intentId,
+        walrusBlobId,
+        endEpoch,
+        this.solanaSrcEid,
       );
+      // 10% buffer for price drift between quote and send.
+      const feeAmount = (quotedFee * 11n) / 10n;
+      this.logger.log(`[${intentId}] LZ fee quote: ${quotedFee} MIST (using ${feeAmount})`);
+      this.logger.log(`[${intentId}] Sending LZ proof to Solana (dstEid: ${this.solanaSrcEid})...`);
+      const lzDigest = await this.suiLz.lzSendProof(
+        intentId,
+        walrusBlobId,
+        endEpoch,
+        this.solanaSrcEid,
+        feeAmount,
+      );
+      this.metrics.recordLzSend('success');
+      this.metrics.recordReturnMode('proof');
+      this.logger.log(`[${intentId}] LZ proof sent to Solana: ${lzDigest}`);
+      // The escrow release + intent.executed happen when our self-operated
+      // solana-return worker verifies+commits+lz_receive on Solana (out-of-band,
+      // like dvn-evm-return on EVM). There is no Solana lifecycle watcher here, so
+      // record proof_sent only; the worker completes the release.
+      await this.trackHop(intentId, 'proof_sent', { txHash: lzDigest });
+    } catch (lzErr) {
+      this.metrics.recordLzSend('failure');
+      this.logger.warn(
+        `[${intentId}] Solana LZ send-proof unavailable (${(lzErr as Error).message}); ` +
+          `falling back to owner confirm_execution (NON-releasing)`,
+      );
+      if (!this.solana.canConfirm()) {
+        throw new Error(
+          `[${intentId}] Solana-origin return leg requires a Solana signer ` +
+            `(set SOLANA_RELAYER_KEYPAIR); cannot confirm_execution`,
+          { cause: lzErr },
+        );
+      }
+      // Same proof bytes the LZ return would carry: the canonical big-endian blob id.
+      const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
+      const sig = await this.solana.confirmExecution(
+        intentId,
+        canonicalBlobIdHex,
+        BigInt(endEpoch),
+      );
+      this.metrics.recordReturnMode('fallback');
+      this.logger.log(
+        `[${intentId}] Solana return confirmed via confirm_execution (non-releasing): ${sig}`,
+      );
+      // No Solana watcher: record both hops here so the feed does not stall.
+      await this.trackHop(intentId, 'proof_sent', { txHash: sig });
+      await this.trackHop(intentId, 'confirmed', { txHash: sig });
     }
-    this.logger.log(
-      `[${intentId}] Confirming execution on Solana (src_eid: ${this.solanaSrcEid})...`,
-    );
-    const sig = await this.solana.confirmExecution(intentId, canonicalBlobIdHex, BigInt(endEpoch));
-    this.metrics.recordLzSend('success');
-    this.logger.log(`[${intentId}] Solana return confirmed: ${sig}`);
-    // On Solana a single confirm_execution tx both delivers the return proof and
-    // marks the intent executed on the origin program, so it is `confirmed` right
-    // away. The EVM path gets `confirmed` from evm-lifecycle.watcher (the on-chain
-    // IntentExecuted event); Solana has no such watcher, so record both hops here
-    // or the public feed would stay stuck at `proof_sent` for a fulfilled intent.
-    await this.trackHop(intentId, 'proof_sent', { txHash: sig });
-    await this.trackHop(intentId, 'confirmed', { txHash: sig });
   }
 
   /**

@@ -528,15 +528,31 @@ describe('IntentProcessor durable queue', () => {
     await new Promise((r) => setTimeout(r, 250));
   });
 
-  it('routes a Solana-origin intent through confirm_execution, not the EVM leg', async () => {
+  it('routes a Solana-origin intent through the genuine LZ send (proof to Solana), not confirm_execution', async () => {
     const { proc, solana, suiLz, lifecycle } = build([makeRow({ srcEid: SOLANA_SRC_EID })]);
     await proc.tick();
 
+    // The return goes over a real LayerZero send to the Solana eid (40168); the
+    // self-operated solana-return worker then runs lz_receive to release escrow.
+    expect(suiLz.lzSendProof).toHaveBeenCalledTimes(1);
+    expect(suiLz.lzSendProof.mock.calls[0][3]).toBe(SOLANA_SRC_EID);
+    expect(solana.confirmExecution).not.toHaveBeenCalled();
+    // Release + executed happen out-of-band via the worker, so on the happy path
+    // the relayer records only proof_sent (no Solana lifecycle watcher here).
+    expect(lifecycle.recordHop).toHaveBeenCalledWith(
+      '0xintent',
+      'proof_sent',
+      expect.objectContaining({ txHash: '0xlz' }),
+    );
+  });
+
+  it('falls back to the non-releasing confirm_execution when the Solana LZ send is unavailable', async () => {
+    const { proc, solana, suiLz, lifecycle } = build([makeRow({ srcEid: SOLANA_SRC_EID })]);
+    suiLz.lzSendProof.mockRejectedValue(new Error('lz down'));
+    await proc.tick();
+
     expect(solana.confirmExecution).toHaveBeenCalledTimes(1);
-    expect(suiLz.lzSendProof).not.toHaveBeenCalled();
-    // Solana has no on-chain confirmation watcher, so the confirm_execution tx
-    // records both proof_sent and confirmed; otherwise the feed would hang at
-    // proof_sent for a fulfilled intent.
+    // The fallback records both hops (no Solana watcher), so the feed does not hang.
     expect(lifecycle.recordHop).toHaveBeenCalledWith(
       '0xintent',
       'confirmed',

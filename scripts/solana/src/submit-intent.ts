@@ -109,11 +109,18 @@ async function main(): Promise<void> {
   };
   const intentId = deriveIntentId(commitment, admin.publicKey.toBytes(), senderNonce);
   const intent = intentPda(intentId);
+  // Per-intent escrow vault PDA (M4): seeds [b"escrow", intent_id].
+  const escrow = PublicKey.findProgramAddressSync(
+    [Buffer.from("escrow"), Buffer.from(intentId)],
+    BOSPHOR_PROGRAM_ID,
+  )[0];
+  const escrowAmount = BigInt(process.env.ESCROW_AMOUNT ?? "5000000"); // 0.005 SOL default
 
   console.log("Store PDA:", store.toBase58());
   console.log("sender nonce:", senderNonce.toString());
   console.log("intent id:", "0x" + bytesToHex(intentId));
   console.log("intent PDA:", intent.toBase58());
+  console.log("escrow PDA:", escrow.toBase58(), "amount:", escrowAmount.toString(), "lamports");
 
   // Ensure the LZ outbound nonce PDA for this pathway exists (idempotent).
   try {
@@ -157,6 +164,7 @@ async function main(): Promise<void> {
       dstEid: SUI_TESTNET_EID,
       options: new Uint8Array(options),
       nativeFee,
+      escrowAmount,
     }),
   );
 
@@ -166,6 +174,8 @@ async function main(): Promise<void> {
       { pubkey: admin.publicKey, isSigner: true, isWritable: true },
       { pubkey: noncePdaKey, isSigner: false, isWritable: true },
       { pubkey: intent, isSigner: false, isWritable: true },
+      // M4: per-intent escrow vault, created + funded here (between intent and store).
+      { pubkey: escrow, isSigner: false, isWritable: true },
       { pubkey: store, isSigner: false, isWritable: false },
       { pubkey: peer, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },

@@ -65,6 +65,29 @@ services:
       - dvn-state:/data
     restart: unless-stopped
 
+  # Sui -> Solana devnet RETURN worker. The Solana analogue of dvn-evm-return:
+  # watches the Sui PacketSentEvent for the relayer's lz_send_proof(40168), then
+  # endpoint.initVerify + uln.initVerify + verify + commitVerification + lz_receive
+  # on Solana (as DVN + executor), which releases the M4 escrow. Lives in
+  # scripts/solana (the LZ Solana SDK home); no cursor file, re-scans each poll and
+  # skips nonces < RETURN_MIN_NONCE. RUN=1 makes it actually send. Sui endpoint /
+  # OApp ids are passed explicitly (no relayer/.env.testnet inside the container).
+  dvn-solana-return:
+    build: ./scripts/solana
+    container_name: bosphor-dvn-solana-return
+    command: ["npm", "run", "solana-return"]
+    environment:
+      - RUN=1
+      - RETURN_MODE=loop
+      - RETURN_MIN_NONCE=2
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - SOLANA_KEYPAIR=/keypair.json
+      - SUI_ENDPOINT_V2=0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a
+      - SUI_LZ_PACKAGE_ID=0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5
+    volumes:
+      - /home/arb/.config/solana/bosphor-devnet.json:/keypair.json:ro
+    restart: unless-stopped
+
 volumes:
   # Shared by both workers; each pathway writes its own cursor-<pathway>.json.
   dvn-state:
