@@ -5,11 +5,12 @@ use oapp::{
 };
 
 use crate::{
-    constants::{INTENT_SEED, PEER_SEED, STORE_SEED},
+    constants::{ESCROW_SEED, INTENT_SEED, PEER_SEED, STORE_SEED},
     error::BosphorError,
+    escrow::check_release,
     events::IntentExecuted,
     message::decode_proof,
-    state::{IntentState, Peer, Store},
+    state::{EscrowVault, IntentState, Peer, Store},
 };
 
 /// The `_lzReceive` equivalent: the endpoint-delivered receive of the return proof
@@ -55,6 +56,25 @@ pub struct LzReceive<'info> {
         bump = intent.bump
     )]
     pub intent: Account<'info, IntentState>,
+
+    /// The intent's escrow vault. Released to the beneficiary on this proof and
+    /// closed on that terminal transition (all lamports go to the beneficiary).
+    #[account(
+        mut,
+        seeds = [ESCROW_SEED, &decode_intent_id(&params.message)],
+        bump = escrow.bump,
+        close = beneficiary
+    )]
+    pub escrow: Account<'info, EscrowVault>,
+
+    /// The recorded beneficiary (relayer) credited with the released lamports.
+    /// Constrained to the escrow's stored beneficiary, so release is keyed on the
+    /// proof + intent id, not on whoever submits this transaction.
+    #[account(
+        mut,
+        address = escrow.beneficiary @ BosphorError::InvalidBeneficiary
+    )]
+    pub beneficiary: SystemAccount<'info>,
     // remaining_accounts: the endpoint accounts required by `clear`.
 }
 
@@ -103,6 +123,13 @@ pub fn handle_lz_receive(ctx: Context<LzReceive>, params: LzReceiveParams) -> Re
 
     intent.executed = true;
     intent.end_epoch = proof.end_epoch;
+
+    // Release the escrow now that a genuine proof has landed and the blob id
+    // matched. The vault must still be Pending (guards against any double
+    // release); the `close = beneficiary` constraint then transfers the vault's
+    // lamports to the beneficiary and closes it. This is the ONLY path that moves
+    // escrowed funds; the owner fallback (confirm_execution) never does.
+    check_release(ctx.accounts.escrow.status)?;
 
     emit!(IntentExecuted {
         intent_id: proof.intent_id,

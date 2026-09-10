@@ -28,6 +28,10 @@ const ADAPTER_ABI = [
   'event IntentExecuted(bytes32 indexed intentId, bytes proof)',
   'function confirmExecution(bytes32 intentId, bytes proof) external',
   'function executed(bytes32) view returns (bool)',
+  // M4 escrow adapter read (absent on the pre-escrow adapter; the read then
+  // reverts and getEscrow returns null, so the break-even guard is simply not
+  // applied rather than failing the intent).
+  'function getEscrow(bytes32) view returns (tuple(address payer, address token, uint256 amount, uint64 deadline, uint8 status))',
   'function quote(uint32 dstEid, bytes payload, uint256 deadline, bytes options) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))',
   'function submitIntent(uint32 dstEid, bytes payload, uint256 deadline, bytes options) payable returns (bytes32)',
 ];
@@ -281,6 +285,25 @@ export class EvmService implements OnModuleInit {
    */
   async confirmExecution(intentId: string, proof: string): Promise<string> {
     return this.serialize(() => this.sendConfirmExecution(intentId, proof));
+  }
+
+  /**
+   * Read an intent's on-chain escrow terms from the escrow adapter. Returns null
+   * when there is no escrow (status None), or when the read reverts (e.g. the
+   * pre-escrow adapter has no getEscrow) so the break-even guard degrades to
+   * "not applied" rather than failing the intent. `token` is address(0) for native.
+   */
+  async getEscrow(
+    intentId: string,
+  ): Promise<{ token: string; amount: bigint; status: number } | null> {
+    try {
+      const e = await this.adapter.getEscrow(intentId);
+      const status = Number(e.status);
+      if (status === 0) return null; // None: no escrow recorded
+      return { token: String(e.token), amount: BigInt(e.amount), status };
+    } catch {
+      return null;
+    }
   }
 
   /**

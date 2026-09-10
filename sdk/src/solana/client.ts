@@ -21,6 +21,7 @@
 import type { ComputeBlob, Hex, StoreResult } from "../types.js";
 import { createDefaultComputeBlob, type WalrusNetwork } from "../blob.js";
 import { ProofTimeoutError } from "../errors.js";
+import { fetchQuote, type PricedQuote } from "../quote.js";
 import {
   DEFAULT_EPOCHS,
   DEFAULT_DEADLINE_SECONDS,
@@ -54,6 +55,8 @@ export interface SolanaSubmitFields {
   options: Hex;
   /** Native fee (lamports) attached for the LayerZero `send` CPI. */
   nativeFee: bigint;
+  /** Lamports to escrow for this intent (0 for the unpriced path). */
+  escrowAmount?: bigint;
 }
 
 /** The result of a submit: the canonical intent id and the Solana tx signature. */
@@ -129,6 +132,8 @@ export interface SubmitOptions {
   options?: Hex;
   /** Override the client's native fee (lamports). */
   nativeFee?: bigint;
+  /** Lamports to escrow for this intent (0 for the unpriced path). */
+  escrowAmount?: bigint;
 }
 
 /**
@@ -193,6 +198,7 @@ export class BosphorSolanaClient {
       dstEid: opts.dstEid ?? this.dstEid,
       options: opts.options ?? this.options,
       nativeFee: opts.nativeFee ?? this.nativeFee,
+      escrowAmount: opts.escrowAmount ?? 0n,
     });
 
     if (!result.intentId) {
@@ -271,6 +277,59 @@ export class BosphorSolanaClient {
     await this.upload(intentId, data, { signal: opts.signal });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
     return { intentId, blobId, endEpoch, txHash };
+  }
+
+  /**
+   * Fetch an all-in priced quote (SOL) from the relayer for this intent: the
+   * forward LayerZero fee plus the relayer-fronted escrow bucket, as one
+   * origin-native amount with a full USD breakdown.
+   */
+  async priceQuote(
+    encoded: EncodedIntent,
+    opts: { signal?: AbortSignal | undefined } = {},
+  ): Promise<PricedQuote> {
+    return fetchQuote(
+      this.relayerUrl,
+      {
+        sizeBytes: encoded.size,
+        epochs: encoded.storageEpochs,
+        originToken: "SOL",
+        forwardLzFeeNative: this.nativeFee,
+      },
+      { fetch: this.fetchFn, ...(opts.signal ? { signal: opts.signal } : {}) },
+    );
+  }
+
+  /**
+   * Submit paying the priced quote: the escrow bucket is deposited into the
+   * per-intent vault and released to the relayer only on the proof. The forward
+   * LZ fee is still passed as the `submit_intent` nativeFee.
+   */
+  async submitPaid(
+    encoded: EncodedIntent,
+    quote: PricedQuote,
+    opts: SubmitOptions = {},
+  ): Promise<{ intentId: Hex; txHash: string }> {
+    return this.submit(encoded, { ...opts, escrowAmount: quote.escrowNative });
+  }
+
+  /**
+   * One-call PRICED flow (the M4 user-pays path):
+   *   encode -> priceQuote -> submitPaid -> upload -> awaitProof
+   * Returns the verified result plus the `quote` used so a caller can surface the
+   * breakdown. Every step fails loudly.
+   */
+  async storePriced(
+    data: Uint8Array,
+    opts: EncodeOptions & SubmitOptions & AwaitProofOptions = {},
+  ): Promise<StoreResult & { quote: PricedQuote }> {
+    opts.signal?.throwIfAborted();
+    const encoded = await this.encode(data, opts);
+    const quote = await this.priceQuote(encoded, { signal: opts.signal });
+    const { intentId, txHash } = await this.submitPaid(encoded, quote, opts);
+    await this.upload(intentId, data, { signal: opts.signal });
+    const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    return { intentId, blobId, endEpoch, txHash, quote };
   }
 }
 

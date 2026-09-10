@@ -5,6 +5,7 @@ import { SuiService } from '../chain/sui/sui.service';
 import { IntentLifecycleStore } from '../lifecycle/intent-lifecycle.store';
 import { IntentCommitment } from '../lifecycle/intent-lifecycle.types';
 import { StagedIntentStore } from '../staged/staged-intent.store';
+import { StoreQueueWaker } from '../common/store-queue-waker';
 
 const INTENT_ID = '0x' + 'ab'.repeat(32);
 
@@ -157,6 +158,7 @@ describe('IntentIngest with the durable staged queue', () => {
   let ingest: IntentIngest;
   let mockStore: { getCommitment: jest.Mock };
   let staged: { stagedBytesTotal: jest.Mock; upsertBytes: jest.Mock };
+  let waker: { wake: jest.Mock; onWake: jest.Mock };
   let encodeBlob: jest.Mock;
 
   async function build(maxStagedBytes = 268_435_456): Promise<void> {
@@ -166,6 +168,7 @@ describe('IntentIngest with the durable staged queue', () => {
       stagedBytesTotal: jest.fn().mockResolvedValue(0),
       upsertBytes: jest.fn().mockResolvedValue('accepted'),
     };
+    waker = { wake: jest.fn(), onWake: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -183,6 +186,7 @@ describe('IntentIngest with the durable staged queue', () => {
         { provide: SuiService, useValue: { getWalrusClient: () => ({ walrus: { encodeBlob } }) } },
         { provide: IntentLifecycleStore, useValue: mockStore },
         { provide: StagedIntentStore, useValue: staged },
+        { provide: StoreQueueWaker, useValue: waker },
       ],
     }).compile();
 
@@ -204,6 +208,19 @@ describe('IntentIngest with the durable staged queue', () => {
       { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5 },
       268_435_456,
     );
+    // Event-driven drain: staging nudges the processor to store without waiting
+    // for the poll interval.
+    expect(waker.wake).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wake the queue when the bytes are refused by backpressure', async () => {
+    await build(100);
+    staged.upsertBytes.mockResolvedValue('backpressure');
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'backpressure' }));
+    expect(waker.wake).not.toHaveBeenCalled();
   });
 
   it('rejects with backpressure when the staged total plus this blob exceeds the ceiling', async () => {

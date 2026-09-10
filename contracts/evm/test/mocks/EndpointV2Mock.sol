@@ -8,6 +8,15 @@ contract EndpointV2Mock {
     uint256 public constant NATIVE_FEE = 0.001 ether;
     uint64 public nonce;
 
+    /// @dev Settable messaging fee so escrow tests can drive fee/quote scenarios
+    ///      (e.g. escrow = msg.value - fee). Defaults to NATIVE_FEE for the
+    ///      existing OApp send/receive tests that read the constant directly.
+    uint256 public nativeFee = NATIVE_FEE;
+
+    /// @dev Records the value forwarded to send() on the most recent call, so a
+    ///      test can assert only the LZ fee (not the escrow) was paid to the endpoint.
+    uint256 public lastSendValue;
+
     // Tracks delegate per OApp
     mapping(address => address) public delegates;
 
@@ -15,11 +24,16 @@ contract EndpointV2Mock {
         delegates[msg.sender] = _delegate;
     }
 
+    /// @dev Test hook: override the fee returned by quote()/charged by send().
+    function setNativeFee(uint256 _fee) external {
+        nativeFee = _fee;
+    }
+
     function quote(
         MessagingParams calldata /*_params*/,
         address /*_sender*/
-    ) external pure returns (MessagingFee memory) {
-        return MessagingFee(NATIVE_FEE, 0);
+    ) external view returns (MessagingFee memory) {
+        return MessagingFee(nativeFee, 0);
     }
 
     function send(
@@ -27,6 +41,7 @@ contract EndpointV2Mock {
         address /*_refundAddress*/
     ) external payable returns (MessagingReceipt memory) {
         nonce++;
+        lastSendValue = msg.value;
         return MessagingReceipt(
             keccak256(abi.encodePacked(nonce, block.timestamp)),
             nonce,

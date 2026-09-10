@@ -34,6 +34,17 @@ export interface ChaosDeps {
   setGasPriceGwei(gwei: number): Promise<void>;
   /** Number of canary probes skipped by the preflight guard so far. */
   getCanarySkipCount(): Promise<number>;
+
+  /**
+   * Drive the WAL/native cross-rate adverse (or restore it), so the break-even
+   * guard sees an escrow that no longer covers cost + margin. Used to prove the
+   * never-lose-money skip: the relayer declines the spend, the user refunds.
+   */
+  setFxAdverse(adverse: boolean): Promise<void>;
+  /** Number of intents whose WAL spend the break-even guard skipped so far. */
+  getBreakEvenSkipCount(): Promise<number>;
+  /** Number of completed intents that netted negative (the invariant alert; must stay 0). */
+  getNegativeMarginCount(): Promise<number>;
 }
 
 /**

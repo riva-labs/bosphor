@@ -21,6 +21,7 @@
 
 pub mod constants;
 pub mod error;
+pub mod escrow;
 pub mod events;
 pub mod instructions;
 pub mod message;
@@ -31,6 +32,7 @@ use oapp::{endpoint_cpi::LzAccount, LzReceiveParams};
 
 pub use constants::*;
 pub use error::*;
+pub use escrow::*;
 pub use events::*;
 pub use instructions::*;
 pub use message::*;
@@ -70,6 +72,7 @@ pub mod bosphor_adapter {
         dst_eid: u32,
         options: Vec<u8>,
         native_fee: u64,
+        escrow_amount: u64,
     ) -> Result<()> {
         instructions::submit_intent::handle_submit_intent(
             ctx,
@@ -81,6 +84,7 @@ pub mod bosphor_adapter {
             dst_eid,
             options,
             native_fee,
+            escrow_amount,
         )
     }
 
@@ -108,6 +112,14 @@ pub mod bosphor_adapter {
             returned_blob_id,
             end_epoch,
         )
+    }
+
+    /// Permissionlessly refunds an intent's escrow to its payer after the
+    /// deadline, then closes the vault (rent returned to the payer). Funds only
+    /// ever go to the recorded payer; the deadline gate makes it safe for anyone
+    /// to call.
+    pub fn refund_escrow(ctx: Context<RefundEscrow>, intent_id: [u8; 32]) -> Result<()> {
+        instructions::refund_escrow::handle_refund_escrow(ctx, intent_id)
     }
 
     /// Returns the account metas the endpoint Executor must pass to `lz_receive`.

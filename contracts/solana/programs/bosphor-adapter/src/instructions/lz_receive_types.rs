@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use oapp::{endpoint_cpi::LzAccount, LzReceiveParams};
 
 use crate::{
-    constants::{INTENT_SEED, LZ_RECEIVE_TYPES_SEED, PEER_SEED, STORE_SEED},
+    constants::{ESCROW_SEED, INTENT_SEED, LZ_RECEIVE_TYPES_SEED, PEER_SEED, STORE_SEED},
     message::decode_proof,
     state::{LzReceiveTypesAccounts, Store},
 };
@@ -17,7 +17,9 @@ use crate::{
 ///   1 - peer                     [readonly]
 ///   2 - store                    [readonly]
 ///   3 - intent                   [writable]
-///   4.. - accounts for `clear` (via oapp::endpoint_cpi::get_accounts_for_clear)
+///   4 - escrow                   [writable]
+///   5 - beneficiary              [writable]
+///   6.. - accounts for `clear` (via oapp::endpoint_cpi::get_accounts_for_clear)
 #[derive(Accounts)]
 pub struct LzReceiveTypes<'info> {
     #[account(
@@ -53,13 +55,17 @@ pub fn handle_lz_receive_types(
     };
     let (intent, _) =
         Pubkey::find_program_address(&[INTENT_SEED, &intent_id], ctx.program_id);
+    let (escrow, _) =
+        Pubkey::find_program_address(&[ESCROW_SEED, &intent_id], ctx.program_id);
 
-    // account 0..4 - the OApp's own accounts, matching the LzReceive struct order.
+    // account 0..6 - the OApp's own accounts, matching the LzReceive struct order.
     let mut accounts = vec![
         LzAccount { pubkey: Pubkey::default(), is_signer: true, is_writable: true }, // 0 payer
         LzAccount { pubkey: peer, is_signer: false, is_writable: false },            // 1 peer
         LzAccount { pubkey: store_key, is_signer: false, is_writable: false },       // 2 store
         LzAccount { pubkey: intent, is_signer: false, is_writable: true },           // 3 intent
+        LzAccount { pubkey: escrow, is_signer: false, is_writable: true },           // 4 escrow
+        LzAccount { pubkey: store.admin, is_signer: false, is_writable: true },      // 5 beneficiary
     ];
 
     // account 4.. - the endpoint accounts required by `clear`.

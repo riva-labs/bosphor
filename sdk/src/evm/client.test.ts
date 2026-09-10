@@ -355,3 +355,85 @@ test("fromEthersContract delegates methods and wires queryProof from the event l
   assert.equal(adapter.nonces, undefined);
   assert.equal(adapter.getIntentId, undefined);
 });
+
+// --- Priced store flow (M4) -------------------------------------------------
+
+const QUOTE_BODY = JSON.stringify({
+  originToken: "ETH",
+  escrowNative: "800000000000000", // 0.0008 ETH escrow bucket
+  forwardNative: "12345", // matches the fake adapter's LZ nativeFee
+  totalNative: "800000000012345",
+  breakdown: {
+    walCostUsd: 0.001,
+    returnLzUsd: 1.4,
+    suiGasUsd: 0.008,
+    forwardLzUsd: 0.03,
+    originGasUsd: 0,
+    bufferedEscrowUsd: 1.78,
+    serviceMarginUsd: 0.27,
+    escrowUsd: 2.05,
+    forwardUsd: 0.03,
+    totalUsd: 2.08,
+    floorApplied: false,
+  },
+});
+
+/** Routes /quote to the quote body and /blob to 200, recording submit value. */
+function makePricedAdapterAndFetch() {
+  const { adapter, calls } = makeFakeAdapter();
+  let submitValue: bigint | undefined;
+  const origSubmit = adapter.submitIntent.bind(adapter);
+  adapter.submitIntent = async (...args: unknown[]) => {
+    const overrides = args[args.length - 1] as { value?: bigint };
+    submitValue = overrides?.value;
+    return origSubmit(...(args as Parameters<typeof origSubmit>));
+  };
+  const urls: string[] = [];
+  const fetch: FetchLike = async (url) => {
+    urls.push(url);
+    const isQuote = url.endsWith("/quote");
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return isQuote ? QUOTE_BODY : "";
+      },
+    };
+  };
+  return { adapter, calls, fetch, urls, getSubmitValue: () => submitValue };
+}
+
+test("storePriced() surfaces an all-in quote and pays escrow + forward fee at submit", async () => {
+  const { adapter, fetch, urls, getSubmitValue } = makePricedAdapterAndFetch();
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  const result = await client.storePriced(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+
+  assert.equal(result.intentId, INTENT_ID);
+  assert.equal(result.quote.escrowNative, 800000000000000n);
+  assert.equal(result.quote.breakdown.escrowUsd, 2.05);
+  // msg.value = escrow + forward LZ fee.
+  assert.equal(getSubmitValue(), 800000000000000n + 12345n);
+  // The relayer /quote endpoint was consulted before payment.
+  assert.ok(urls.some((u) => u.endsWith("/quote")));
+});
+
+test("priceQuote() is individually callable and returns the breakdown", async () => {
+  const { adapter, fetch } = makePricedAdapterAndFetch();
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const encoded = await client.encode(new Uint8Array([1, 2, 3]));
+  const quote = await client.priceQuote(encoded);
+  assert.equal(quote.totalNative, 800000000012345n);
+});

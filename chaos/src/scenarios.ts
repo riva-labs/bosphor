@@ -188,6 +188,77 @@ export function deadlineExpiryScenario(deps: ChaosDeps, timings = DEFAULT_TIMING
   };
 }
 
+/** (8) Adverse WAL/native FX trips the break-even guard: skip, no spend, refund. */
+export function adverseFxBreakEvenSkipScenario(deps: ChaosDeps, timings = DEFAULT_TIMINGS): Scenario {
+  return {
+    name: 'adverse-fx-break-even-skip',
+    description:
+      'Adverse WAL/native FX makes the escrow no longer cover cost + margin: the ' +
+      'break-even guard skips the WAL spend and the intent refunds on deadline (zero spend)',
+    async run(): Promise<ScenarioOutcome> {
+      const evidence: string[] = [];
+      const before = await deps.getBreakEvenSkipCount();
+      await deps.setFxAdverse(true);
+      evidence.push('drove WAL/native FX adverse');
+      const { intentId } = await deps.submitIntent();
+      evidence.push(`submitted intent ${intentId} under adverse FX`);
+      await deps.sleep(timings.outageMs);
+      const after = await deps.getBreakEvenSkipCount();
+      await deps.setFxAdverse(false);
+      evidence.push('restored FX');
+
+      const skipped = after > before;
+      evidence.push(`break-even skips: ${before} -> ${after}`);
+      const wasFulfilled = await deps.isFulfilled(intentId);
+      evidence.push(
+        wasFulfilled
+          ? 'intent was fulfilled despite adverse FX (BUG: spent at a loss)'
+          : 'intent not fulfilled: no WAL spent, refunds on deadline',
+      );
+      const ok = skipped && !wasFulfilled;
+      return {
+        recovered: ok,
+        evidence,
+        error: ok ? undefined : 'break-even guard did not skip under adverse FX',
+      };
+    },
+  };
+}
+
+/** (9) WAL spent but the return proof never lands: storage safe, no booked loss. */
+export function spentWalNoProofScenario(deps: ChaosDeps, timings = DEFAULT_TIMINGS): Scenario {
+  return {
+    name: 'spent-wal-no-proof-no-loss',
+    description:
+      'The one loss path: WAL is spent but the return proof cannot land. Reimbursement ' +
+      'is only booked on a genuine proof, so no negative-margin loss is recorded and the ' +
+      'stored blob is flagged for redelivery. The invariant alert stays flat at zero',
+    async run(): Promise<ScenarioOutcome> {
+      const evidence: string[] = [];
+      const beforeNeg = await deps.getNegativeMarginCount();
+      await deps.setChainRpc('evm', false);
+      evidence.push('blocked the EVM return leg so the proof cannot land');
+      const { intentId } = await deps.submitIntent();
+      evidence.push(`submitted intent ${intentId}; relayer stores on Walrus, cannot return the proof`);
+      await deps.sleep(timings.outageMs);
+      const fulfilled = await deps.isFulfilled(intentId);
+      const afterNeg = await deps.getNegativeMarginCount();
+      await deps.setChainRpc('evm', true);
+      evidence.push('restored the EVM return leg for redelivery');
+
+      // No reimbursement is booked without a real proof, so a stuck return never
+      // records a negative-margin completion. The alert must not move.
+      const noLoss = afterNeg === beforeNeg && !fulfilled;
+      evidence.push(`negative-margin alerts: ${beforeNeg} -> ${afterNeg}; fulfilled-during-outage=${fulfilled}`);
+      return {
+        recovered: noLoss,
+        evidence,
+        error: noLoss ? undefined : 'a stuck return booked a negative-margin loss',
+      };
+    },
+  };
+}
+
 /** All scenarios in run order, bound to the given deps. */
 export function allScenarios(deps: ChaosDeps, timings = DEFAULT_TIMINGS): Scenario[] {
   return [
@@ -198,5 +269,7 @@ export function allScenarios(deps: ChaosDeps, timings = DEFAULT_TIMINGS): Scenar
     walrusEpochRolloverScenario(deps, timings),
     gasSpikeCanarySkipScenario(deps, timings),
     deadlineExpiryScenario(deps, timings),
+    adverseFxBreakEvenSkipScenario(deps, timings),
+    spentWalNoProofScenario(deps, timings),
   ];
 }

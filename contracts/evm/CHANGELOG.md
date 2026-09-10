@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 (2026-09-05)
+
+### Features
+
+- feat(contracts): add USDC/CCTP payment path behind mocks (live wiring deferred)
+- feat(contracts): add proof-gated EscrowVault and BosphorEscrowAdapter
+
 ## 0.4.0 (2026-08-11)
 
 ### Features

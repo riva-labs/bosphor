@@ -124,6 +124,8 @@ export interface SubmitIntentArgs {
   dstEid: number;
   options: Uint8Array;
   nativeFee: bigint;
+  /** Lamports to escrow for this intent (0 for the unpriced path). */
+  escrowAmount: bigint;
 }
 
 /** Encodes the `submit_intent` instruction data (discriminator ++ borsh args). */
@@ -140,6 +142,7 @@ export function encodeSubmitIntentData(a: SubmitIntentArgs): Uint8Array {
     .u32(a.dstEid)
     .vecU8(a.options)
     .u64(a.nativeFee)
+    .u64(a.escrowAmount)
     .finish();
 }
 

@@ -39,6 +39,7 @@ test("encodeSubmitIntentData lays out discriminator ++ borsh args", () => {
     dstEid: 40378,
     options: Uint8Array.of(0xaa, 0xbb),
     nativeFee: 250n,
+    escrowAmount: 1000n,
   });
 
   const expected =
@@ -50,7 +51,8 @@ test("encodeSubmitIntentData lays out discriminator ++ borsh args", () => {
     "0078e768" + "00000000" + //                         deadline u64 LE (1760000000)
     "ba9d0000" + //                                      dstEid u32 LE (40378)
     "02000000" + "aabb" + //                             options: len 2 + bytes
-    "fa00000000000000"; //                               nativeFee u64 LE (250)
+    "fa00000000000000" + //                              nativeFee u64 LE (250)
+    "e803000000000000"; //                               escrowAmount u64 LE (1000)
 
   assert.equal(bytesToHex(data), expected);
 });

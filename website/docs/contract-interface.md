@@ -101,6 +101,37 @@ Update the trusted relayer address. Owner-only.
 function setRelayer(address _relayer) external; // onlyOwner
 ```
 
+## BosphorEscrowAdapter.sol (EVM, Milestone 4)
+
+The escrow adapter is the paid variant of `BosphorAdapter`. `submitIntent` is
+unchanged in signature but now escrows the `msg.value` surplus above the
+LayerZero fee, keyed by the intent id. Release is gated on a genuine proof; the
+owner `confirmExecution` fallback marks executed but never moves escrowed funds.
+See the [payment flow](./payment-flow.md) for the model and the SDK usage.
+
+```solidity
+// Deposit at submit: msg.value = LZ fee + escrow. Only the fee reaches the
+// endpoint; the surplus is escrowed for this intent.
+function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32);
+
+// The escrow record for an intent (status: 0 None, 1 Pending, 2 Released, 3 Refunded).
+function getEscrow(bytes32 intentId) external view
+    returns (address payer, address token, uint256 amount, uint64 deadline, uint8 status);
+
+// Permissionless once the deadline passes: credits the recorded payer.
+function refund(bytes32 intentId) external;
+
+// Pull-payment: relayer withdraws released funds, payers withdraw refunds.
+function withdraw() external;              // native (ETH)
+function withdrawToken(address token) external; // ERC20 (USDC path)
+```
+
+Release happens inside `_lzReceive` after the returned blob id matches the
+commitment: the escrow moves to the relayer's withdrawable balance. A USDC
+deposit path via a Permit2 witness bound to the intent id
+(`depositUsdcWithPermit2`, enabled by `setPermit2`) is available opt-in; native
+is the default.
+
 **Emits**: `RelayerUpdated(oldRelayer, newRelayer)`
 
 ### getIntentId

@@ -16,4 +16,12 @@ pub enum BosphorError {
     InvalidPeer,
     #[msg("Return proof has an invalid length or type byte")]
     InvalidProof,
+    #[msg("Escrow is not in the pending state")]
+    EscrowNotPending,
+    #[msg("Escrow deadline has not been reached yet")]
+    DeadlineNotReached,
+    #[msg("Escrow vault has insufficient lamports for the transfer")]
+    InsufficientFunds,
+    #[msg("Escrow beneficiary account does not match the recorded beneficiary")]
+    InvalidBeneficiary,
 }

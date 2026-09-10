@@ -31,6 +31,7 @@ const STORE_SEED = "store";
 const PEER_SEED = "peer";
 const INTENT_SEED = "intent";
 const NONCE_SEED = "nonce";
+const ESCROW_SEED = "escrow";
 
 /** A LayerZero endpoint account appended to `submit_intent` as a remaining account. */
 export interface SolanaAccountMetaInput {
@@ -121,6 +122,7 @@ export async function createDefaultSolanaChain(
   const [storePda] = PublicKey.findProgramAddressSync([enc.encode(STORE_SEED)], programId);
   const noncePda = (owner: any): any => pda([enc.encode(NONCE_SEED), owner.toBytes()]);
   const intentPda = (intentId: Hex): any => pda([enc.encode(INTENT_SEED), bytes32(intentId)]);
+  const escrowPda = (intentId: Hex): any => pda([enc.encode(ESCROW_SEED), bytes32(intentId)]);
   const peerPda = (dstEid: number): any => {
     const eidBe = new Uint8Array(4);
     new DataView(eidBe.buffer).setUint32(0, dstEid, false); // big-endian, matches to_be_bytes
@@ -166,6 +168,7 @@ export async function createDefaultSolanaChain(
           dstEid: fields.dstEid,
           options: hexToBytes(fields.options.startsWith("0x") ? fields.options.slice(2) : fields.options),
           nativeFee: fields.nativeFee,
+          escrowAmount: fields.escrowAmount ?? 0n,
         }),
       );
 
@@ -173,6 +176,7 @@ export async function createDefaultSolanaChain(
         { pubkey: payerKey, isSigner: true, isWritable: true },
         { pubkey: noncePda(payerKey), isSigner: false, isWritable: true },
         { pubkey: intentPda(intentId), isSigner: false, isWritable: true },
+        { pubkey: escrowPda(intentId), isSigner: false, isWritable: true },
         { pubkey: storePda, isSigner: false, isWritable: false },
         { pubkey: peerPda(fields.dstEid), isSigner: false, isWritable: false },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },

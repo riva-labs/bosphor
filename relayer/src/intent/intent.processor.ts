@@ -26,6 +26,11 @@ import { StagedIntentRow } from '../staged/staged-intent.types';
 import { IntentIngest } from '../ingest/intent-ingest.service';
 import { blobIdMatches, fieldToWalrusBlobId, walrusBlobIdToField } from '../common/walrus-blob-id';
 import { BYTES_RECOVERY_INTERVAL_MS, CLAIM_INTERVAL_MS } from '../common/constants';
+import { StoreQueueWaker } from '../common/store-queue-waker';
+import { BreakEvenGuardService } from '../settlement/break-even-guard.service';
+import { SettlementReconciler } from '../settlement/settlement-reconciler.service';
+import { EscrowReader, ESCROW_READER } from '../settlement/escrow-reader';
+import { BreakEvenDecision } from '../pricing/break-even-guard';
 
 /**
  * Marker stored in store_digest when execute_store aborts with
@@ -85,6 +90,13 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   // disjoint rows and never double-store.
   private tickStartedAt: number | null = null;
   private readonly tickWatchdogMs: number;
+  // Coalesces event-driven wakes so a burst triggers at most one extra drain.
+  private wakePending = false;
+  private unsubscribeWake: (() => void) | null = null;
+  // Never-lose-money gate config.
+  private readonly breakEvenEnabled: boolean;
+  private readonly guardReturnLzFeeMist: bigint;
+  private readonly guardSuiGasMist: bigint;
 
   constructor(
     private readonly evm: EvmService,
@@ -102,6 +114,19 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Explicit @Inject because the `| null` union erases DI type metadata.
     @Optional() @Inject(StagedIntentStore) private readonly staged: StagedIntentStore | null = null,
     @Optional() @Inject(IntentIngest) private readonly ingest: IntentIngest | null = null,
+    // Event-driven wake for the store queue. Optional: without it the fixed poll
+    // still drains the queue, so behaviour degrades to polling, never breaks.
+    @Optional() @Inject(StoreQueueWaker) private readonly waker: StoreQueueWaker | null = null,
+    // Never-lose-money gate + P&L. All optional and gated by BREAK_EVEN_GUARD_ENABLED;
+    // inert until the escrow contracts are live (#395), so the current flow is
+    // unchanged when they are absent or the escrow reader returns null.
+    @Optional()
+    @Inject(BreakEvenGuardService)
+    private readonly breakEven: BreakEvenGuardService | null = null,
+    @Optional()
+    @Inject(SettlementReconciler)
+    private readonly reconciler: SettlementReconciler | null = null,
+    @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
@@ -120,6 +145,14 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Give the client's normal blob delivery a head start before self-healing.
     this.bytesRecoveryGraceMs = this.config.get<number>('BYTES_RECOVERY_GRACE_MS') ?? 45000;
     this.bytesRecoveryBackoffMs = this.config.get<number>('BYTES_RECOVERY_BACKOFF_MS') ?? 60000;
+    // Never-lose-money gate. Off by default; enabled once the escrow contracts are
+    // live and the escrow reader is wired (#395). The return-leg + Sui-gas cost
+    // used for the live break-even recompute mirror the QuoteService estimates.
+    this.breakEvenEnabled = this.config.get<string>('BREAK_EVEN_GUARD_ENABLED', 'false') === 'true';
+    this.guardReturnLzFeeMist = BigInt(
+      this.config.get<string>('QUOTE_RETURN_LZ_FEE_MIST', '1760000000'),
+    );
+    this.guardSuiGasMist = BigInt(this.config.get<string>('QUOTE_SUI_GAS_MIST', '30000000'));
   }
 
   async onModuleInit(): Promise<void> {
@@ -138,6 +171,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Fulfilling intents from the durable store queue (staged_intent)');
     }
 
+    // Drain promptly when a producer (ingest or receive) signals new ready work,
+    // instead of waiting out the poll interval. The poll remains the backstop.
+    if (this.waker) this.unsubscribeWake = this.waker.onWake(() => this.scheduleWake());
+
     // Register the checkpoint callback before streaming so backfill events are
     // not dropped. The callback only durably records the event; storage is done
     // by the claim loop.
@@ -145,9 +182,25 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     this.suiCheckpoint.startStreaming();
   }
 
+  /**
+   * Schedule an out-of-band drain on the next tick of the event loop. Coalesced
+   * (at most one pending wake) so a burst of signals triggers a single drain, and
+   * a no-op while stopped or without a durable queue. The claimed-row DB lease
+   * makes a wake-driven tick safe to overlap with the interval tick.
+   */
+  private scheduleWake(): void {
+    if (this.stopped || !this.staged || this.wakePending) return;
+    this.wakePending = true;
+    setImmediate(() => {
+      this.wakePending = false;
+      void this.tick();
+    });
+  }
+
   async onModuleDestroy(): Promise<void> {
     this.logger.log('Shutting down intent processor...');
     this.stopped = true;
+    if (this.unsubscribeWake) this.unsubscribeWake();
     this.suiCheckpoint.stop();
     // Bounded graceful drain: give in-flight stores up to SHUTDOWN_DRAIN_MS to
     // settle so none is cut mid-flight, but never block shutdown past the budget.
@@ -181,6 +234,10 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         deliveryDigest: event.deliveryDigest || undefined,
       });
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
+      // The row may now be ready (bytes already ingested): drain without waiting
+      // for the poll. If bytes are not in yet, the drain is a cheap no-op and the
+      // later ingest wake (or the poll) picks it up.
+      this.scheduleWake();
     } catch (err) {
       this.logger.error(`[${event.intentId}] Failed to record IntentReceived: ${err}`);
       this.errorReporter.captureException(err, { intentId: event.intentId });
@@ -303,6 +360,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     commitment: IntentCommitment | null,
   ): Promise<void> {
     const intentId = row.intentId;
+    const startedAt = Date.now();
     this.inProcess.add(intentId);
     let released = false;
     const release = () => {
@@ -318,6 +376,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     try {
       await withTimeout(work, this.attemptTimeoutMs);
+      // Relayer processing latency (observe -> work-complete), NOT the LZ
+      // round-trip. This is the metric the <3s deliverable is measured against.
+      this.metrics.observeProcessingLatency((Date.now() - startedAt) / 1000);
       this.metrics.recordIntentProcessed('sui_lz', 'success');
       this.logger.log(`[${intentId}] Intent fulfilled`);
       return;
@@ -381,6 +442,32 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       );
       this.logger.warn(`[${intentId}] Dead-lettered: blob id mismatch`);
       return;
+    }
+
+    // 1b. Never-lose-money gate: BEFORE any WAL spend, recompute the actual cost at
+    // live prices and only proceed if the on-chain escrow covers cost + margin.
+    // Skipping spends nothing; the user is refunded on-chain by the escrow deadline.
+    // Inert unless enabled AND the escrow reader returns terms for this intent.
+    let guardDecision: BreakEvenDecision | null = null;
+    if (this.breakEvenEnabled && this.breakEven && this.escrowReader) {
+      const escrow = await this.escrowReader.getEscrow(intentId, row.srcEid);
+      if (escrow) {
+        guardDecision = await this.breakEven.check({
+          escrowNative: escrow.escrowNative,
+          originToken: escrow.originToken,
+          sizeBytes: row.size ?? 0,
+          returnLzFeeMist: this.guardReturnLzFeeMist,
+          suiGasMist: this.guardSuiGasMist,
+        });
+        if (!guardDecision.proceed) {
+          await staged.markDead(intentId, `break-even guard skip: ${guardDecision.reason}`);
+          this.reconciler?.recordSkip(intentId, guardDecision.reason);
+          this.logger.warn(
+            `[${intentId}] Skipped by break-even guard (no WAL spent): ${guardDecision.reason}`,
+          );
+          return;
+        }
+      }
     }
 
     // 0. Ensure the relayer holds enough WAL to pay for storage.
@@ -471,6 +558,15 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
     // 6. Settle.
     await staged.markDone(intentId);
+
+    // Book the per-intent P&L: the escrow reimbursed us (collected) against the
+    // recomputed spend, proving the never-lose-money invariant per completed intent.
+    if (guardDecision) {
+      this.reconciler?.recordCompletion(intentId, {
+        collectedUsd: guardDecision.escrowUsd,
+        spentUsd: guardDecision.costUsd,
+      });
+    }
   }
 
   /**

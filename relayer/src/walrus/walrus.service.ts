@@ -1,17 +1,19 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SuiService } from '../chain/sui/sui.service';
+import { computeWalCost, WalrusSystemState } from './wal-cost.calculator';
 
 export interface WalrusBlobInfo {
   blobId: string;
   suiObjectId: string;
   endEpoch: number;
   /**
-   * WAL spent to store this blob, in MIST. Metering hook for the M4 user-pays
-   * model. The Walrus SDK writeBlob result does not surface the exact charge
-   * today, so this is undefined until the SDK exposes it (or we compute it from
-   * the storage-payment PTB). Callers must treat undefined as "unknown cost",
-   * never as zero. TODO(M4): populate from the real storage payment.
+   * WAL spent to store this blob, in FROST (WAL's smallest unit). Metering hook
+   * for the M4 user-pays model. The Walrus SDK writeBlob result does not surface
+   * the exact charge, so we recompute it deterministically from the same fresh
+   * on-chain system state the write paid against (see WalCostCalculator). It is
+   * left undefined only when that computation cannot be done; callers must treat
+   * undefined as "unknown cost", never as zero.
    */
   walCostMist?: bigint;
 }
@@ -99,15 +101,60 @@ export class WalrusService implements OnModuleInit {
 
     this.logger.log(`Walrus upload complete: blobId=${result.blobId}`);
 
+    // Recompute the exact WAL charge from the fresh system state the write paid
+    // against. walrusClient caches systemState from the write we just ran, so
+    // reading it back reflects the same epoch/prices, not a stale snapshot. If
+    // this fails we surface undefined ("unknown cost"), never a fabricated zero.
+    const walCostMist = await this.computeWalCost(data.length, walrusClient);
+
     return {
       blobId: result.blobId,
       suiObjectId: result.blobObject.id,
       endEpoch: result.blobObject.storage.end_epoch,
-      // TODO(M4): the SDK writeBlob result does not expose the WAL charge; leave
-      // undefined ("unknown cost") rather than fabricate a value. When the SDK
-      // surfaces it (or we read the storage-payment PTB), populate it here and
-      // the metering hook in the processor will record it automatically.
-      walCostMist: undefined,
+      walCostMist,
+    };
+  }
+
+  /**
+   * Compute the FROST cost of the store we just performed, from the live system
+   * state (shard count + storage/write prices) the write used. Returns undefined
+   * rather than throwing so a metering hiccup never fails an otherwise-good store;
+   * the caller records it only when defined and treats undefined as unknown.
+   */
+  private async computeWalCost(
+    dataLength: number,
+    walrusClient: ReturnType<SuiService['getWalrusClient']>,
+  ): Promise<bigint | undefined> {
+    try {
+      const state = await this.readSystemState(walrusClient);
+      return computeWalCost(dataLength, this.storeEpochs, state).totalCostFrost;
+    } catch (err) {
+      this.logger.warn(`Could not compute WAL storage cost (recording unknown): ${err}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Estimate the WAL storage cost (FROST) for a blob of the given size WITHOUT
+   * storing it, against fresh on-chain state. Used by the quote engine. Unlike
+   * the metering hook this fails loud: a quote must never be built on a fabricated
+   * or unknown cost.
+   */
+  async estimateWalCostFrost(byteLength: number, epochs?: number): Promise<bigint> {
+    const walrusClient = this.sui.getWalrusClient();
+    walrusClient.walrus.reset();
+    const state = await this.readSystemState(walrusClient);
+    return computeWalCost(byteLength, epochs ?? this.storeEpochs, state).totalCostFrost;
+  }
+
+  private async readSystemState(
+    walrusClient: ReturnType<SuiService['getWalrusClient']>,
+  ): Promise<WalrusSystemState> {
+    const sys = await walrusClient.walrus.systemState();
+    return {
+      nShards: Number(sys.committee.n_shards),
+      storagePricePerUnitSize: BigInt(sys.storage_price_per_unit_size),
+      writePricePerUnitSize: BigInt(sys.write_price_per_unit_size),
     };
   }
 
