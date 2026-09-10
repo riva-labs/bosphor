@@ -628,7 +628,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
    * commitVerification + runs lz_receive on Solana, which RELEASES the escrow.
    * If the LZ send path is unavailable, fall back to the owner-gated
    * confirm_execution, which marks the intent executed for observability but is
-   * NON-releasing (the escrow then only refunds on its deadline) — the same trust
+   * NON-releasing (the escrow then only refunds on its deadline), the same trust
    * model as the EVM confirmExecution fallback.
    */
   private async returnToSolana(
