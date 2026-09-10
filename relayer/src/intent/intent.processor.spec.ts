@@ -247,7 +247,9 @@ describe('IntentProcessor durable queue', () => {
     };
     const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
     const escrowReader = {
-      getEscrow: jest.fn().mockResolvedValue({ escrowNative: 400_000_000_000_000n, originToken: 'ETH' }),
+      getEscrow: jest
+        .fn()
+        .mockResolvedValue({ escrowNative: 400_000_000_000_000n, originToken: 'ETH' }),
     };
     const { proc, staged, walrus } = build(
       [makeRow()],
@@ -280,7 +282,9 @@ describe('IntentProcessor durable queue', () => {
     };
     const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
     const escrowReader = {
-      getEscrow: jest.fn().mockResolvedValue({ escrowNative: 800_000_000_000_000n, originToken: 'ETH' }),
+      getEscrow: jest
+        .fn()
+        .mockResolvedValue({ escrowNative: 800_000_000_000_000n, originToken: 'ETH' }),
     };
     const { proc, staged, walrus } = build(
       [makeRow()],

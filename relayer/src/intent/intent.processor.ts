@@ -120,8 +120,12 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Never-lose-money gate + P&L. All optional and gated by BREAK_EVEN_GUARD_ENABLED;
     // inert until the escrow contracts are live (#395), so the current flow is
     // unchanged when they are absent or the escrow reader returns null.
-    @Optional() @Inject(BreakEvenGuardService) private readonly breakEven: BreakEvenGuardService | null = null,
-    @Optional() @Inject(SettlementReconciler) private readonly reconciler: SettlementReconciler | null = null,
+    @Optional()
+    @Inject(BreakEvenGuardService)
+    private readonly breakEven: BreakEvenGuardService | null = null,
+    @Optional()
+    @Inject(SettlementReconciler)
+    private readonly reconciler: SettlementReconciler | null = null,
     @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
@@ -458,7 +462,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         if (!guardDecision.proceed) {
           await staged.markDead(intentId, `break-even guard skip: ${guardDecision.reason}`);
           this.reconciler?.recordSkip(intentId, guardDecision.reason);
-          this.logger.warn(`[${intentId}] Skipped by break-even guard (no WAL spent): ${guardDecision.reason}`);
+          this.logger.warn(
+            `[${intentId}] Skipped by break-even guard (no WAL spent): ${guardDecision.reason}`,
+          );
           return;
         }
       }
@@ -666,11 +672,16 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         throw new Error(
           `[${intentId}] Solana-origin return leg requires a Solana signer ` +
             `(set SOLANA_RELAYER_KEYPAIR); cannot confirm_execution`,
+          { cause: lzErr },
         );
       }
       // Same proof bytes the LZ return would carry: the canonical big-endian blob id.
       const canonicalBlobIdHex = '0x' + walrusBlobIdToField(walrusBlobId).toString('hex');
-      const sig = await this.solana.confirmExecution(intentId, canonicalBlobIdHex, BigInt(endEpoch));
+      const sig = await this.solana.confirmExecution(
+        intentId,
+        canonicalBlobIdHex,
+        BigInt(endEpoch),
+      );
       this.metrics.recordReturnMode('fallback');
       this.logger.log(
         `[${intentId}] Solana return confirmed via confirm_execution (non-releasing): ${sig}`,

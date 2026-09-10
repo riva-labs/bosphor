@@ -52,7 +52,9 @@ export class QuoteService {
     // Return-leg fee and Sui gas are estimated here for the quote; the break-even
     // guard (#390) recomputes them at execution time against live values before
     // any WAL spend, so a stale estimate here never causes a loss.
-    const returnLzFeeMist = BigInt(this.config.get<string>('QUOTE_RETURN_LZ_FEE_MIST', '1760000000'));
+    const returnLzFeeMist = BigInt(
+      this.config.get<string>('QUOTE_RETURN_LZ_FEE_MIST', '1760000000'),
+    );
     const suiGasMist = BigInt(this.config.get<string>('QUOTE_SUI_GAS_MIST', '30000000'));
 
     const engine = new QuoteEngine(this.engineConfig());

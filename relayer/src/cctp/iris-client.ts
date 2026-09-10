@@ -44,7 +44,8 @@ export function parseIrisAttestation(body: unknown): IrisAttestation {
   if (typeof m.message !== 'string' || typeof m.eventNonce !== 'string') {
     throw new Error('Iris message is missing required fields (message/eventNonce)');
   }
-  const complete = m.status === 'complete' && typeof m.attestation === 'string' && m.attestation.startsWith('0x');
+  const complete =
+    m.status === 'complete' && typeof m.attestation === 'string' && m.attestation.startsWith('0x');
   return {
     status: complete ? 'complete' : 'pending',
     message: m.message,

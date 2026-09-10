@@ -74,7 +74,8 @@ export class BenchmarkHarness {
     const firstObserved = Math.min(...this.samples.map((s) => s.observedAtMs));
     const lastCompleted = Math.max(...this.samples.map((s) => s.completedAtMs));
     const windowMs = lastCompleted - firstObserved;
-    const throughputPerSec = windowMs > 0 ? (this.samples.length / windowMs) * 1000 : this.samples.length;
+    const throughputPerSec =
+      windowMs > 0 ? (this.samples.length / windowMs) * 1000 : this.samples.length;
 
     return {
       count: this.samples.length,

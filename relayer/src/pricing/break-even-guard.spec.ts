@@ -56,9 +56,7 @@ describe('evaluateBreakEven', () => {
   });
 
   it('treats a zero-cost store as infinite margin (proceeds)', () => {
-    const d = evaluateBreakEven(
-      inputs({ walCostFrost: 0n, returnLzFeeMist: 0n, suiGasMist: 0n }),
-    );
+    const d = evaluateBreakEven(inputs({ walCostFrost: 0n, returnLzFeeMist: 0n, suiGasMist: 0n }));
     expect(d.costUsd).toBe(0);
     expect(d.marginRatio).toBe(Number.POSITIVE_INFINITY);
     expect(d.proceed).toBe(true);

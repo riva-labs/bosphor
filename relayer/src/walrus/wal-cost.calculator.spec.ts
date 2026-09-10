@@ -74,9 +74,9 @@ describe('computeWalCost', () => {
       expect(() => computeWalCost(1024, 5, { ...STATE, nShards: 0 })).toThrow(/shard/i);
     });
     it('rejects a negative storage price', () => {
-      expect(() =>
-        computeWalCost(1024, 5, { ...STATE, storagePricePerUnitSize: -1n }),
-      ).toThrow(/price/i);
+      expect(() => computeWalCost(1024, 5, { ...STATE, storagePricePerUnitSize: -1n })).toThrow(
+        /price/i,
+      );
     });
     it('rejects a missing write price', () => {
       expect(() =>

@@ -104,7 +104,10 @@ describe('PriceOracle', () => {
       ...(coingeckoFixture as Record<string, unknown>),
       ethereum: { usd: 1.0, last_updated_at: 1757030400 },
     };
-    const oracle = new PriceOracle(baseConfig(), makeFetch({ hermes: badHermes, coingecko: badCg }));
+    const oracle = new PriceOracle(
+      baseConfig(),
+      makeFetch({ hermes: badHermes, coingecko: badCg }),
+    );
     await expect(oracle.getPrices()).rejects.toThrow(/sanity|bound/i);
   });
 
