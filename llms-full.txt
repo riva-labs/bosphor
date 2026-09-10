@@ -207,6 +207,38 @@ The canary reports failed probes to Sentry when `SENTRY_DSN` is set, tagged with
 ## Changelog
 
 
+## Milestone 4: Payment Flow & Integration Hardening
+
+Storing becomes a paid operation: the relayer stops fronting the Walrus cost, and
+users escrow payment on the origin chain, released by the trustless LayerZero
+proof.
+
+### Added
+
+- **Origin-chain payment flow**: the EVM `BosphorEscrowAdapter` and a Solana
+  escrow vault escrow the user's payment at submit, release it to the relayer on
+  a genuine proof, and refund the payer after a deadline. The EVM (Sepolia) path
+  is live on testnet and validated end to end; the Solana release path is being
+  finalized. See [Payment flow](payment-flow.md) and the
+  [contract interface](contract-interface.md).
+
+- **Off-chain quoting**: a relayer `POST /quote` endpoint and the SDK
+  `client.storePriced()` / `priceQuote()` surface a single all-in origin-native
+  amount plus a USD breakdown, priced from a multi-source oracle (Pyth Hermes +
+  CoinGecko) with staleness and sanity bounds. See [Public API](public-api.md).
+
+- **Never lose money**: a relayer break-even guard recomputes cost at live prices
+  before any WAL spend and skips unprofitable intents (which then refund), with a
+  per-intent profit-and-loss ledger and a negative-margin alert.
+
+- **Sub-3s processing + benchmarks**: an event-driven store-queue drain and a
+  benchmark harness reporting p50/p95/p99 relayer processing latency (distinct
+  from the LayerZero round-trip).
+
+- **USDC/CCTP scaffolding**: an opt-in USDC deposit via a Permit2 witness bound to
+  the intent id, with CCTP settlement scaffolding behind mocks (live wiring is a
+  fast-follow).
+
 ## v0.2.0, Milestone 2: Proof Validation & System Stabilization
 
 Operational hardening of the cross-chain pipeline: live monitoring, continuous validation, a public data surface, and resilience improvements.
@@ -512,6 +544,37 @@ Update the trusted relayer address. Owner-only.
 ```solidity
 function setRelayer(address _relayer) external; // onlyOwner
 ```
+
+## BosphorEscrowAdapter.sol (EVM, Milestone 4)
+
+The escrow adapter is the paid variant of `BosphorAdapter`. `submitIntent` is
+unchanged in signature but now escrows the `msg.value` surplus above the
+LayerZero fee, keyed by the intent id. Release is gated on a genuine proof; the
+owner `confirmExecution` fallback marks executed but never moves escrowed funds.
+See the [payment flow](./payment-flow.md) for the model and the SDK usage.
+
+```solidity
+// Deposit at submit: msg.value = LZ fee + escrow. Only the fee reaches the
+// endpoint; the surplus is escrowed for this intent.
+function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32);
+
+// The escrow record for an intent (status: 0 None, 1 Pending, 2 Released, 3 Refunded).
+function getEscrow(bytes32 intentId) external view
+    returns (address payer, address token, uint256 amount, uint64 deadline, uint8 status);
+
+// Permissionless once the deadline passes: credits the recorded payer.
+function refund(bytes32 intentId) external;
+
+// Pull-payment: relayer withdraws released funds, payers withdraw refunds.
+function withdraw() external;              // native (ETH)
+function withdrawToken(address token) external; // ERC20 (USDC path)
+```
+
+Release happens inside `_lzReceive` after the returned blob id matches the
+commitment: the escrow moves to the relayer's withdrawable balance. A USDC
+deposit path via a Permit2 witness bound to the intent id
+(`depositUsdcWithPermit2`, enabled by `setPermit2`) is available opt-in; native
+is the default.
 
 **Emits**: `RelayerUpdated(oldRelayer, newRelayer)`
 
@@ -1701,6 +1764,136 @@ The relayer pays LZ messaging fees in SUI. Before sending a proof, the relayer c
 
 ---
 
+## Payment flow
+
+# Origin-chain payment flow
+
+From Milestone 4, storing on Bosphor is a paid operation. Instead of the relayer
+fronting the Walrus cost for free, the user escrows payment on the origin chain
+and that escrow is released to the relayer only when the trustless LayerZero
+proof lands. If the store never completes, the escrow refunds to the payer after
+a deadline. You always pay one all-in amount in the origin chain's native token
+(ETH on EVM, SOL on Solana), quoted off chain.
+
+:::info Availability
+The EVM (Sepolia) escrow flow is live on testnet and validated end to end,
+including the trustless proof-gated release and the deadline refund. The Solana
+origin-chain payment path (the escrow vault and its release) is being finalized;
+until then, use the EVM origin for paid stores.
+:::
+
+## How it works
+
+```
+submit (pay escrow + LZ fee)  ->  LZ  ->  Sui lz_receive  ->  relayer stores on Walrus
+      |                                                              |
+   escrow held on origin                                     lz_send_proof
+      |                                                              |
+      +<----------------- proof releases escrow to relayer <---------+
+
+no proof by deadline  ->  anyone calls refund(intentId)  ->  payer credited
+```
+
+1. **Quote (off chain).** The relayer prices the full cost stack, the Walrus
+   storage, the Sui gas, and the LayerZero return leg, into a single origin-native
+   amount with buffers and a service margin. Contracts hold no oracle.
+2. **Submit + pay.** You send `msg.value = forward LZ fee + escrow`. The adapter
+   forwards only the LayerZero fee to the endpoint and escrows the rest, keyed by
+   the intent id.
+3. **Release on proof.** When the genuine Sui-originated proof arrives at
+   `_lzReceive` and the returned blob id matches the commitment, the escrow is
+   released to the relayer (pull-payment: it later calls `withdraw`).
+4. **Refund on timeout.** If no proof lands by the deadline, anyone can call
+   `refund(intentId)` and the recorded payer is credited. The relayer only ever
+   earns on a completed store.
+
+The forward LayerZero fee and origin gas are paid by you directly (spent by the
+send and the transaction itself); LayerZero refunds any surplus. Only the escrow
+bucket, the relayer-fronted cost, is custodied.
+
+## Pay in one call (SDK)
+
+The SDK adds `storePriced()`: quote, pay, upload, and await-proof in one call. It
+surfaces the full breakdown so you can show the user what they are paying before
+they sign. The EVM origin is live; the Solana `storePriced()` shares the same
+shape and lands with the Solana release path (see Availability above).
+
+```ts
+import { createBosphorClient } from "@bosphor/sdk/evm";
+
+const client = createBosphorClient({ adapter, relayerUrl, dstEid });
+
+// Preview the quote (optional).
+const encoded = await client.encode(fileBytes, { epochs: 5 });
+const quote = await client.priceQuote(encoded);
+console.log(quote.breakdown.totalUsd, quote.totalNative); // USD + wei
+
+// Pay and store in one call. The result carries the quote that was used.
+const { intentId, blobId, endEpoch, quote: used } = await client.storePriced(
+  fileBytes,
+  { epochs: 5 },
+);
+```
+
+The lower-level steps, `priceQuote`, `submitPaid`, `upload`, `awaitProof`, are all
+individually callable. See the SDK examples `store-file-priced.evm.ts` and
+`store-file-priced.solana.ts`.
+
+## The quote endpoint
+
+The relayer exposes the pricing as `POST /quote`. Bigint amounts are decimal
+strings so no precision is lost.
+
+```bash
+curl -s https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1048576,"originToken":"ETH","forwardLzFeeNative":"1211000000000000"}'
+```
+
+```json
+{
+  "originToken": "ETH",
+  "escrowNative": "821243000000000",
+  "forwardNative": "1211000000000000",
+  "totalNative": "2032243000000000",
+  "breakdown": { "escrowUsd": 2.05, "totalUsd": 5.18, "floorApplied": false, "...": "..." }
+}
+```
+
+- `escrowNative`, the relayer-fronted bucket you escrow.
+- `forwardNative`, the forward LZ fee (and origin gas) you pay directly.
+- `totalNative = escrowNative + forwardNative`, your `msg.value` at submit.
+
+Prices come from a multi-source oracle (Pyth Hermes primary, CoinGecko fallback)
+with staleness and sanity bounds; a spend or refund decision never rides on a
+single or fabricated feed.
+
+## Never lose money, by construction
+
+Before spending any WAL, the relayer runs a break-even guard: it recomputes the
+actual cost at live prices and only proceeds if the escrow covers cost plus a
+minimum margin. Otherwise it skips, spends nothing, and the intent refunds on its
+deadline. Every completed store is profitable by construction, and every skipped
+one costs nothing. A per-intent profit-and-loss ledger and a negative-margin
+alert make the invariant observable.
+
+## Escrow contract surface
+
+The escrow adapter adds these to the [contract interface](./contract-interface.md):
+
+- `submitIntent{value: fee + escrow}(...)`, escrows the surplus above the LZ fee.
+- `getEscrow(intentId) -> (payer, token, amount, deadline, status)`, the record.
+- `refund(intentId)`, permissionless after the deadline; pays the payer.
+- `withdraw()` / `withdrawToken(token)`, pull-payment for released/refunded funds.
+
+The owner `confirmExecution` fallback marks an intent executed for observability
+but never moves escrowed funds: only a genuine proof can release the escrow.
+
+Payment is native (ETH/SOL) today. A USDC path (Permit2 witness deposit + CCTP
+settlement) is scaffolded behind mocks as a fast-follow.
+
+---
+
 ## Public Intent Feed API
 
 
@@ -1773,6 +1966,41 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 
 The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
 
+## Quote (pricing)
+
+From Milestone 4 a store is paid. The relayer is the single pricing source of
+truth (contracts hold no oracle), exposed as a quote endpoint. See the
+[payment flow](./payment-flow.md) for the full model.
+
+### `POST {relayerBaseUrl}/quote`
+
+Body (JSON): `sizeBytes` (number), `originToken` (`"ETH"` or `"SOL"`), and
+optional `epochs`, `forwardLzFeeNative` (decimal string, from the on-chain
+adapter quote), `originGasNative` (decimal string).
+
+```bash
+curl -s https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1048576,"originToken":"ETH","forwardLzFeeNative":"1211000000000000"}'
+```
+
+Response, bigint amounts are decimal strings so no precision is lost:
+
+```json
+{
+  "originToken": "ETH",
+  "escrowNative": "821243000000000",
+  "forwardNative": "1211000000000000",
+  "totalNative": "2032243000000000",
+  "breakdown": { "escrowUsd": 2.05, "totalUsd": 5.18, "floorApplied": false }
+}
+```
+
+`totalNative` is your `msg.value` at submit (`escrowNative + forwardNative`). If
+every price source fails or a price is stale/implausible, the endpoint fails loud
+rather than returning a fabricated quote. The SDK wraps this as
+`client.priceQuote()` / `client.storePriced()`.
+
 ## Blob ingest (out-of-band)
 
 This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
@@ -1831,8 +2059,9 @@ Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
 
 :::tip Building an app? Use the SDK.
 This guide deploys the full protocol yourself. To **integrate** Bosphor into an
-app, you do not deploy anything, install `@bosphor/sdk` and call `store()`. See
-the SDK docs at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)** for the EVM and
+app, you do not deploy anything, install `@bosphor/sdk` and call `store()` (free
+tier) or `storePriced()` for the Milestone 4 [origin-chain payment flow](payment-flow.md).
+See the SDK docs at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)** for the EVM and
 Solana guides and the API reference.
 :::
 
