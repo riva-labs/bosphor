@@ -66,7 +66,9 @@ export class PriceOracle {
     const chosen = freshPrimary ?? freshFallback;
     if (!chosen) {
       if (primary || fallback) {
-        throw new Error(`PriceOracle: only stale ${token} prices available (all past staleness bound)`);
+        throw new Error(
+          `PriceOracle: only stale ${token} prices available (all past staleness bound)`,
+        );
       }
       throw new Error(`PriceOracle: no source returned a ${token} price`);
     }

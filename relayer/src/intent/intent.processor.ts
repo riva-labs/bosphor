@@ -120,8 +120,12 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Never-lose-money gate + P&L. All optional and gated by BREAK_EVEN_GUARD_ENABLED;
     // inert until the escrow contracts are live (#395), so the current flow is
     // unchanged when they are absent or the escrow reader returns null.
-    @Optional() @Inject(BreakEvenGuardService) private readonly breakEven: BreakEvenGuardService | null = null,
-    @Optional() @Inject(SettlementReconciler) private readonly reconciler: SettlementReconciler | null = null,
+    @Optional()
+    @Inject(BreakEvenGuardService)
+    private readonly breakEven: BreakEvenGuardService | null = null,
+    @Optional()
+    @Inject(SettlementReconciler)
+    private readonly reconciler: SettlementReconciler | null = null,
     @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
@@ -458,7 +462,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         if (!guardDecision.proceed) {
           await staged.markDead(intentId, `break-even guard skip: ${guardDecision.reason}`);
           this.reconciler?.recordSkip(intentId, guardDecision.reason);
-          this.logger.warn(`[${intentId}] Skipped by break-even guard (no WAL spent): ${guardDecision.reason}`);
+          this.logger.warn(
+            `[${intentId}] Skipped by break-even guard (no WAL spent): ${guardDecision.reason}`,
+          );
           return;
         }
       }

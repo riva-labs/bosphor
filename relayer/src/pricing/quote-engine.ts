@@ -1,5 +1,11 @@
 import { PriceSet, PriceToken } from './price-oracle.types';
-import { FROST_DECIMALS, MIST_DECIMALS, NATIVE_DECIMALS, amountToUsd, usdToNative } from './pricing-math';
+import {
+  FROST_DECIMALS,
+  MIST_DECIMALS,
+  NATIVE_DECIMALS,
+  amountToUsd,
+  usdToNative,
+} from './pricing-math';
 
 /** Native token of the origin chain the user pays on. */
 export type OriginToken = 'ETH' | 'SOL';

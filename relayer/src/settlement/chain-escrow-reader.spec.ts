@@ -12,14 +12,16 @@ function make(
   return new ChainEscrowReader(
     { getEscrow: jest.fn().mockResolvedValue(null), ...evm } as EvmEscrowSource,
     { getEscrow: jest.fn().mockResolvedValue(null), ...solana } as SolanaEscrowSource,
-    { get: (_k: string, d?: unknown) => (solanaSrcEid ?? d) } as unknown as ConfigService,
+    { get: (_k: string, d?: unknown) => solanaSrcEid ?? d } as unknown as ConfigService,
   );
 }
 
 describe('ChainEscrowReader', () => {
   it('maps a native EVM escrow to ETH', async () => {
     const reader = make({
-      getEscrow: jest.fn().mockResolvedValue({ token: ZERO, amount: 800_000_000_000_000n, status: 1 }),
+      getEscrow: jest
+        .fn()
+        .mockResolvedValue({ token: ZERO, amount: 800_000_000_000_000n, status: 1 }),
     });
     const info = await reader.getEscrow('0xabc', 40161);
     expect(info).toEqual({ escrowNative: 800_000_000_000_000n, originToken: 'ETH' });
