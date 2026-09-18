@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0 (2026-09-18)
+
+### Features
+
+- feat(relayer): add compute-latency metric isolating relayer reaction time
+
+### Bug Fixes
+
+- fix(relayer): stop presenting synthetic bench as the real <3s KPI
+
 ## 0.12.0 (2026-09-09)
 
 ### Features
