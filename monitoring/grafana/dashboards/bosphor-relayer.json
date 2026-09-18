@@ -20,7 +20,7 @@
   "timezone": "",
   "title": "Bosphor Relayer",
   "uid": "bosphor-relayer",
-  "version": 2,
+  "version": 3,
   "panels": [
     {
       "id": 1,
@@ -486,7 +486,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 40
       },
       "datasource": {
         "type": "grafana-postgresql-datasource",
@@ -864,6 +864,114 @@
           },
           "expr": "bosphor_relayer_staged_bytes",
           "legendFormat": "staged bytes"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Relayer compute latency p50 / p95 (s) \u2014 <3s KPI",
+      "description": "COMPUTE latency (bosphor_relayer_compute_latency_seconds) = the store span MINUS external chain/Walrus/LZ I/O; this is the relayer's own reaction time and the M4 <3s KPI (green below 3s). The dashed end-to-end p50 (bosphor_relayer_processing_latency_seconds) is observe to work-complete, I/O-bound (~10-30s on public testnet) and is shown for context only, NOT the KPI. See #411 and the relayer doc (Latency metrics).",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bosphor-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "end-to-end p50 (I/O-bound, not KPI)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(bosphor_relayer_compute_latency_seconds_bucket[30m])) by (le))",
+          "legendFormat": "compute p50 (KPI)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(bosphor_relayer_compute_latency_seconds_bucket[30m])) by (le))",
+          "legendFormat": "compute p95 (KPI)"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(bosphor_relayer_processing_latency_seconds_bucket[30m])) by (le))",
+          "legendFormat": "end-to-end p50 (I/O-bound, not KPI)"
         }
       ]
     }
