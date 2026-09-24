@@ -39,6 +39,7 @@ consumer never pulls them:
 - `ethers` (EVM client)
 - `@solana/web3.js` (Solana client, default backend)
 - `@mysten/walrus` and `@mysten/sui` (client-side blob-id computation)
+- `@layerzerolabs/lz-solana-sdk-v2` (only for `resolveEndpointAccounts`)
 
 The Solana path is Anchor-free: the SDK owns the program's binary interface (see
 `src/solana/program.ts`), so no generated IDL is required.
@@ -55,6 +56,22 @@ For the full Solana `store()` flow:
 npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
 ```
 
+## Testnet preset
+
+`TESTNET` (exported from every entry point) holds every address, endpoint id,
+LayerZero option, and URL of the hosted Bosphor testnet, so you never copy them by
+hand:
+
+| Field | Value |
+|-------|-------|
+| `TESTNET.relayerUrl` | `https://api.bosphor.xyz/testnet` |
+| `TESTNET.evm.adapterAddress` | `0x3296686Fc61076d27488278c1da5468E1e0A7156` (Sepolia, EID 40161) |
+| `TESTNET.solana.programId` | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` (devnet, EID 40168) |
+| `TESTNET.sui.eid` | `40378` (Sui testnet, the destination) |
+
+The one-call helpers below default to it. `walrusBlobUrl(blobId)` turns a returned
+blob id into a Walrus aggregator URL you can open in a browser.
+
 ## EVM: store a file in one call
 
 `store(data, { epochs })` runs the whole path and returns the verified result:
@@ -65,23 +82,20 @@ encode -> quote -> submit -> upload -> awaitProof
 
 ```ts
 import { ethers } from "ethers";
-import { createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
+import { createBosphorClientFromSigner } from "@bosphor/sdk/evm";
 
-const signer = new ethers.Wallet(PRIVATE_KEY, provider);
-const contract = new ethers.Contract(ADAPTER_ADDRESS, ADAPTER_ABI, signer);
-
-const client = createBosphorClient({
-  adapter: fromEthersContract(contract),
-  relayerUrl: "https://api.bosphor.xyz/testnet",
-  dstEid: 40378, // Sui testnet
-});
+const signer = new ethers.Wallet(PRIVATE_KEY, new ethers.JsonRpcProvider(SEPOLIA_RPC_URL));
+const client = await createBosphorClientFromSigner(signer); // TESTNET by default
 
 const { intentId, blobId, endEpoch, txHash } = await client.store(fileBytes, { epochs: 5 });
 ```
 
-`fromEthersContract(contract)` builds the whole adapter surface, including the
-`queryProof` reader the client needs to resolve `endEpoch`, so there is no cast
-and no boilerplate. `store()` returns the origin `txHash` alongside the verified
+`createBosphorClientFromSigner` binds the adapter with the bundled `ADAPTER_ABI`,
+wires the `queryProof` reader the client needs to resolve `endEpoch`, and fills the
+relayer URL, destination endpoint id, and LayerZero options from the preset. To
+wire it by hand (a custom deployment, or a different `ethers` setup), use
+`new ethers.Contract(address, ADAPTER_ABI, signer)` with `fromEthersContract` and
+`createBosphorClient`. `store()` returns the origin `txHash` alongside the verified
 result. Every step is verified against on-chain state before `store()` resolves.
 Nothing is fabricated: a relayer rejection throws `RelayerUploadError` with the
 relayer's reason, and an intent that never executes throws `ProofTimeoutError`.
@@ -150,23 +164,22 @@ Solana has no separate `quote` step: the LayerZero messaging fee is passed as
 
 ```ts
 import { Connection, Keypair } from "@solana/web3.js";
-import { BosphorSolanaClient, createDefaultSolanaChain } from "@bosphor/sdk/solana";
+import { TESTNET, createBosphorSolanaClientFromKeypair } from "@bosphor/sdk/solana";
 
-const connection = new Connection(RPC_URL, "confirmed");
-
-// Anchor-free: no IDL, no Program. `endpointAccounts` are the LayerZero send
-// accounts assembled per the deployed LZ config.
-const chain = await createDefaultSolanaChain({ connection, wallet: payer /*, endpointAccounts */ });
-
-const client = new BosphorSolanaClient({
-  chain,
-  relayerUrl: "https://relayer.bosphor.xyz",
-  dstEid: 40378, // Sui testnet
-  nativeFee: quotedLamports,
-});
+const connection = new Connection(TESTNET.solana.rpcUrl, "confirmed");
+const client = await createBosphorSolanaClientFromKeypair({ connection, wallet: keypair });
 
 const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
 ```
+
+`submit_intent` makes a CPI into the LayerZero endpoint, which needs a fixed list
+of "send" accounts. The helper uses `testnetEndpointAccounts(payer)`, a published
+snapshot of that list for the testnet pathway. If LayerZero ever changes the
+pathway's configuration, resolve the live list instead with
+`resolveEndpointAccounts({ connection, payer })` (needs the optional peer
+`@layerzerolabs/lz-solana-sdk-v2`) and pass it as `endpointAccounts`. The
+lower-level `createDefaultSolanaChain` + `BosphorSolanaClient` pair stays available
+for full control.
 
 The canonical intent id is the SAME keccak digest as the EVM and Sui paths (shared
 `bosphor_commitment_codec`). The backend derives it from the on-chain nonce with
@@ -234,10 +247,10 @@ The errors are exported from the core `@bosphor/sdk` and from both chain subpath
 
 | Import | Exports |
 |--------|---------|
-| `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `Hex` |
+| `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`; `fetchQuote`; `TESTNET`, `networks`, `walrusBlobUrl`, `blobIdToBase64Url`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `Hex`, `PricedQuote`, `QuoteRequest`, `QuoteBreakdown`, `BosphorNetwork` |
 | `@bosphor/sdk/commitment` | The commitment codec on its own. |
-| `@bosphor/sdk/evm` | `BosphorEvmClient`, `createBosphorClient`, `fromEthersContract`, `decodeProofEndEpoch`, `defaultComputeBlob`, `createDefaultComputeBlob`; the errors + core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee`, `EthersContractLike` |
-| `@bosphor/sdk/solana` | `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the errors + core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions` |
+| `@bosphor/sdk/evm` | `createBosphorClientFromSigner`, `connectAdapter`, `ADAPTER_ABI`, `EscrowStatus`, `BosphorEvmClient`, `createBosphorClient`, `fromEthersContract`, `decodeProofEndEpoch`, `defaultComputeBlob`, `createDefaultComputeBlob`; the preset, errors, and core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee`, `EthersContractLike`, `CreateClientFromSignerOptions` |
+| `@bosphor/sdk/solana` | `createBosphorSolanaClientFromKeypair`, `testnetEndpointAccounts`, `resolveEndpointAccounts`, `TESTNET_SEND_ACCOUNTS`, `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the preset, errors, and core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions`, `CreateSolanaClientFromKeypairOptions` |
 
 ## For Solidity integrators
 
