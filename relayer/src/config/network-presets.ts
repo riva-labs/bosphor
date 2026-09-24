@@ -78,6 +78,14 @@ export function isMainnetEid(eid: number): boolean {
 }
 
 /** URL substrings that betray a non-mainnet endpoint. */
+function urlHost(v: string): string {
+  try {
+    return new URL(v).host;
+  } catch {
+    return '<unparseable url>';
+  }
+}
+
 const TESTNET_URL_MARKERS = ['testnet', 'devnet', 'sepolia', 'holesky'];
 
 export function looksLikeTestnetUrl(url: string): boolean {
@@ -122,7 +130,8 @@ export function mainnetConsistencyErrors(cfg: Record<string, unknown>): string[]
   for (const key of ['EVM_RPC_URL', 'SUI_GRPC_URL', 'SOLANA_RPC_URL', 'WALRUS_RELAY_URL']) {
     const v = cfg[key];
     if (typeof v === 'string' && v !== '' && looksLikeTestnetUrl(v)) {
-      errors.push(`${key}=${v} looks like a testnet/devnet endpoint`);
+      // Host only: provider URLs often carry an API key in the path or query.
+      errors.push(`${key} (host ${urlHost(v)}) looks like a testnet/devnet endpoint`);
     }
   }
   return errors;

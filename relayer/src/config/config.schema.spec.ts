@@ -146,8 +146,18 @@ describe('config schema network presets', () => {
         SUI_GRPC_URL: 'https://sui-testnet.mystenlabs.com',
         SOLANA_RPC_URL: 'https://api.devnet.solana.com',
       });
-      expect(error?.message).toMatch(/SUI_GRPC_URL=/);
-      expect(error?.message).toMatch(/SOLANA_RPC_URL=/);
+      expect(error?.message).toMatch(/SUI_GRPC_URL \(host sui-testnet\.mystenlabs\.com\)/);
+      expect(error?.message).toMatch(/SOLANA_RPC_URL \(host api\.devnet\.solana\.com\)/);
+    });
+
+    it('never echoes a provider API key from a rejected RPC URL', () => {
+      const { error } = validate({
+        ...BASE,
+        ...MAINNET_REQUIRED,
+        EVM_RPC_URL: 'https://eth-sepolia.g.alchemy.com/v2/SECRETKEY123',
+      });
+      expect(error?.message).toMatch(/EVM_RPC_URL/);
+      expect(error?.message).not.toMatch(/SECRETKEY123/);
     });
   });
 });
