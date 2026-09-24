@@ -145,6 +145,10 @@ export function makeIoFakes(lat: IoLatency, walrusBlobId: string) {
         walCostMist: BigInt(bytes.length),
       };
     },
+    // Pure policy in production (plus one cached system-state read), so no latency.
+    async resolveStoreEpochs(committed?: number | null) {
+      return { ok: true as const, epochs: Math.max(committed ?? 5, 1), source: 'committed' as const };
+    },
     async fetchBlobFromAggregator(): Promise<Buffer> {
       throw new Error('byte recovery is not exercised by the load generator');
     },
@@ -162,6 +166,10 @@ export function makeIoFakes(lat: IoLatency, walrusBlobId: string) {
     getLzPackageId: () => '0xloadgen',
   };
   const suiLz = {
+    // Only hit for legacy rows without persisted epochs; seeded rows carry them.
+    async readCommittedStorageEpochs() {
+      return 5;
+    },
     async quoteLzFee() {
       await sleep(lat.lzQuote());
       return 1_000_000n;
