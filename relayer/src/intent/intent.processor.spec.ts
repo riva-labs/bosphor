@@ -75,6 +75,15 @@ function build(
       walCostMist: undefined,
     }),
     fetchBlobFromAggregator: jest.fn().mockResolvedValue(Buffer.from('recovered-bytes')),
+    // Mirrors WalrusService.resolveStoreEpochs with a cap of 53: committed epochs
+    // are used as-is, a missing value falls back to the legacy default of 5.
+    resolveStoreEpochs: jest.fn(async (committed?: number) => {
+      if (committed === undefined || committed === null) {
+        return { ok: true, epochs: 5, source: 'legacy_default' };
+      }
+      if (committed > 53) return { ok: false, reason: `committed ${committed} exceed the max 53` };
+      return { ok: true, epochs: committed, source: 'committed' };
+    }),
   };
   const ingest = { ingest: jest.fn().mockResolvedValue({ ok: true, intentId: '0xintent' }) };
   const sui = {
@@ -315,6 +324,85 @@ describe('IntentProcessor durable queue', () => {
     expect(escrowReader.getEscrow).not.toHaveBeenCalled();
     expect(breakEven.check).not.toHaveBeenCalled();
     expect(walrus.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('stores for the committed storage epochs, not the global default', async () => {
+    const { proc, walrus } = build([makeRow({ storageEpochs: 12 })]);
+    await proc.tick();
+
+    expect(walrus.resolveStoreEpochs).toHaveBeenCalledWith(12);
+    expect(walrus.upload).toHaveBeenCalledWith(expect.any(Buffer), 12);
+  });
+
+  it('prices the break-even guard for the same epochs the store uses', async () => {
+    const breakEven = {
+      check: jest.fn().mockResolvedValue({
+        proceed: true,
+        reason: 'ok',
+        escrowUsd: 2,
+        costUsd: 1,
+        requiredUsd: 1.1,
+        marginUsd: 1,
+        marginRatio: 1,
+      }),
+    };
+    const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
+    const escrowReader = {
+      getEscrow: jest.fn().mockResolvedValue({ escrowNative: 1n, originToken: 'ETH' }),
+    };
+    const { proc, walrus } = build(
+      [makeRow({ storageEpochs: 20 })],
+      { BREAK_EVEN_GUARD_ENABLED: 'true' },
+      { breakEven, reconciler, escrowReader },
+    );
+    await proc.tick();
+
+    expect(breakEven.check).toHaveBeenCalledWith(expect.objectContaining({ epochs: 20 }));
+    expect(walrus.upload).toHaveBeenCalledWith(expect.any(Buffer), 20);
+    // The reconciler books the P&L from that same-epochs guard cost.
+    expect(reconciler.recordCompletion).toHaveBeenCalledWith('0xintent', {
+      collectedUsd: 2,
+      spentUsd: 1,
+    });
+  });
+
+  it('dead-letters an over-max commitment before any spend instead of shortening it', async () => {
+    const breakEven = { check: jest.fn() };
+    const reconciler = { recordSkip: jest.fn(), recordCompletion: jest.fn() };
+    const escrowReader = { getEscrow: jest.fn() };
+    const { proc, staged, walrus, sui } = build(
+      [makeRow({ storageEpochs: 54 })],
+      { BREAK_EVEN_GUARD_ENABLED: 'true' },
+      { breakEven, reconciler, escrowReader },
+    );
+    await proc.tick();
+
+    expect(walrus.upload).not.toHaveBeenCalled();
+    expect(sui.executeStore).not.toHaveBeenCalled();
+    expect(breakEven.check).not.toHaveBeenCalled();
+    expect(staged.markDead).toHaveBeenCalledWith(
+      '0xintent',
+      expect.stringContaining('storage epochs rejected'),
+    );
+    expect(reconciler.recordSkip).toHaveBeenCalledWith('0xintent', expect.any(String));
+  });
+
+  it('falls back to the legacy default only when the row has no committed epochs', async () => {
+    const { proc, walrus } = build([makeRow({ storageEpochs: undefined })]);
+    await proc.tick();
+
+    expect(walrus.resolveStoreEpochs).toHaveBeenCalledWith(undefined);
+    expect(walrus.upload).toHaveBeenCalledWith(expect.any(Buffer), 5);
+  });
+
+  it('does not re-resolve epochs for a row whose blob is already uploaded', async () => {
+    const { proc, walrus } = build([
+      makeRow({ walrusObjectId: '0xobj', walrusBlobId: COMMITTED_B64URL, endEpoch: 42 }),
+    ]);
+    await proc.tick();
+
+    expect(walrus.resolveStoreEpochs).not.toHaveBeenCalled();
+    expect(walrus.upload).not.toHaveBeenCalled();
   });
 
   it('counts a return settled over the LayerZero proof path as mode=proof', async () => {

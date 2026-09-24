@@ -465,6 +465,35 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // 1a. Storage duration: store for the epochs the user COMMITTED (and paid for),
+    // never a global setting. execute_store aborts unless the blob covers
+    // current_epoch + committed epochs, so a shorter store would burn WAL for
+    // nothing. A commitment above the cap (WALRUS_MAX_EPOCHS or Walrus's own
+    // max_epochs_ahead) is dead-lettered here, BEFORE any spend, and never
+    // silently shortened: the origin escrow refunds on its deadline, the same
+    // outcome as a break-even skip. Only a legacy row with no committed epochs
+    // falls back to WALRUS_STORE_EPOCHS, and that fallback is logged.
+    // Skipped once the blob is uploaded (retry): the duration is already fixed.
+    let storeEpochs: number | undefined;
+    if (!row.walrusObjectId) {
+      const resolution = await io.time(() => this.walrus.resolveStoreEpochs(row.storageEpochs));
+      if (!resolution.ok) {
+        await staged.markDead(intentId, `storage epochs rejected: ${resolution.reason}`);
+        this.reconciler?.recordSkip(intentId, resolution.reason);
+        this.logger.warn(
+          `[${intentId}] Not stored (no WAL spent, escrow refunds on deadline): ${resolution.reason}`,
+        );
+        return;
+      }
+      if (resolution.source === 'legacy_default') {
+        this.logger.warn(
+          `[${intentId}] Commitment carries no storage epochs (legacy); ` +
+            `falling back to WALRUS_STORE_EPOCHS=${resolution.epochs}`,
+        );
+      }
+      storeEpochs = resolution.epochs;
+    }
+
     // 1b. Never-lose-money gate: BEFORE any WAL spend, recompute the actual cost at
     // live prices and only proceed if the on-chain escrow covers cost + margin.
     // Skipping spends nothing; the user is refunded on-chain by the escrow deadline.
@@ -478,6 +507,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
             escrowNative: escrow.escrowNative,
             originToken: escrow.originToken,
             sizeBytes: row.size ?? 0,
+            // Price the SAME duration the store will buy, so the guard's cost
+            // (and the P&L the reconciler books from it) matches the real spend.
+            epochs: storeEpochs ?? row.storageEpochs,
             returnLzFeeMist: this.guardReturnLzFeeMist,
             suiGasMist: this.guardSuiGasMist,
           }),
@@ -506,7 +538,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       if (!bytes) throw new Error('ready row has no bytes to upload');
       this.logger.log(`[${intentId}] Uploading ingested bytes to Walrus...`);
       const uploadStart = Date.now();
-      const info = await io.time(() => this.walrus.upload(bytes));
+      const info = await io.time(() => this.walrus.upload(bytes, storeEpochs!));
       this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
       await staged.persistUpload(intentId, {
         walrusObjectId: info.suiObjectId,
