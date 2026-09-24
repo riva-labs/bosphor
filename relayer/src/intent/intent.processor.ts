@@ -402,14 +402,25 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       const nextAt = Date.now() + backoff;
 
       if (err instanceof StoreError && err.phase === 'post') {
-        // Storage is safe; keep retrying the return leg. Never dead-letter it.
-        await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
+        // The blob is safe on Walrus + Sui. Retry the return leg, but CAP it:
+        // retrying forever risks minting a fresh LZ outbound nonce on every
+        // attempt (a send can land on-chain even when the client errors), and
+        // those orphaned return packets accumulate and wedge the gapless return
+        // channel. Past the cap we stop and dead-letter the RETURN only; storage
+        // is never lost and the origin escrow refunds on its deadline, so the
+        // never-lose-money invariant holds.
         if (attempts >= this.returnMaxAttempts) {
+          await this.staged!.markDead(
+            intentId,
+            `return proof undelivered after ${attempts} attempts (capped): ${err}`,
+          );
           this.metrics.recordDeadLetter('return');
           this.logger.error(
-            `[${intentId}] Stored but proof undelivered after ${attempts} attempts: ${err}`,
+            `[${intentId}] Return leg capped after ${attempts} attempts; ` +
+              `blob is stored, escrow refunds on deadline: ${err}`,
           );
         } else {
+          await this.staged!.reschedule(intentId, attempts, nextAt, String(err));
           this.logger.warn(`[${intentId}] Return leg failed (attempt ${attempts}): ${err}`);
         }
         return;

@@ -491,7 +491,7 @@ describe('IntentProcessor durable queue', () => {
     expect(metrics.recordDeadLetter).not.toHaveBeenCalled();
   });
 
-  it('alerts (but does not dead-letter) when the return leg exceeds its budget', async () => {
+  it('caps the return leg once it exceeds its budget (stops re-minting nonces)', async () => {
     const { proc, staged, metrics, suiLz, evm } = build([makeRow({ attempts: 1 })], {
       RETURN_MAX_ATTEMPTS: 2,
     });
@@ -499,9 +499,11 @@ describe('IntentProcessor durable queue', () => {
     evm.confirmExecution.mockRejectedValue(new Error('evm down'));
     await proc.tick();
 
+    // Past the cap we stop rescheduling (which would re-send lz_send_proof and
+    // mint another orphaned return nonce) and dead-letter the RETURN only.
+    expect(staged.reschedule).not.toHaveBeenCalled();
+    expect(staged.markDead).toHaveBeenCalledWith('0xintent', expect.stringContaining('capped'));
     expect(metrics.recordDeadLetter).toHaveBeenCalledWith('return');
-    expect(staged.reschedule).toHaveBeenCalledTimes(1); // still retries
-    expect(staged.markDead).not.toHaveBeenCalled(); // storage stays safe
   });
 
   it('aborts a hung store at the attempt timeout and reschedules', async () => {
