@@ -57,7 +57,8 @@ Milestone 2 built on Sepolia + Sui Testnet with a verified bidirectional E2E flo
 ## Next steps
 
 - [SDK docs (sdk.bosphor.xyz)](https://sdk.bosphor.xyz): integrate Bosphor from EVM or Solana with `@bosphor/sdk`.
-- [Quickstart](quickstart.md): Deploy and run the full pipeline in 15 minutes.
+- [Quickstart](quickstart.md): store your first file from Sepolia or Solana devnet on the hosted testnet.
+- [Self-hosting](self-hosting.md): deploy the contracts and relayer yourself.
 - [Architecture](architecture.md): Understand the system design and message flow.
 - [Security Model](security-model.md): Review trust assumptions before integrating.
 - [Contract Interface](contract-interface.md): Function signatures and code examples.
