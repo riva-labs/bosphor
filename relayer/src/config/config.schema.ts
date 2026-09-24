@@ -88,6 +88,20 @@ export const configValidationSchema = Joi.object({
   // Integrator API CORS allowlist (comma-separated origins). `*` opens POST /blob,
   // POST /blob/encode and POST /quote to browser dApps on any origin (default).
   CORS_ORIGINS: Joi.string().default('*'),
+  // Integrator API rate limits (in-memory fixed window). Apply to POST /blob/:id,
+  // POST /blob/encode and POST /quote; over the budget the relayer answers 429.
+  RATE_LIMIT_ENABLED: Joi.boolean().default(true),
+  RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000), // 1 min
+  RATE_LIMIT_PER_IP: Joi.number().integer().min(1).default(120),
+  // Per X-Bosphor-App id, across all IPs (only when the header is sent).
+  RATE_LIMIT_PER_APP: Joi.number().integer().min(1).default(1200),
+  // Tighter per-IP budget for the CPU-heavy POST /blob/encode.
+  RATE_LIMIT_ENCODE_PER_IP: Joi.number().integer().min(1).default(30),
+  // Derive the client IP from CF-Connecting-IP / X-Forwarded-For. Enable ONLY when
+  // the relayer is reachable solely through a proxy that sets them (Cloudflare
+  // tunnel + nginx); otherwise every client shares the proxy's IP (off) or could
+  // spoof its IP (on while directly reachable).
+  TRUST_PROXY: Joi.boolean().default(false),
 
   // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
   // error reporting is disabled (the relayer runs unchanged).

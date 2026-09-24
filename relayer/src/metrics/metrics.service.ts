@@ -170,6 +170,15 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Integrator API requests rejected with 429, by the budget that tripped
+  // (`ip`, `app` = per X-Bosphor-App id, `encode` = POST /blob/encode per IP).
+  private readonly rateLimited = new Counter({
+    name: 'bosphor_relayer_rate_limited_total',
+    help: 'Integrator API requests rejected with 429, by budget scope',
+    labelNames: ['scope'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -196,6 +205,14 @@ export class MetricsService {
     for (const phase of ['pre_store', 'return'] as const) {
       this.storeDeadLetter.inc({ phase }, 0);
     }
+    for (const scope of ['ip', 'app', 'encode'] as const) {
+      this.rateLimited.inc({ scope }, 0);
+    }
+  }
+
+  /** Record an integrator API request rejected with 429 by the given budget. */
+  recordRateLimited(scope: 'ip' | 'app' | 'encode'): void {
+    this.rateLimited.inc({ scope });
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {

@@ -4,6 +4,8 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { buildCorsOptions } from './api/cors-config';
+import { createRateLimitMiddleware } from './api/rate-limit';
+import { MetricsService } from './metrics/metrics.service';
 
 // express ships with @nestjs/platform-express but has no bundled types here.
 // Only express.raw() is needed (the raw-body parser for the ingest route), so
@@ -24,6 +26,26 @@ async function bootstrap() {
     dashboardOrigin: config.get<string>('DASHBOARD_ORIGIN'),
   });
   app.enableCors(cors);
+
+  // Per-IP (and per-app) rate limits on the integrator routes. Registered BEFORE
+  // the raw-body parser below, so an over-limit client is turned away with a 429
+  // before the relayer reads (up to 10 MiB of) its body.
+  const metrics = app.get(MetricsService);
+  const trustProxy = config.get<boolean>('TRUST_PROXY') ?? false;
+  app.use(
+    ['/blob', '/quote'],
+    createRateLimitMiddleware(
+      {
+        enabled: config.get<boolean>('RATE_LIMIT_ENABLED') ?? true,
+        windowMs: config.get<number>('RATE_LIMIT_WINDOW_MS') ?? 60_000,
+        perIp: config.get<number>('RATE_LIMIT_PER_IP') ?? 120,
+        perApp: config.get<number>('RATE_LIMIT_PER_APP') ?? 1200,
+        encodePerIp: config.get<number>('RATE_LIMIT_ENCODE_PER_IP') ?? 30,
+        trustProxy,
+      },
+      { onLimited: (scope) => metrics.recordRateLimited(scope) },
+    ),
+  );
 
   // The out-of-band ingest endpoint (POST /blob/:intentId) accepts the raw blob
   // bytes as the request body, shaped like the Walrus publisher's PUT /v1/blobs.
