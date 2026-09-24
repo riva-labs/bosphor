@@ -32,7 +32,7 @@ import { writeFileSync } from "node:fs";
 import {
   BOSPHOR_PROGRAM_ID,
   ENDPOINT_ID,
-  SUI_TESTNET_EID,
+  SUI_EID,
   ULN_ID,
   connection,
   intentPda,
@@ -40,11 +40,11 @@ import {
   payer,
   peerPda,
   storePda,
+  PRESET,
+  setting,
 } from "./config.ts";
 
-const SUI_RECEIVER =
-  process.env.SUI_RECEIVER ??
-  "0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5";
+const SUI_RECEIVER = setting("SUI_RECEIVER", PRESET.suiOappPackageId);
 
 const BLOB_ID = process.env.BLOB_ID ?? "0x" + "a1".repeat(32);
 const SIZE = 1024;
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   const conn = connection();
   const admin = payer();
   const store = storePda();
-  const peer = peerPda(store, SUI_TESTNET_EID);
+  const peer = peerPda(store, SUI_EID);
   const noncePdaKey = noncePda(admin.publicKey);
   const receiver = toBytes32(SUI_RECEIVER);
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 24 * 3600);
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   // but rejects PublicKey objects.
   const path = {
     sender: "0x" + Buffer.from(store.toBytes()).toString("hex"),
-    dstEid: SUI_TESTNET_EID,
+    dstEid: SUI_EID,
     receiver: SUI_RECEIVER,
   };
 
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
 
   // Ensure the LZ outbound nonce PDA for this pathway exists (idempotent).
   try {
-    const initNonceIx = endpoint.initOAppNonce(admin.publicKey, SUI_TESTNET_EID, store, receiver);
+    const initNonceIx = endpoint.initOAppNonce(admin.publicKey, SUI_EID, store, receiver);
     await sendAndConfirmTransaction(conn, new Transaction().add(initNonceIx), [admin], {
       commitment: "confirmed",
     });
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
       encodingType,
       storageEpochs: STORAGE_EPOCHS,
       deadline,
-      dstEid: SUI_TESTNET_EID,
+      dstEid: SUI_EID,
       options: new Uint8Array(options),
       nativeFee,
       escrowAmount,

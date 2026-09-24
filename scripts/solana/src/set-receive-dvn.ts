@@ -1,11 +1,11 @@
 /**
  * Register our self-operated DVN as the required DVN on the OApp's RECEIVE-ULN
- * config for src eid = Sui (40378), so a Sui->Solana return packet can be
+ * config for src eid = Sui (40378 testnet, 30378 mainnet), so a Sui->Solana return packet can be
  * verified by a keypair we control and the escrow-releasing `lz_receive` can run
  * (M4 #398). This is the Solana analogue of the EVM `set-evm-receive-uln` step:
  * the LZ-default Sui-testnet DVN is dead, so we self-verify.
  *
- * The receive LIBRARY for src 40378 is already ULN302 (set by `set-libraries`).
+ * The receive LIBRARY for the Sui src eid is already ULN302 (set by `set-libraries`).
  * This only sets `required_dvns = [OUR_DVN]` in the receive config. The DVN is a
  * plain Ed25519 pubkey (the direct-signer model the Solana ULN allows): the same
  * keypair later signs the ULN `verify` in the return worker.
@@ -16,7 +16,8 @@
  *   npm run set-receive-dvn            # simulate only
  *   npm run set-receive-dvn -- --apply # send the setConfig tx
  *
- * Env: SOLANA_KEYPAIR (admin/delegate, default devnet path), SOLANA_RPC_URL,
+ * Env: NETWORK (testnet|mainnet), SOLANA_KEYPAIR (admin/delegate, devnet path by
+ * default on testnet, required on mainnet), SOLANA_RPC_URL,
  *      SOLANA_DVN_PUBKEY (optional; defaults to the admin keypair's pubkey),
  *      SOLANA_RECEIVE_CONFIRMATIONS (optional, default 1).
  */
@@ -30,7 +31,7 @@ import {
 import { EndpointProgram, UlnProgram } from "@layerzerolabs/lz-solana-sdk-v2";
 import {
   ENDPOINT_ID,
-  SUI_TESTNET_EID,
+  SUI_EID,
   ULN_ID,
   connection,
   payer,
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
     optionalDvns: [] as PublicKey[],
   };
 
-  console.log("=== Solana receive-ULN DVN config (src = Sui 40378) ===");
+  console.log(`=== Solana receive-ULN DVN config (src = Sui ${SUI_EID}) ===`);
   console.log("  Endpoint:      ", ENDPOINT_ID.toBase58());
   console.log("  ULN302:        ", ULN_ID.toBase58());
   console.log("  Store (OApp):  ", store.toBase58());
@@ -72,21 +73,23 @@ async function main(): Promise<void> {
 
   // The ULN SetConfig ix references the OApp's send+receive config PDAs, which
   // must be initialized first. The forward leg sends via the DEFAULT config, so
-  // these OApp-specific PDAs for eid 40378 were never created. initOAppConfig
+  // these OApp-specific PDAs for the Sui eid were never created. initOAppConfig
   // creates both (idempotent: it reverts "already initialized" on re-run).
   const initIx = endpoint.initOAppConfig(
     admin.publicKey,
     uln as unknown as Parameters<typeof endpoint.initOAppConfig>[1],
     admin.publicKey,
     store,
-    SUI_TESTNET_EID,
+    SUI_EID,
   );
   const setIx = await endpoint.setOappConfig(
-    conn,
+    // The LZ SDK bundles its own @solana/web3.js copy; the Connection is
+    // structurally identical, only the private declarations differ.
+    conn as unknown as Parameters<typeof endpoint.setOappConfig>[0],
     admin.publicKey,
     store,
     ULN_ID,
-    SUI_TESTNET_EID,
+    SUI_EID,
     {
       configType: CONFIG_TYPE_RECEIVE_ULN,
       value: ulnConfig,
@@ -129,7 +132,7 @@ async function main(): Promise<void> {
   console.log("\n=== BROADCASTING initOAppConfig + setOappConfig(RECEIVE_ULN) ===");
   await send("init_oapp_config", initIx);
   await send("set_receive_uln_config", setIx);
-  console.log("  Receive-ULN now requires DVN", dvn.toBase58(), "for src eid", SUI_TESTNET_EID);
+  console.log("  Receive-ULN now requires DVN", dvn.toBase58(), "for src eid", SUI_EID);
 }
 
 main().catch((e) => {

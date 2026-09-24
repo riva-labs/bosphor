@@ -23,7 +23,24 @@ The DVN-side and Sui-side wiring for this pathway live in the separate
 `bosphor-dvn` repo (`src/solana-source.ts`, `src/main-solana.ts`, and the
 `*-solana.ts` Sui config scripts).
 
-## Confirmed addresses
+## Network preset
+
+Every script reads `NETWORK` (see `src/config.ts`):
+
+| | `testnet` (default) | `mainnet` |
+|---|---|---|
+| Sui EID / Solana EID | `40378` / `40168` | `30378` / `30168` |
+| `SOLANA_RPC_URL` | `https://api.devnet.solana.com` | required |
+| `SOLANA_KEYPAIR` | `~/.config/solana/bosphor-devnet.json` | required |
+| `SOLANA_PROGRAM_ID` | `7RCSzaG9...it1AF` (devnet program) | required |
+| `SUI_RECEIVER` (Sui `bosphor_lz` package) | v6 testnet package | required |
+| `SUI_JSONRPC_URL`, `SUI_RELAYER_ADDR` (return worker) | publicnode, v6 relayer | required |
+| `SUI_ENV_PATH` (return worker) | `relayer/.env.testnet` | no default |
+
+Unset `NETWORK` keeps the exact devnet behavior. With `NETWORK=mainnet` a
+missing value fails at startup instead of falling back to devnet.
+
+## Confirmed addresses (devnet)
 
 | Thing | Address |
 |-------|---------|
