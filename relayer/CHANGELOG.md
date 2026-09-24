@@ -4,13 +4,7 @@
 
 ### Bug Fixes
 
-- fix(relayer): address committed-epochs review (legacy rows, zero epochs, retry pricing)
-- fix(relayer): reject quotes for epochs above the storable max
-- fix(relayer): resolve committed epochs before spend and price the guard on them
-- fix(relayer): store blobs for the committed epochs, capped by WALRUS_MAX_EPOCHS
-- fix(relayer): persist committed storage epochs from IntentReceived
-- fix(relayer): add committed storage-epochs resolution policy
-- fix(relayer): claim only storable rows so orphans can't starve the queue
+- fix(relayer): send execute_store without deadline on committed-deadline executor
 
 ## 0.13.3 (2026-09-24)
 
