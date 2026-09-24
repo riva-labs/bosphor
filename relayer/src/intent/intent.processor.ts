@@ -271,7 +271,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       for (const row of rows) {
         if (ready.length >= this.storeConcurrency) break;
         if (this.inProcess.has(row.intentId)) continue;
-        if (!row.received || !row.hasBytes) continue;
+        // Needs its bytes to upload; an already uploaded row (bytes freed after
+        // execute_store) only resumes the remaining steps, e.g. a return retry.
+        if (!row.received || (!row.hasBytes && !row.walrusObjectId)) continue;
         // Past-deadline rows are left for the reaper to expire.
         if (row.deadline != null && now >= row.deadline) continue;
         // original_sender for execute_store comes from the EVM/Solana commitment
@@ -469,7 +471,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Skipping spends nothing; the user is refunded on-chain by the escrow deadline.
     // Inert unless enabled AND the escrow reader returns terms for this intent.
     let guardDecision: BreakEvenDecision | null = null;
-    if (this.breakEvenEnabled && this.breakEven && this.escrowReader) {
+    // Only before the spend: once the blob is uploaded the WAL is sunk, and
+    // skipping now would forfeit the escrow release for work already paid for.
+    if (this.breakEvenEnabled && this.breakEven && this.escrowReader && !row.walrusObjectId) {
       const escrow = await io.time(() => this.escrowReader!.getEscrow(intentId, row.srcEid));
       if (escrow) {
         guardDecision = await io.time(() =>

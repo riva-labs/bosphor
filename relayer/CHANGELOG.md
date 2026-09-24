@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.13.3 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): keep a stored row claimable so a failed return leg retries
+
 ## 0.13.2 (2026-09-24)
 
 ### Bug Fixes
 
-- fix(relayer): send execute_store without deadline on committed-deadline executor
+- fix(relayer): claim only storable rows so orphans can't starve the queue
 
 ## 0.13.1 (2026-09-24)
 
