@@ -20,7 +20,7 @@
   "timezone": "",
   "title": "Bosphor Relayer",
   "uid": "bosphor-relayer",
-  "version": 3,
+  "version": 4,
   "panels": [
     {
       "id": 1,
@@ -972,6 +972,415 @@
           },
           "expr": "histogram_quantile(0.5, sum(rate(bosphor_relayer_processing_latency_seconds_bucket[30m])) by (le))",
           "legendFormat": "end-to-end p50 (I/O-bound, not KPI)"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Storage ops by origin chain (ops ledger)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "description": "Completed Walrus storage ops from storage_op_ledger (durable, never reaped), bucketed by the dashboard interval and split by origin chain.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(to_timestamp(stored_at / 1000), $__interval, 0), CASE src_eid WHEN 30101 THEN 'ethereum' WHEN 30102 THEN 'bsc' WHEN 30106 THEN 'avalanche' WHEN 30109 THEN 'polygon' WHEN 30110 THEN 'arbitrum' WHEN 30111 THEN 'optimism' WHEN 30168 THEN 'solana' WHEN 30184 THEN 'base' WHEN 30378 THEN 'sui' WHEN 40161 THEN 'sepolia' WHEN 40168 THEN 'solana-devnet' WHEN 40231 THEN 'arbitrum-sepolia' WHEN 40232 THEN 'optimism-sepolia' WHEN 40245 THEN 'base-sepolia' WHEN 40378 THEN 'sui-testnet' ELSE COALESCE('eid-' || src_eid::text, 'unknown') END AS metric, count(*) AS value FROM storage_op_ledger WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000 GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Cumulative bytes stored (ops ledger, all time)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 50
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "description": "Running total of bytes stored across every op in storage_op_ledger since the ledger began, plotted over the selected range.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "lineInterpolation": "stepAfter"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT time, bytes AS \"bytes stored\" FROM (SELECT to_timestamp(stored_at / 1000) AS time, stored_at, SUM(COALESCE(size, 0)) OVER (ORDER BY stored_at, intent_id) AS bytes FROM storage_op_ledger) t WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000 ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Storage ops (range)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 58
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS ops FROM storage_op_ledger WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Bytes stored (range)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 58
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(SUM(size), 0) AS bytes FROM storage_op_ledger WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Unique apps (range)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 58
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT app_id) AS apps FROM storage_op_ledger WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Unique apps (all time)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 58
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT app_id) AS apps FROM storage_op_ledger"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "table",
+      "title": "Ops by app id (range)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 62
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "bosphor-postgres-testnet"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "bosphor-postgres-testnet"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT COALESCE(app_id, 'none') AS app_id, count(*) AS ops, COALESCE(SUM(size), 0) AS bytes, count(DISTINCT sender) AS senders FROM storage_op_ledger WHERE stored_at >= $__unixEpochFrom()::bigint * 1000 AND stored_at < $__unixEpochTo()::bigint * 1000 GROUP BY 1 ORDER BY ops DESC"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Ledger ops by origin chain (Prometheus, all relayers)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 62
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bosphor-prometheus"
+      },
+      "description": "Hourly increase of bosphor_relayer_ledger_ops_total per relayer deployment. Counters reset on restart; the Postgres panels are the durable record.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "sum by (deployment, src_eid) (increase(bosphor_relayer_ledger_ops_total[1h]))",
+          "legendFormat": "{{deployment}} eid {{src_eid}}"
         }
       ]
     }
