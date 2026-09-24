@@ -57,7 +57,17 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `WAL_TOPUP_SUI_MIST` | `1000000000` | SUI to swap per top-up (1 SUI) |
 | `WAL_TOPUP_SUI_RESERVE_MIST` | `1000000000` | SUI kept in reserve for gas, never spent on a swap (1 SUI) |
 | `INTENT_TTL_MS` | `3600000` | TTL for processed intent deduplication (ms) |
-| `PORT` | `3000` | HTTP server port |
+| `PORT` | `3000` | Public HTTP API port |
+| `METRICS_PORT` | `9464` | Internal Prometheus port serving `GET /metrics`. Must differ from `PORT`; never route it through the public tunnel |
+| `METRICS_HOST` | `0.0.0.0` | Bind address of the metrics port |
+| `METRICS_TOKEN` | - | Optional bearer token required on scrapes (`Authorization: Bearer <token>`) |
+| `CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. `*` allows any origin. `DASHBOARD_ORIGIN` is always added to an explicit list |
+| `RATE_LIMIT_ENABLED` | `true` | Rate limiting for `POST /quote`, `POST /blob/{intentId}`, `POST /blob/encode` |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window length |
+| `RATE_LIMIT_PER_IP` | `120` | Requests per window per client IP (all three routes together) |
+| `RATE_LIMIT_ENCODE_PER_IP` | `30` | Extra per-IP budget for `POST /blob/encode` |
+| `RATE_LIMIT_PER_APP` | `1200` | Requests per window per `X-Bosphor-App` id, across IPs |
+| `TRUST_PROXY` | `false` | Take the client IP from `CF-Connecting-IP` / `X-Forwarded-For`. Enable only when the relayer is reachable solely through Cloudflare / nginx; otherwise all clients share the proxy IP (off) or can spoof theirs (on while directly reachable) |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 
 ### Durable store queue variables
@@ -187,7 +197,7 @@ Response format:
 
 ## Metrics endpoint
 
-The relayer exposes Prometheus metrics at `GET /metrics` on the configured `PORT` (default 3000), served in the standard text exposition format (`Content-Type: text/plain; version=0.0.4`). Point a Prometheus scrape job at this path. The provided `monitoring/prometheus.yml` is already configured to scrape `relayer:3000/metrics`.
+The relayer exposes Prometheus metrics at `GET /metrics` on a separate internal port, `METRICS_PORT` (default 9464), in the standard text exposition format (`Content-Type: text/plain; version=0.0.4`). The public API port (`PORT`) does not serve `/metrics`: the exposition includes wallet balances and queue internals. Keep the metrics port on the internal network (do not route it through the Cloudflare tunnel or nginx), and optionally set `METRICS_TOKEN` to require a bearer token. The provided `monitoring/prometheus.yml` scrapes `relayer:9464` over the compose network, and the testnet relayer through the host at `host.docker.internal:9465` (publish its container port 9464 on host port 9465).
 
 Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`, memory, event loop lag, and so on), the relayer emits:
 
@@ -206,6 +216,10 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_staged_bytes` | gauge | (none) | Total committed bytes still held in the queue (backpressure headroom vs `MAX_STAGED_BYTES`) |
 | `bosphor_relayer_staged_dead` | gauge | (none) | Durable-queue rows that dead-lettered |
 | `bosphor_relayer_store_dead_letter_total` | counter | `phase` (`pre_store`/`return`) | Dead-lettered stores (`pre_store`) and undelivered return proofs (`return`) |
+| `bosphor_relayer_ledger_ops_total` | counter | `src_eid`, `app_id` (`none`, the app id, or `other` past 100 distinct ids) | Completed storage ops newly recorded in the durable ops ledger |
+| `bosphor_relayer_ledger_bytes_total` | counter | `src_eid` | Bytes stored across ops recorded in the ledger |
+| `bosphor_relayer_ledger_write_failures_total` | counter | (none) | Inline ledger writes that failed (the backfill sweep retries them) |
+| `bosphor_relayer_rate_limited_total` | counter | `scope` (`ip`/`app`/`encode`) | Integrator API requests rejected with 429 |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
 
@@ -221,14 +235,48 @@ The two differ only by external I/O time, tracked per intent by the relayer's I/
 **Measuring the KPI.** Do not use the synthetic benchmark as evidence, it fabricates samples and only exercises the harness as a CI floor. Take the real number from a live relayer:
 
 ```bash
-# From a live relayer's Prometheus endpoint (the honest KPI measurement):
-BENCH_METRICS_URL=http://localhost:3399/metrics npm --prefix relayer run bench
+# From a live relayer's Prometheus endpoint (the honest KPI measurement).
+# Use the relayer's METRICS_PORT (the testnet relayer publishes it on :9465):
+BENCH_METRICS_URL=http://localhost:9465/metrics npm --prefix relayer run bench
 
 # Or directly from the histogram:
-curl -s http://localhost:3399/metrics | grep bosphor_relayer_compute_latency_seconds
+curl -s http://localhost:9465/metrics | grep bosphor_relayer_compute_latency_seconds
 ```
 
 The Grafana relayer dashboard's "Relayer compute latency p50 / p95" panel plots the KPI (green below the 3s threshold line) with the end-to-end p50 dashed alongside for context.
+
+## Ops ledger and KPI export
+
+Every completed store is written once to a durable Postgres table, `storage_op_ledger`, right after `execute_store` succeeds on Sui. Unlike the store queue (purged after `STAGED_RETENTION_MS`) and the Prometheus counters (reset on restart), ledger rows are never deleted, so usage figures can be recomputed for any window.
+
+Each row holds: `intent_id`, `src_eid` (origin chain), `sender`, `size`, `blob_id` (the committed id), `walrus_blob_id`, `walrus_object_id`, `end_epoch`, `app_id` (from the `X-Bosphor-App` header, null when none was sent), `network`, `store_digest`, `created_at` (intent first seen) and `stored_at`.
+
+The write is exactly-once per intent (an idempotent insert keyed on `intent_id`) and never fails the store. If it fails, the error is logged and counted in `bosphor_relayer_ledger_write_failures_total`, and a backfill sweep (every 30 seconds) records the op later. A completed store is kept in the queue table until it has been recorded, so no op is lost to the reaper.
+
+### KPI export script
+
+`relayer/scripts/kpi.ts` prints a KPI package for a time window as JSON and markdown: total ops, ops and bytes by origin chain, total bytes, unique senders, unique app ids, ops per app, compute latency p50 / p95, and `@bosphor/sdk` npm downloads.
+
+```bash
+DATABASE_URL=postgres://bosphor:...@localhost:5432/bosphor_testnet \
+PROMETHEUS_URL=http://localhost:9091 \
+PROMETHEUS_SELECTOR='deployment="testnet"' \
+  npm --prefix relayer run kpi -- --since 2026-09-01 --until 2026-10-01 --network testnet
+```
+
+| Argument / variable | Meaning |
+|---------------------|---------|
+| `--since` (required) | Window start, ISO date or epoch ms (inclusive) |
+| `--until` | Window end (exclusive), default now |
+| `--network` | Only count ledger rows of this network label (`testnet` / `mainnet`) |
+| `--format` | `both` (default), `json` or `md` |
+| `DATABASE_URL` | Postgres holding `storage_op_ledger` |
+| `PROMETHEUS_URL` | Prometheus base URL for the latency quantiles (`histogram_quantile` over `bosphor_relayer_compute_latency_seconds_bucket` across the window) |
+| `PROMETHEUS_SELECTOR` | Optional label matcher to pick one relayer |
+
+The script never estimates a number. A source it cannot read (no `DATABASE_URL`, Prometheus down or without samples in the window, npm API error) is printed as `unavailable` with the reason. It does not load a `.env` file by itself, so point it explicitly at the database you mean to report on.
+
+The Grafana relayer dashboard shows the same ledger data live: ops by origin chain, cumulative bytes stored and unique apps.
 
 ## Walrus upload
 

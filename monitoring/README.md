@@ -19,6 +19,19 @@ Grafana home dashboard. Top to bottom:
 Component detail dashboards (`bosphor-canary`, `bosphor-relayer`, `bosphor-dvn`,
 `bosphor-testnet-history`) are linked from the overview's top-right menu.
 
+## Relayer scrape port
+
+The relayer serves `/metrics` only on its internal `METRICS_PORT` (default
+9464), never on the public API port. Prometheus scrapes the mainnet relayer at
+`relayer:9464` over the compose network. The testnet relayer runs in a separate
+compose project, so its container port 9464 must be published on the host at
+9465 (bound to the docker bridge, never routed through the tunnel or nginx);
+Prometheus reaches it at `host.docker.internal:9465`.
+
+The relayer dashboard's ops-ledger panels (ops by origin chain, cumulative
+bytes, unique apps) read `storage_op_ledger` through the Bosphor Testnet
+Postgres datasource.
+
 ## Access
 
 - **Admin:** https://grafana.bosphor.xyz (login). Opens Mission Control by default.
