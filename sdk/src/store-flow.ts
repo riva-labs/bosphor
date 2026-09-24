@@ -134,6 +134,43 @@ export type FetchLike = (
  * Used by the poll loops so a cancellation is honored without waiting out the
  * current interval.
  */
+/**
+ * Whether an RPC/network failure is worth retrying: connection resets and
+ * timeouts, rate limiting, and 5xx responses. Public RPCs drop connections
+ * routinely, and a proof wait lasts minutes, so one such blip must not fail it.
+ * Contract errors (reverts, CALL_EXCEPTION), programming errors and caller
+ * aborts are never transient.
+ */
+export function isTransientRpcError(err: unknown): boolean {
+  if (err === null || typeof err !== "object") return false;
+  const e = err as { name?: unknown; code?: unknown; message?: unknown; status?: unknown };
+  if (e.name === "AbortError") return false;
+  const code = typeof e.code === "string" ? e.code : "";
+  if (["CALL_EXCEPTION", "INVALID_ARGUMENT", "BAD_DATA"].includes(code)) return false;
+  if (TRANSIENT_CODES.has(code)) return true;
+  const status = typeof e.status === "number" ? e.status : undefined;
+  if (status !== undefined && (status === 429 || status >= 500)) return true;
+  const msg = typeof e.message === "string" ? e.message : "";
+  return TRANSIENT_MESSAGE.test(msg);
+}
+
+const TRANSIENT_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "TIMEOUT",
+  "NETWORK_ERROR",
+  "SERVER_ERROR",
+]);
+
+const TRANSIENT_MESSAGE =
+  /socket (hang up|disconnected)|network socket|fetch failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
