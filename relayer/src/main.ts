@@ -1,7 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
+import { buildCorsOptions } from './api/cors-config';
 
 // express ships with @nestjs/platform-express but has no bundled types here.
 // Only express.raw() is needed (the raw-body parser for the ingest route), so
@@ -11,10 +13,17 @@ const express: { raw(opts: unknown): unknown } = require('express');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const config = app.get(ConfigService);
 
-  // The public API is read-only; allow the dashboard origin to read it.
-  const dashboardOrigin = process.env.DASHBOARD_ORIGIN ?? 'https://status.bosphor.xyz';
-  app.enableCors({ origin: dashboardOrigin, methods: ['GET'] });
+  // Browser dApps call the integrator API (POST /blob/:intentId, /blob/encode,
+  // /quote) directly, so preflight + POST must pass for the configured origins.
+  // CORS_ORIGINS='*' (default) opens it; an explicit list always keeps the
+  // dashboard origin that reads the public feed.
+  const cors = buildCorsOptions({
+    corsOrigins: config.get<string>('CORS_ORIGINS'),
+    dashboardOrigin: config.get<string>('DASHBOARD_ORIGIN'),
+  });
+  app.enableCors(cors);
 
   // The out-of-band ingest endpoint (POST /blob/:intentId) accepts the raw blob
   // bytes as the request body, shaped like the Walrus publisher's PUT /v1/blobs.
@@ -29,7 +38,7 @@ async function bootstrap() {
   await app.listen(port);
   const logger = new Logger('Bootstrap');
   logger.log(`Bosphor Relayer listening on port ${port}`);
-  logger.log(`Public API CORS origin: ${dashboardOrigin}`);
+  logger.log(`API CORS origins: ${cors.origin === '*' ? '*' : cors.origin.join(', ')}`);
 }
 
 bootstrap();

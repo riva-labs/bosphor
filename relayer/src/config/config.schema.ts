@@ -82,8 +82,12 @@ export const configValidationSchema = Joi.object({
     .uri({ scheme: ['postgres', 'postgresql'] })
     .optional()
     .allow(''),
-  // Origin allowed to read the public API (CORS). The deployed dashboard.
+  // Origin allowed to read the public API (CORS). The deployed dashboard. Always
+  // kept in the allowlist when CORS_ORIGINS is an explicit list.
   DASHBOARD_ORIGIN: Joi.string().uri().default('https://status.bosphor.xyz'),
+  // Integrator API CORS allowlist (comma-separated origins). `*` opens POST /blob,
+  // POST /blob/encode and POST /quote to browser dApps on any origin (default).
+  CORS_ORIGINS: Joi.string().default('*'),
 
   // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
   // error reporting is disabled (the relayer runs unchanged).
