@@ -249,6 +249,7 @@ export async function createBosphorSolanaClientFromKeypair(
   if (opts.deadlineSeconds !== undefined) clientOpts.deadlineSeconds = opts.deadlineSeconds;
   if (opts.computeBlob !== undefined) clientOpts.computeBlob = opts.computeBlob;
   if (opts.fetch !== undefined) clientOpts.fetch = opts.fetch;
+  if (opts.appId !== undefined) clientOpts.appId = opts.appId;
 
   return new BosphorSolanaClient(clientOpts);
 }

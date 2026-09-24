@@ -128,6 +128,34 @@ test("createBosphorClientFromSigner wires the preset dstEid, LZ options, and rel
   assert.equal(quote.totalNative, 1300n);
 });
 
+test("createBosphorClientFromSigner passes appId through to the client", async () => {
+  const seen: Seen = {};
+  let appHeader: string | undefined;
+  const fetchFn: FetchLike = async (_url, init) => {
+    appHeader = init.headers["X-Bosphor-App"];
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          originToken: "ETH",
+          escrowNative: "1000",
+          forwardNative: "300",
+          totalNative: "1300",
+          breakdown: {},
+        }),
+    };
+  };
+  const client = await createBosphorClientFromSigner(SIGNER, {
+    ethers: stubEthers(seen),
+    computeBlob: stubComputeBlob,
+    fetch: fetchFn,
+    appId: "starter-app",
+  });
+  await client.priceQuote(await client.encode(new Uint8Array([1])));
+  assert.equal(appHeader, "starter-app");
+});
+
 test("createBosphorClientFromSigner accepts a custom network preset", async () => {
   const seen: Seen = {};
   const custom: BosphorNetwork = {
