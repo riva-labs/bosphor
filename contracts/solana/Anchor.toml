@@ -2,6 +2,9 @@ skip_local_validator = true
 
 [toolchain]
 anchor_version = "0.32.1"
+# Pin the Solana toolchain anchor switches to; unset, anchor 0.32.1 installs its
+# default 2.3.0 whose cargo (1.84) cannot parse edition-2024 deps (zeroize 1.9).
+solana_version = "3.1.10"
 
 [features]
 resolution = true
