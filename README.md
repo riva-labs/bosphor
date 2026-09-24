@@ -130,7 +130,10 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 - [Canary](https://docs.bosphor.xyz/canary): continuous synthetic round-trip monitoring
 - [Chaos Harness](https://docs.bosphor.xyz/chaos-harness): on-demand resilience testing
 
-## Testnet Evidence
+## Testnet Evidence (Milestone 1, historical)
+
+These transactions are from the Milestone 1 deployment, which has since been
+superseded. See [Deployed Contracts](#deployed-contracts-testnet) for the current addresses.
 
 | Step | TX |
 |------|----|
