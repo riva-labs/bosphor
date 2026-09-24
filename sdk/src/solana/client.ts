@@ -101,7 +101,7 @@ export interface SolanaChain {
 export interface BosphorSolanaClientOptions {
   /** A `SolanaChain` backend bound to the deployed adapter and a funded wallet. */
   chain: SolanaChain;
-  /** Base URL of the relayer's ingest endpoint, e.g. `https://relayer.bosphor.xyz`. */
+  /** Base URL of the relayer's ingest endpoint, e.g. `https://api.bosphor.xyz/testnet` (`TESTNET.relayerUrl`). */
   relayerUrl: string;
   /** LayerZero endpoint id of the destination chain (e.g. 40378 for Sui testnet). */
   dstEid: number;

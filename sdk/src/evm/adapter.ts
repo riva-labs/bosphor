@@ -71,14 +71,17 @@ export interface FromEthersContractOptions {
  * @example
  * ```ts
  * import { Contract } from "ethers";
- * import { createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
+ * import { ADAPTER_ABI, TESTNET, createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
  *
- * const contract = new Contract(adapterAddress, ADAPTER_ABI, signer);
+ * const contract = new Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, signer);
  * const client = createBosphorClient({
  *   adapter: fromEthersContract(contract),
- *   relayerUrl: "https://api.bosphor.xyz/testnet",
- *   dstEid: 40378,
+ *   relayerUrl: TESTNET.relayerUrl,
+ *   dstEid: TESTNET.sui.eid,
+ *   options: TESTNET.evm.lzOptions,
  * });
+ *
+ * // Or, in one call: `await createBosphorClientFromSigner(signer)`.
  * ```
  */
 export function fromEthersContract(

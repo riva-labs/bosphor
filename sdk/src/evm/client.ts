@@ -107,7 +107,7 @@ export interface MessagingFee {
 export interface BosphorEvmClientOptions {
   /** An `ethers.Contract` bound to the deployed BosphorAdapter, with a signer. */
   adapter: AdapterContract;
-  /** Base URL of the relayer's ingest endpoint, e.g. `https://relayer.bosphor.xyz`. */
+  /** Base URL of the relayer's ingest endpoint, e.g. `https://api.bosphor.xyz/testnet` (`TESTNET.relayerUrl`). */
   relayerUrl: string;
   /** LayerZero endpoint id of the destination chain (e.g. 40378 for Sui testnet). */
   dstEid: number;

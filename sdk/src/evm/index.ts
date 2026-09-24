@@ -8,6 +8,13 @@
 
 export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./client.js";
 export { fromEthersContract } from "./adapter.js";
+export { ADAPTER_ABI, EscrowStatus } from "./abi.js";
+export { connectAdapter, createBosphorClientFromSigner } from "./signer.js";
+export type {
+  EthersModuleLike,
+  ConnectAdapterOptions,
+  CreateClientFromSignerOptions,
+} from "./signer.js";
 export type { EthersContractLike, FromEthersContractOptions } from "./adapter.js";
 export type {
   AdapterContract,
