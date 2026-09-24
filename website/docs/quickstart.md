@@ -53,7 +53,7 @@ testnet prices, storing a 1 KB file for 5 epochs costs roughly:
 | Origin | Cost per store (1 KB, 5 epochs) | Get test funds | Suggested balance |
 |--------|---------------------------------|----------------|-------------------|
 | Ethereum Sepolia | about 0.0015 ETH, plus gas | [Alchemy](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) faucet | 0.02 ETH |
-| Solana devnet | about 0.035 SOL, including account rent | [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 1 --url devnet` | 0.5 SOL |
+| Solana devnet | about 0.03 SOL, including account rent | [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 1 --url devnet` | 0.5 SOL |
 
 Prices follow the live token prices. Ask the relayer for a live quote at any time
 (`sizeBytes` is your file size, `originToken` is `ETH` or `SOL`):
@@ -65,7 +65,8 @@ curl -s -X POST https://api.bosphor.xyz/testnet/quote \
 ```
 
 `totalNative` in the response is the storage part in wei (or lamports for `SOL`).
-The SDK adds the LayerZero fee for you when you call `priceQuote()`.
+The SDK adds the live LayerZero fee for you in `priceQuote()`, or without a wallet
+in `quoteEvmStore({ provider, sizeBytes })` / `quoteSolanaStore({ connection, sizeBytes })`.
 
 ## 2. Install
 
@@ -80,8 +81,12 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 <TabItem value="solana" label="Solana (devnet)">
 
 ```bash
-npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui @layerzerolabs/lz-solana-sdk-v2
 ```
+
+`@layerzerolabs/lz-solana-sdk-v2` is optional. With it, quotes contain the exact
+LayerZero fee; without it they use a 0.01 SOL cap and set
+`quote.forwardIsUpperBound` (you are then charged less than `totalNative`).
 
 </TabItem>
 </Tabs>
@@ -131,7 +136,8 @@ export const client = await createBosphorSolanaClientFromKeypair({ connection, w
 ## 4. Check the price
 
 `priceQuote()` returns the single amount you will pay and a USD breakdown, so you
-can show it to your user before they sign.
+can show it to your user before they sign. To price before a wallet is connected,
+use `quoteEvmStore` or `quoteSolanaStore` (see [Payment flow](payment-flow.md#quote-without-a-wallet)).
 
 ```ts
 const bytes = new TextEncoder().encode("hello, permanence");
@@ -154,6 +160,8 @@ before the intent deadline, the escrow can be refunded to you. See
 ```ts
 const { intentId, blobId, endEpoch, txHash, quote } = await client.storePriced(bytes, {
   epochs: 5,
+  // Optional: called after each step (encoded, quoted, submitted, uploaded, proven).
+  onProgress: (e) => console.log(e.step, e.step === "submitted" ? e.txHash : ""),
 });
 
 console.log({ intentId, blobId, endEpoch, txHash, paid: quote.totalNative });
@@ -238,7 +246,9 @@ try {
 ```
 
 A timeout is not a loss: the intent and your escrow are on-chain, and the flow
-can be resumed. See [Troubleshooting](troubleshooting.md) and the SDK guide to
+can be resumed. If no proof ever lands, refund the escrow after the deadline with
+`client.refund(intentId)` then `client.withdraw()` (EVM) or
+`client.refundEscrow(intentId)` (Solana). See [Troubleshooting](troubleshooting.md) and the SDK guide to
 [resuming after a crash](https://sdk.bosphor.xyz/docs/resume).
 
 ## Next steps

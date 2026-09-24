@@ -17,7 +17,7 @@ your own. Every address and endpoint id is in the SDK `TESTNET` preset and on th
 ## Prerequisites
 
 - [ ] Node.js 22 installed
-- [ ] A Sepolia wallet with ETH (about 0.0015 ETH per 1 KB paid store, see [Quickstart](quickstart.md#fund-your-wallet)), or a Solana devnet wallet with SOL (about 0.035 SOL per store)
+- [ ] A Sepolia wallet with ETH (about 0.0015 ETH per 1 KB paid store, see [Quickstart](quickstart.md#fund-your-wallet)), or a Solana devnet wallet with SOL (about 0.03 SOL per store)
 - [ ] An RPC endpoint for your origin chain
 
 ## 1. Understand the protocol
