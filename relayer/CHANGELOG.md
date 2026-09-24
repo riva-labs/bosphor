@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.1 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): cap return-leg retries so a wedge can't mint orphaned nonces
+
 ## 0.13.0 (2026-09-18)
 
 ### Features
