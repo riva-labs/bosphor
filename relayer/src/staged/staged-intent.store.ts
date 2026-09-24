@@ -286,10 +286,11 @@ export class StagedIntentStore {
    *   expired          lease_expires_at < now (the claimant died mid-store;
    *                    takeover, and per-step idempotency makes the resume safe)
    *
-   * Only storable rows (received AND bytes present) are claimed. A row missing
-   * either half cannot be acted on, and an un-received row has no deadline so the
-   * reaper never expires it; claiming those would let a backlog of them fill every
-   * LIMIT batch and starve the storable rows queued behind them.
+   * Only actionable rows are claimed: received AND (bytes present OR already
+   * uploaded). An uploaded row has its bytes freed after execute_store but may
+   * still owe a return-leg retry, so it stays claimable (#434). An un-received
+   * row has no deadline so the reaper never expires it; claiming those would let
+   * a backlog of them fill every LIMIT batch and starve the rows behind them.
    */
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     const { rows } = await this.pool.query(
@@ -299,7 +300,7 @@ export class StagedIntentStore {
           SELECT intent_id
             FROM ${TABLE}
            WHERE state = 'active' AND next_attempt_at <= $1
-             AND received AND bytes IS NOT NULL
+             AND received AND (bytes IS NOT NULL OR walrus_object_id IS NOT NULL)
              AND (claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1)
            ORDER BY created_at
            LIMIT $2

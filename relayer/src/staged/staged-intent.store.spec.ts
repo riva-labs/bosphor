@@ -238,9 +238,9 @@ class FakePool implements PgQueryable {
           (r) =>
             r.state === 'active' &&
             (r.next_attempt_at as number) <= now &&
-            // SQL: received AND bytes IS NOT NULL (only storable rows are claimed)
+            // SQL: received AND (bytes IS NOT NULL OR walrus_object_id IS NOT NULL)
             r.received === true &&
-            r.bytes !== null &&
+            (r.bytes !== null || r.walrus_object_id != null) &&
             // SQL: claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1
             // (a NULL lease_expires_at makes the comparison false, as in SQL).
             (r.claimed_by == null ||
@@ -492,6 +492,28 @@ describe('StagedIntentStore', () => {
     // Nothing un-actionable was leased either.
     expect((await store.get('0xorphan0'))?.claimedBy ?? null).toBeNull();
     expect((await store.get('0xnobytes'))?.claimedBy ?? null).toBeNull();
+  });
+
+  it('keeps an uploaded row claimable after its bytes are freed (return-leg retry)', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    clock = 1000;
+    await store.upsertBytes('0xstored', { bytes: bytes('s'), blobId: 'b', size: 1 });
+    await store.markReceived('0xstored', RX);
+    await store.persistUpload('0xstored', {
+      walrusObjectId: '0xobj',
+      walrusBlobId: 'wb',
+      endEpoch: 9,
+    });
+    await store.persistStore('0xstored', '0xdigest');
+    await store.freeBytes('0xstored');
+    await store.reschedule('0xstored', 1, 2000, 'return leg failed');
+
+    const due = await store.drainDue(5000, 10);
+    expect(due.map((r) => r.intentId)).toEqual(['0xstored']);
+    expect(due[0].hasBytes).toBe(false);
+    expect(due[0].walrusObjectId).toBe('0xobj');
   });
 
   describe('claim lease (single-writer enforcement)', () => {

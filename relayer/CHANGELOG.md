@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.3 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): keep a stored row claimable so a failed return leg retries
+
 ## 0.13.2 (2026-09-24)
 
 ### Bug Fixes
