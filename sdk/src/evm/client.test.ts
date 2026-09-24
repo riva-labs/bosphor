@@ -437,3 +437,51 @@ test("priceQuote() is individually callable and returns the breakdown", async ()
   const quote = await client.priceQuote(encoded);
   assert.equal(quote.totalNative, 800000000012345n);
 });
+
+test("storePriced() reports each step through onProgress, in order", async () => {
+  const { adapter, fetch } = makePricedAdapterAndFetch();
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const steps: string[] = [];
+  let submittedTx = "";
+  let quotedAmount = 0n;
+  await client.storePriced(new Uint8Array([1, 2, 3]), {
+    pollMs: 1,
+    onProgress: (e) => {
+      steps.push(e.step);
+      if (e.step === "submitted") submittedTx = e.txHash;
+      if (e.step === "quoted") quotedAmount = e.amount;
+    },
+  });
+  assert.deepEqual(steps, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
+  assert.equal(submittedTx, "0xdeadbeef");
+  assert.equal(quotedAmount, 800000000012345n);
+});
+
+test("store() reports the LZ fee as the quoted amount through onProgress", async () => {
+  const { adapter } = makeFakeAdapter();
+  const { fetch } = makeFetch(200, "{}");
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const steps: string[] = [];
+  let amount = 0n;
+  await client.store(new Uint8Array([1]), {
+    pollMs: 1,
+    onProgress: (e) => {
+      steps.push(e.step);
+      if (e.step === "quoted") amount = e.amount;
+    },
+  });
+  assert.deepEqual(steps, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
+  assert.equal(amount, 12345n);
+});

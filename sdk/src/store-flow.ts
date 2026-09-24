@@ -9,6 +9,7 @@
  */
 
 import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
+import type { PricedQuote } from "./quote.js";
 import { RelayerUploadError } from "./errors.js";
 
 /** Default committed storage duration, in Walrus epochs. */
@@ -41,6 +42,33 @@ export interface AwaitProofOptions {
    * needs the bytes to execute), then re-poll.
    */
   signal?: AbortSignal;
+}
+
+/**
+ * A progress event emitted by `store()` / `storePriced()` as each step completes,
+ * so a UI can show where a 1 to 3 minute round trip is.
+ *
+ * - `encoded`: the blob id and commitment fields are derived (no chain call yet).
+ * - `quoted`: the price is known. `amount` is the native value attached at submit;
+ *   `quote` is set on the priced path.
+ * - `submitted`: the intent is on-chain (`txHash` is the EVM tx hash or Solana signature).
+ * - `uploaded`: the relayer accepted the bytes.
+ * - `proven`: the proof landed and was verified on the origin chain.
+ */
+export type StoreProgress =
+  | { step: "encoded"; encoded: EncodedIntent }
+  | { step: "quoted"; amount: bigint; quote?: PricedQuote }
+  | { step: "submitted"; intentId: Hex; txHash: string }
+  | { step: "uploaded"; intentId: Hex }
+  | { step: "proven"; intentId: Hex; blobId: Hex; endEpoch: bigint };
+
+/** Options accepted by the one-call `store()` / `storePriced()`. */
+export interface ProgressOptions {
+  /**
+   * Called synchronously after each step. An exception thrown here aborts the
+   * flow (the on-chain intent is not rolled back; resume with `upload`/`awaitProof`).
+   */
+  onProgress?: (event: StoreProgress) => void;
 }
 
 /** Fields derived from the raw bytes plus the chosen storage terms. */

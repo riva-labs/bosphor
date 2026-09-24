@@ -29,7 +29,14 @@ export type {
 export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
-export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
+export type {
+  EncodeOptions,
+  AwaitProofOptions,
+  EncodedIntent,
+  FetchLike,
+  StoreProgress,
+  ProgressOptions,
+} from "../store-flow.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 export type { WalrusNetwork } from "../blob.js";

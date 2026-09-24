@@ -26,6 +26,7 @@ import {
   uploadBlob,
   type AwaitProofOptions,
   type EncodeOptions,
+  type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
 } from "../store-flow.js";
@@ -342,14 +343,20 @@ export class BosphorEvmClient {
    */
   async store(
     data: Uint8Array,
-    opts: EncodeOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const fee = await this.quote(encoded);
+    emit({ step: "quoted", amount: fee.nativeFee });
     const { intentId, txHash } = await this.submit(encoded, fee);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash };
   }
 
@@ -362,14 +369,20 @@ export class BosphorEvmClient {
    */
   async storePriced(
     data: Uint8Array,
-    opts: EncodeOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult & { quote: PricedQuote }> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const quote = await this.priceQuote(encoded, { signal: opts.signal });
+    emit({ step: "quoted", amount: quote.escrowNative + quote.forwardNative, quote });
     const { intentId, txHash } = await this.submitPaid(encoded, quote);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash, quote };
   }
 
