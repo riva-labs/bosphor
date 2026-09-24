@@ -28,7 +28,7 @@ describe('ChainEscrowReader', () => {
   });
 
   it('routes a Solana-origin intent to the Solana vault and maps to SOL', async () => {
-    const solGet = jest.fn().mockResolvedValue({ amount: 20_000_000n, status: 1 });
+    const solGet = jest.fn().mockResolvedValue({ amount: 20_000_000n, status: 0 }); // Solana 0 = Pending
     const evmGet = jest.fn();
     const reader = make({ getEscrow: evmGet }, { getEscrow: solGet });
     const info = await reader.getEscrow('0xabc', 40168);
@@ -54,5 +54,21 @@ describe('ChainEscrowReader', () => {
       getEscrow: jest.fn().mockResolvedValue({ token: USDC, amount: 5_000_000n, status: 1 }),
     });
     expect(await reader.getEscrow('0xabc', 40161)).toBeNull();
+  });
+
+  it('ignores a Solana vault that is no longer pending (1 Released, 2 Refunded)', async () => {
+    for (const status of [1, 2]) {
+      const reader = make({}, { getEscrow: jest.fn().mockResolvedValue({ amount: 5n, status }) });
+      expect(await reader.getEscrow('0xabc', 40168)).toBeNull();
+    }
+  });
+
+  it('ignores an EVM escrow that is not pending (EVM 1 = Pending)', async () => {
+    for (const status of [0, 2, 3]) {
+      const reader = make({
+        getEscrow: jest.fn().mockResolvedValue({ token: ZERO, amount: 5n, status }),
+      });
+      expect(await reader.getEscrow('0xabc', 40161)).toBeNull();
+    }
   });
 });

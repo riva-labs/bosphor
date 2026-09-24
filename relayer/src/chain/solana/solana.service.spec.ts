@@ -215,4 +215,28 @@ describe('SolanaService', () => {
       );
     });
   });
+
+  describe('getEscrow (EscrowVault: 0 Pending, 1 Released, 2 Refunded)', () => {
+    function vault(amount: bigint, status: number): { data: Buffer } {
+      const data = Buffer.alloc(90);
+      data.writeBigUInt64LE(amount, 72);
+      data[88] = status;
+      return { data };
+    }
+
+    it('returns a PENDING vault (status 0) so the break-even guard applies', async () => {
+      const s = enabledService();
+      mockConn.getAccountInfo.mockResolvedValueOnce(vault(20_000_000n, 0));
+      await expect(s.getEscrow('0x' + '11'.repeat(32))).resolves.toEqual({
+        amount: 20_000_000n,
+        status: 0,
+      });
+    });
+
+    it('returns null only when the vault does not exist (unpriced intent)', async () => {
+      const s = enabledService();
+      mockConn.getAccountInfo.mockResolvedValueOnce(null);
+      await expect(s.getEscrow('0x' + '11'.repeat(32))).resolves.toBeNull();
+    });
+  });
 });

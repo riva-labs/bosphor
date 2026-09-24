@@ -1,15 +1,10 @@
 # Changelog
 
-## 0.14.0 (2026-09-24)
-
-### Features
-
-- feat(relayer): add NETWORK testnet|mainnet config presets
+## 0.13.6 (2026-09-24)
 
 ### Bug Fixes
 
-- fix(relayer): never echo an RPC URL (and its API key) in mainnet config errors
-- fix(relayer): skip the testnet-only SUI->WAL swap on mainnet
+- fix(relayer): apply the break-even guard to pending Solana escrows
 
 ## 0.13.5 (2026-09-24)
 

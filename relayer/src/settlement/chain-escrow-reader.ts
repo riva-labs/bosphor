@@ -25,6 +25,10 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
  * escrow returns null here (its USD coverage is validated on the token path, a
  * fast-follow), never a mis-priced native amount.
  */
+/** Pending escrow status per chain (the two programs number their enums differently). */
+const EVM_ESCROW_PENDING = 1;
+const SOLANA_ESCROW_PENDING = 0;
+
 @Injectable()
 export class ChainEscrowReader implements EscrowReader {
   private readonly solanaSrcEid: number;
@@ -41,11 +45,13 @@ export class ChainEscrowReader implements EscrowReader {
   async getEscrow(intentId: string, srcEid?: number): Promise<EscrowInfo | null> {
     if (srcEid === this.solanaSrcEid) {
       const e = await this.solana.getEscrow(intentId);
-      if (!e || e.amount <= 0n) return null;
+      // Solana EscrowVault: 0 = Pending (not "None"; an unpriced intent has no vault).
+      if (!e || e.status !== SOLANA_ESCROW_PENDING || e.amount <= 0n) return null;
       return { escrowNative: e.amount, originToken: 'SOL' };
     }
     const e = await this.evm.getEscrow(intentId);
-    if (!e || e.amount <= 0n) return null;
+    // EVM EscrowStatus: 0 None, 1 Pending, 2 Released, 3 Refunded.
+    if (!e || e.status !== EVM_ESCROW_PENDING || e.amount <= 0n) return null;
     // Native only for the guard; a token (USDC) escrow is handled on the token path.
     if (e.token.toLowerCase() !== ZERO_ADDRESS) return null;
     return { escrowNative: e.amount, originToken: 'ETH' };
