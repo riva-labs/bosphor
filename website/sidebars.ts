@@ -44,6 +44,8 @@ const sidebars: SidebarsConfig = {
         'canary',
         'chaos-harness',
         'testing',
+        'benchmarks',
+        'multichain-testing',
         'troubleshooting',
       ],
     },
