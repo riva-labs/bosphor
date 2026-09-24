@@ -517,6 +517,90 @@ async function querySuiPacketSent(limit = 15): Promise<LzPacket[]> {
   return out;
 }
 
+/**
+ * Paginate the relayer's PacketSent history for our-return packets in [from..to].
+ * Used to backfill a gap of older return nonces that scrolled out of the
+ * newest-window before this worker delivered them.
+ */
+async function findReturnPacketsInRange(from: bigint, to: bigint): Promise<Map<bigint, LzPacket>> {
+  const want = new Set<bigint>();
+  for (let n = from; n <= to; n++) want.add(n);
+  const found = new Map<bigint, LzPacket>();
+  let cursor: unknown = null;
+  for (let page = 0; page < 40 && want.size; page++) {
+    let res: any;
+    try {
+      res = await suiRpc("suix_queryEvents", [{ Sender: SUI_RELAYER_ADDR }, cursor, 50, true]);
+    } catch {
+      break;
+    }
+    for (const ev of res?.data ?? []) {
+      if (ev.type !== PACKET_SENT_EVENT) continue;
+      const pkt = packetFromEvent(ev);
+      if (pkt && isOurReturn(pkt) && want.has(pkt.nonce)) {
+        found.set(pkt.nonce, pkt);
+        want.delete(pkt.nonce);
+      }
+    }
+    if (!res?.hasNextPage) break;
+    cursor = res.nextCursor;
+  }
+  return found;
+}
+
+/**
+ * Self-heal a nonce gap. LZ requires gapless inbound order, so if this worker
+ * fell behind its newest-window and an older return nonce never delivered, every
+ * later nonce reverts InvalidNonce and all escrow releases stall. Each tick we
+ * read the endpoint's inbound frontier; if it lags the visible tip, backfill the
+ * missing packets from history and deliver them in order so the frontier advances
+ * (which also cascades through any already-delivered run). A recoverable gap
+ * self-clears; a gap whose packet predates the queryable window needs the manual
+ * skip-return-nonce tool (logged, then we stop so we don't spin).
+ */
+// The frontier at which the last heal hit an unrecoverable gap. While the
+// frontier stays here, re-paginating history every tick is pure waste (and RPC
+// load), so we skip until the frontier actually advances (manual skip/new
+// delivery) or the process restarts.
+let healBlockedAt: bigint | null = null;
+
+async function healReturnGap(tip: bigint): Promise<void> {
+  if (!RUN) return;
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
+  const sender = hexToBytes(SUI_OAPP_SENDER_B32);
+  let frontier: bigint;
+  try {
+    const nonce = await endpoint.getNonce(
+      connection() as never,
+      storePda() as never,
+      SUI_TESTNET_EID,
+      sender,
+    );
+    if (!nonce) return;
+    frontier = BigInt(nonce.inboundNonce.toString());
+  } catch {
+    return;
+  }
+  if (tip <= frontier + 1n) return; // no gap below the tip
+  if (healBlockedAt === frontier) return; // known-unrecoverable here; wait for progress
+  console.log(`heal: return frontier ${frontier} lags tip ${tip}; backfilling ${frontier + 1n}..${tip}`);
+  const packets = await findReturnPacketsInRange(frontier + 1n, tip);
+  for (let n = frontier + 1n; n <= tip; n++) {
+    const pkt = packets.get(n);
+    if (!pkt) {
+      console.log(`heal: nonce ${n} not in queryable history; run skip-return-nonce ${n} manually. Pausing heal until the frontier advances.`);
+      healBlockedAt = frontier;
+      return;
+    }
+    const r = await deliver(pkt);
+    if (r === "skipped") {
+      console.log(`heal: nonce ${n} delivery failed; retry next tick`);
+      return;
+    }
+    healBlockedAt = null; // made progress
+  }
+}
+
 /** Fetch the PacketSentEvent from a single Sui transaction digest. */
 async function packetFromDigest(digest: string): Promise<LzPacket> {
   const result = await suiRpc("sui_getTransactionBlock", [digest, { showEvents: true }]);
@@ -553,6 +637,10 @@ async function runLoop(): Promise<void> {
   for (;;) {
     try {
       const packets = await querySuiPacketSent();
+      // Heal any gap below the visible tip first, so the endpoint's gapless
+      // frontier can advance and lz_receive stops reverting InvalidNonce.
+      const tip = packets.reduce((m, p) => (p.nonce > m ? p.nonce : m), 0n);
+      if (tip > 0n) await healReturnGap(tip);
       for (const pkt of packets.reverse()) {
         if (seen.has(pkt.guid)) continue;
         if (pkt.nonce < MIN_NONCE) continue;
