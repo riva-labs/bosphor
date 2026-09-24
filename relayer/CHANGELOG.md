@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.2 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): claim only storable rows so orphans can't starve the queue
+
 ## 0.13.1 (2026-09-24)
 
 ### Bug Fixes
