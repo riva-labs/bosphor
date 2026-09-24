@@ -34,7 +34,22 @@ export {
 export type { DecodedIntentState } from "./proof.js";
 
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
-export type { DefaultSolanaChainOptions } from "./backend.js";
+export type { DefaultSolanaChainOptions, SolanaAccountMetaInput } from "./backend.js";
+
+// LayerZero send accounts + one-call client from a Keypair.
+export {
+  PAYER_PLACEHOLDER,
+  TESTNET_SEND_ACCOUNTS,
+  testnetEndpointAccounts,
+  resolveEndpointAccounts,
+  createBosphorSolanaClientFromKeypair,
+} from "./endpoint-accounts.js";
+export type {
+  PublicKeyLike,
+  LzSolanaSdkLike,
+  ResolveEndpointAccountsOptions,
+  CreateSolanaClientFromKeypairOptions,
+} from "./endpoint-accounts.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 export type { WalrusNetwork } from "../blob.js";
