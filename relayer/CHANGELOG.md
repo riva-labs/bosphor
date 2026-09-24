@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 (2026-09-24)
+
+### Features
+
+- feat(relayer): add NETWORK testnet|mainnet config presets
+
+### Bug Fixes
+
+- fix(relayer): skip the testnet-only SUI->WAL swap on mainnet
+
 ## 0.13.4 (2026-09-24)
 
 ### Bug Fixes
