@@ -96,7 +96,7 @@ function uniqueData(tag: string): Uint8Array {
 
 /** Read the freshly opened escrow and assert it is Pending, funded, and ours. */
 async function openedEscrow(intentId: Hex, quotedEscrow: bigint) {
-  const e = await chain.readEscrow(intentId);
+  const e = await chain.readEscrowVault(intentId);
   if (!e) throw new Error(`escrow vault for ${intentId} does not exist after submit`);
   console.log(
     `  escrow ${e.address.toBase58()}: status ${e.vault.status}, amount ${e.vault.amount}, ` +
@@ -145,7 +145,7 @@ async function phaseRelease(): Promise<void> {
   console.log(`  proof: blobId ${proof.blobId}, endEpoch ${proof.endEpoch}`);
   if (proof.blobId.toLowerCase() !== encoded.blobId.toLowerCase()) throw new Error("proof blob id != committed blob id");
 
-  const after = await chain.readEscrow(intentId);
+  const after = await chain.readEscrowVault(intentId);
   if (after) {
     throw new Error(
       `intent executed but escrow still open (status ${after.vault.status}): the proof came through the ` +
@@ -188,7 +188,7 @@ async function phaseRefund(): Promise<void> {
   if (!passed) throw new Error("chain clock did not pass the deadline in time");
   await sleep(2_000); // one more slot of margin for the program's Clock sysvar
 
-  const pending = await chain.readEscrow(intentId);
+  const pending = await chain.readEscrowVault(intentId);
   if (!pending) throw new Error("escrow closed before refund: the relayer should have skipped this intent");
   if (!refundAllowed(pending.vault.status, await chain.chainTime(), pending.vault.deadline)) {
     throw new Error(`refund not allowed yet (status ${pending.vault.status})`);
@@ -201,7 +201,7 @@ async function phaseRefund(): Promise<void> {
   const expected = expectedCloseCredit(opened.lamports, meta.fee, idx === 0);
   console.log(`  refund tx ${sig}: payer ${credited >= 0n ? "+" : ""}${credited} lamports (expected ${expected}, fee ${meta.fee})`);
   if (credited !== expected) throw new Error("refund did not credit the payer the whole escrow vault");
-  if (await chain.readEscrow(intentId)) throw new Error("escrow vault still open after refund");
+  if (await chain.readEscrowVault(intentId)) throw new Error("escrow vault still open after refund");
   console.log("  [OK] deadline refund returned the escrow (and vault rent) to the payer");
 }
 
