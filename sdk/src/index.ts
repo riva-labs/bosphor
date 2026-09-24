@@ -38,3 +38,12 @@ export type {
   PricedQuote,
   FetchQuoteOptions,
 } from "./quote.js";
+
+// Network presets: addresses, endpoint ids, and URLs for the hosted testnet.
+export { TESTNET, networks, walrusBlobUrl, blobIdToBase64Url } from "./networks.js";
+export type {
+  BosphorNetwork,
+  EvmNetworkConfig,
+  SolanaNetworkConfig,
+  SuiNetworkConfig,
+} from "./networks.js";

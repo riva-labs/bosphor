@@ -50,3 +50,12 @@ export {
 } from "../commitment-codec.js";
 export type { Commitment } from "../commitment-codec.js";
 export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.js";
+
+// Network presets: addresses, endpoint ids, and URLs for the hosted testnet.
+export { TESTNET, networks, walrusBlobUrl, blobIdToBase64Url } from "../networks.js";
+export type {
+  BosphorNetwork,
+  EvmNetworkConfig,
+  SolanaNetworkConfig,
+  SuiNetworkConfig,
+} from "../networks.js";
