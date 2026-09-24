@@ -117,6 +117,12 @@ Body (JSON): `sizeBytes` (number), `originToken` (`"ETH"` or `"SOL"`), and
 optional `epochs`, `forwardLzFeeNative` (decimal string, from the on-chain
 adapter quote), `originGasNative` (decimal string).
 
+Pass the same `epochs` you will commit in the intent: the relayer stores the blob
+for exactly the committed duration, so the quote is priced on it. `epochs` must be
+an integer between 1 and the relayer's `WALRUS_MAX_EPOCHS` (default 53); anything
+outside that range returns HTTP 400. When omitted, the quote uses the relayer's
+`WALRUS_STORE_EPOCHS` default (5).
+
 ```bash
 curl -s https://api.bosphor.xyz/testnet/quote \
   -H 'content-type: application/json' \

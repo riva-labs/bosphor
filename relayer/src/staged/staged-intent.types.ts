@@ -49,6 +49,11 @@ export interface StagedIntentRow {
   walrusObjectId?: string;
   walrusBlobId?: string;
   endEpoch?: number;
+  /**
+   * Committed storage duration in Walrus epochs from the IntentReceived event.
+   * Undefined on legacy rows recorded before the column existed.
+   */
+  storageEpochs?: number;
   /** Set after a successful execute_store - retry skips re-recording on Sui. */
   storeDigest?: string;
   /** Whether the return-leg proof has been confirmed. */
@@ -113,6 +118,8 @@ export interface ReceivedDetails {
   deadline: number;
   /** Sui digest of the delivery tx that emitted the event. */
   deliveryDigest?: string;
+  /** Committed storage duration in Walrus epochs (absent only if the event lacks it). */
+  storageEpochs?: number;
 }
 
 /** Result of a successful Walrus upload, persisted for idempotent retry. */

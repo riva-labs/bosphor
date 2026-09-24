@@ -226,6 +226,37 @@ export class SuiLzService {
   }
 
   /**
+   * Read the storage epochs the user committed for a received intent, straight
+   * from the LzReceiverConfig (lz_receiver::committed_storage_epochs) via a
+   * read-only simulation. Used for queue rows recorded before the relayer
+   * persisted the epochs from the IntentReceived event, so they are still
+   * stored for exactly the committed duration. Throws when it cannot be read;
+   * the caller decides the fallback.
+   */
+  async readCommittedStorageEpochs(intentId: string): Promise<number> {
+    const client = this.sui.getClient();
+    const tx = new Transaction();
+    tx.moveCall({
+      target: `${this.sui.getLzPackageId()}::lz_receiver::committed_storage_epochs`,
+      arguments: [
+        tx.object(this.sui.getLzConfigId()),
+        tx.pure.vector('u8', Array.from(ethers.getBytes(intentId))),
+      ],
+    });
+    tx.setSender(this.sui.getAddress());
+    const bytes = await tx.build({ client });
+    const { response } = await client.transactionExecutionService.simulateTransaction({
+      transaction: { bcs: { value: bytes } },
+      readMask: { paths: ['command_outputs.return_values'] },
+    });
+    const raw = response.commandOutputs?.[0]?.returnValues?.[0]?.value?.value;
+    if (!raw || raw.length !== 4) {
+      throw new Error(`Failed to read committed storage epochs for ${intentId}`);
+    }
+    return new DataView(Uint8Array.from(raw).buffer).getUint32(0, true);
+  }
+
+  /**
    * Quote the LZ messaging fee for sending a proof back to EVM.
    *
    * Builds a 16-step quote PTB (mirrors the send PTB but with quote functions),

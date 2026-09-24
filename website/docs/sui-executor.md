@@ -38,17 +38,24 @@ The deployer is set as the initial relayer. Two functions can change it:
 ## execute_store flow
 
 ```
-Relayer calls execute_store(config, intent_id, blob, deadline_ms, clock, original_sender)
+Relayer calls execute_store(config, lz_config, system, intent_id, blob, clock, original_sender)
   1. Assert caller == config.relayer
   2. Assert blob.certified_epoch().is_some()   (Walrus certification check)
   3. Assert intent_id not in executed_intents   (deduplication)
-  4. Assert clock.timestamp_ms() <= deadline_ms (deadline enforcement)
-  5. Record intent_id in executed_intents
-  6. Emit StorageExecuted event
-  7. Create StorageReceipt
-  8. Transfer blob to original_sender
-  9. Transfer receipt to original_sender
+  4. Read the committed deadline from lz_config and assert
+     clock.timestamp_ms() <= committed_deadline * 1000   (deadline enforcement)
+  5. Assert the blob id and storage epochs match the committed reference
+  6. Record intent_id in executed_intents
+  7. Emit StorageExecuted event
+  8. Create StorageReceipt
+  9. Transfer blob and receipt to original_sender
 ```
+
+## Deadline enforcement
+
+The deadline the user committed when submitting the intent is stored on Sui by `lz_receive`, and `execute_store` reads it back from `LzReceiverConfig`. The relayer does not pass a deadline, so it cannot extend or shorten it. The committed deadline is a unix timestamp in seconds, and the executor compares it against the Sui clock in milliseconds. Executing at exactly the deadline is allowed; one millisecond later aborts with `EDeadlineExpired`. An intent that was never received aborts with `EIntentNotReceived` from the receiver module.
+
+Packages deployed before this change took a relayer-supplied `deadline_ms` argument between `blob` and `clock`. The relayer detects which signature the configured package has and builds the matching transaction.
 
 ## Blob verification
 
@@ -92,7 +99,7 @@ An on-chain object transferred to the original sender as proof of execution.
 - The relayer is a trusted operator. Only the configured relayer address can call `execute_store`.
 - Blob certification is verified on-chain. The executor does not blindly trust the relayer's claim.
 - The `original_sender` address is provided by the relayer. In production, this comes from the ABI-decoded intent message received via LayerZero.
-- Deadline enforcement uses Sui's on-chain clock, not the relayer's local time.
+- Deadline enforcement uses the deadline the user committed and Sui's on-chain clock, never a relayer-supplied value or the relayer's local time.
 
 ## Related
 

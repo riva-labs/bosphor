@@ -2,6 +2,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SuiService } from '../chain/sui/sui.service';
 import { computeWalCost, WalrusSystemState } from './wal-cost.calculator';
+import { resolveStoreEpochs, StoreEpochsResolution } from './store-epochs';
+
+/** Default relayer cap on stored epochs; Walrus's own max_epochs_ahead is also enforced. */
+export const DEFAULT_WALRUS_MAX_EPOCHS = 53;
 
 export interface WalrusBlobInfo {
   blobId: string;
@@ -21,7 +25,10 @@ export interface WalrusBlobInfo {
 @Injectable()
 export class WalrusService implements OnModuleInit {
   private readonly logger = new Logger(WalrusService.name);
+  /** Legacy fallback only: used when a commitment carries no storage epochs. */
   private storeEpochs!: number;
+  /** Relayer-side cap on a committed storage duration (WALRUS_MAX_EPOCHS). */
+  private maxEpochs!: number;
   private aggregatorUrl!: string;
 
   constructor(
@@ -31,6 +38,7 @@ export class WalrusService implements OnModuleInit {
 
   onModuleInit() {
     this.storeEpochs = this.config.get<number>('WALRUS_STORE_EPOCHS', 5);
+    this.maxEpochs = this.config.get<number>('WALRUS_MAX_EPOCHS', DEFAULT_WALRUS_MAX_EPOCHS);
     this.aggregatorUrl = this.config
       .get<string>('WALRUS_AGGREGATOR_URL', 'https://aggregator.walrus-testnet.walrus.space')
       .replace(/\/+$/, '');
@@ -50,18 +58,63 @@ export class WalrusService implements OnModuleInit {
     return Buffer.from(await res.arrayBuffer());
   }
 
-  async upload(data: Buffer): Promise<WalrusBlobInfo> {
+  /**
+   * Resolve how many epochs to store an intent's blob for from its committed
+   * `storageEpochs` (see store-epochs.ts). The cap is the smaller of
+   * WALRUS_MAX_EPOCHS and Walrus's own max_epochs_ahead (read live, since a
+   * store beyond it aborts on-chain). The relayer config cap is checked first so
+   * an over-cap commitment is rejected without any RPC. Fails loud (throws) if
+   * the Walrus system state cannot be read.
+   */
+  async resolveStoreEpochs(committed: number | null | undefined): Promise<StoreEpochsResolution> {
+    const byConfig = resolveStoreEpochs(committed, {
+      defaultEpochs: this.storeEpochs,
+      maxEpochs: this.maxEpochs,
+    });
+    if (!byConfig.ok) return byConfig;
+
+    const walrusMax = await this.maxEpochsAhead();
+    return resolveStoreEpochs(committed, {
+      defaultEpochs: this.storeEpochs,
+      maxEpochs: Math.min(this.maxEpochs, walrusMax),
+    });
+  }
+
+  /** Relayer-side cap on a committed storage duration (WALRUS_MAX_EPOCHS). */
+  get maxStoreEpochs(): number {
+    return this.maxEpochs;
+  }
+
+  /** Walrus's own limit on how many epochs ahead storage can be bought. */
+  private async maxEpochsAhead(): Promise<number> {
+    const sys = await this.sui.getWalrusClient().walrus.systemState();
+    const max = Number(sys.future_accounting?.length);
+    if (!Number.isInteger(max) || max < 1) {
+      throw new Error(`Walrus system state has no valid max_epochs_ahead (${max})`);
+    }
+    return max;
+  }
+
+  /**
+   * Store `data` on Walrus for `epochs` epochs. `epochs` is the intent's resolved
+   * committed duration (see resolveStoreEpochs), never a global setting, so the
+   * stored end epoch covers what the user committed and paid for.
+   */
+  async upload(data: Buffer, epochs: number): Promise<WalrusBlobInfo> {
+    if (!Number.isInteger(epochs) || epochs < 1) {
+      throw new Error(`Invalid Walrus store epochs: ${epochs}`);
+    }
     const walrusClient = this.sui.getWalrusClient();
     const signer = this.sui.getSigner();
     const owner = this.sui.getAddress();
 
-    this.logger.log(`Uploading ${data.length} bytes to Walrus via SDK...`);
+    this.logger.log(`Uploading ${data.length} bytes to Walrus via SDK for ${epochs} epochs...`);
 
     const writeBlob = () =>
       walrusClient.walrus.writeBlob({
         blob: new Uint8Array(data),
         deletable: true,
-        epochs: this.storeEpochs,
+        epochs,
         signer,
         owner,
       });
@@ -105,7 +158,7 @@ export class WalrusService implements OnModuleInit {
     // against. walrusClient caches systemState from the write we just ran, so
     // reading it back reflects the same epoch/prices, not a stale snapshot. If
     // this fails we surface undefined ("unknown cost"), never a fabricated zero.
-    const walCostMist = await this.computeWalCost(data.length, walrusClient);
+    const walCostMist = await this.computeWalCost(data.length, epochs, walrusClient);
 
     return {
       blobId: result.blobId,
@@ -123,11 +176,12 @@ export class WalrusService implements OnModuleInit {
    */
   private async computeWalCost(
     dataLength: number,
+    epochs: number,
     walrusClient: ReturnType<SuiService['getWalrusClient']>,
   ): Promise<bigint | undefined> {
     try {
       const state = await this.readSystemState(walrusClient);
-      return computeWalCost(dataLength, this.storeEpochs, state).totalCostFrost;
+      return computeWalCost(dataLength, epochs, state).totalCostFrost;
     } catch (err) {
       this.logger.warn(`Could not compute WAL storage cost (recording unknown): ${err}`);
       return undefined;
@@ -138,7 +192,8 @@ export class WalrusService implements OnModuleInit {
    * Estimate the WAL storage cost (FROST) for a blob of the given size WITHOUT
    * storing it, against fresh on-chain state. Used by the quote engine. Unlike
    * the metering hook this fails loud: a quote must never be built on a fabricated
-   * or unknown cost.
+   * or unknown cost. Pass the same epochs the store will use; omitting them uses
+   * the legacy WALRUS_STORE_EPOCHS default.
    */
   async estimateWalCostFrost(byteLength: number, epochs?: number): Promise<bigint> {
     const walrusClient = this.sui.getWalrusClient();
