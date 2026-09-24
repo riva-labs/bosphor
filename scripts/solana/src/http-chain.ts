@@ -49,7 +49,7 @@ export interface HttpSolanaChain extends SolanaChain {
   readonly conn: Connection;
   readonly wallet: Keypair;
   /** The escrow vault and its total lamports (escrow + rent), or null once closed. */
-  readEscrow(intentId: Hex): Promise<{ vault: EscrowVault; lamports: bigint; address: PublicKey } | null>;
+  readEscrowVault(intentId: Hex): Promise<{ vault: EscrowVault; lamports: bigint; address: PublicKey } | null>;
   /** Send refund_escrow (wallet is refunder, `payer` = vault.payer); returns the signature. */
   refund(intentId: Hex, payer: Uint8Array): Promise<string>;
   /** Most recent confirmed signature touching an account (e.g. the escrow close). */
@@ -126,7 +126,7 @@ export function createHttpSolanaChain(conn: Connection, wallet: Keypair): HttpSo
       return { executed: d.executed, committedBlobId: d.committedBlobId, endEpoch: d.endEpoch };
     },
 
-    async readEscrow(intentId: Hex) {
+    async readEscrowVault(intentId: Hex) {
       const address = escrowPda(toBytes32(intentId));
       const info = await withBackoff(() => conn.getAccountInfo(address));
       if (!info) return null;
