@@ -25,10 +25,19 @@ const { intentId, blobId, endEpoch, txHash } = await client.storePriced(fileByte
 
 The helper fills everything from the `TESTNET` preset: the program id, the
 LayerZero send accounts, the LayerZero options, a `nativeFee` cap of 0.01 SOL
-(the endpoint charges only the computed fee), a 400k compute-unit limit for the
+(the endpoint charges only the live fee), a live LayerZero fee quote for
+`priceQuote()` when the optional peer `@layerzerolabs/lz-solana-sdk-v2` is
+installed (otherwise the quote uses the cap and sets `forwardIsUpperBound`), a 400k compute-unit limit for the
 endpoint call, the Sui endpoint id, and the relayer URL. Override any of them in
 the options. See [Pay for storage](/docs/pay-for-storage) for what `storePriced()`
 charges; the free testnet path is `client.store(bytes, { epochs })`.
+
+## Progress and refunds
+
+`store()` and `storePriced()` accept `onProgress` (steps `encoded`, `quoted`,
+`submitted` with the signature as `txHash`, `uploaded`, `proven`). If no proof
+lands before the deadline, `client.refundEscrow(intentId)` returns the escrow to
+the payer; see [Pay for storage](/docs/pay-for-storage#refund-an-escrow).
 
 ## LayerZero send accounts
 

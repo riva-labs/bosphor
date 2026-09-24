@@ -69,6 +69,23 @@ Splitting `submitPaid` from later steps matters in the browser: a wallet popup m
 open in direct response to a user gesture, so each signature belongs in its own
 event handler.
 
+## Progress and refunds
+
+`store()` and `storePriced()` accept `onProgress`, called after each step:
+
+```ts
+await client.storePriced(fileBytes, {
+  onProgress: (e) => {
+    // e.step: 'encoded' | 'quoted' | 'submitted' | 'uploaded' | 'proven'
+    if (e.step === 'submitted') console.log('tx', e.txHash);
+  },
+});
+```
+
+If no proof lands before the deadline, `client.refund(intentId)` credits the
+escrow back to the payer and `client.withdraw()` pays it out; `client.getEscrow(intentId)`
+reads its status. See [Pay for storage](/docs/pay-for-storage#refund-an-escrow).
+
 ## Blob-id computation
 
 The Walrus blob id is derived locally from the bytes, so the id the SDK commits to
