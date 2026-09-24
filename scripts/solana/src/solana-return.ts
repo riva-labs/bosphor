@@ -1,5 +1,7 @@
 /**
- * Return-path worker: Sui testnet (EID 40378) -> Solana devnet (EID 40168).
+ * Return-path worker: Sui -> Solana for the selected NETWORK preset
+ * (testnet: Sui testnet EID 40378 -> Solana devnet EID 40168;
+ *  mainnet: Sui EID 30378 -> Solana EID 30168).
  *
  * Self-operated, mirrors the proven EVM sibling /home/arb/bosphor-dvn/src/evm-return.ts.
  * On the return leg we are BOTH the DVN and the executor: the same keypair that
@@ -27,11 +29,13 @@
  *
  * Env (all optional unless noted):
  *   RUN=1                    enable real broadcast (otherwise DRY-RUN)
- *   SUI_ENV_PATH             dotenv path for Sui endpoint/package ids (default ../../relayer/.env.testnet)
+ *   NETWORK                  testnet (default) or mainnet, see config.ts
+ *   SUI_ENV_PATH             dotenv path for Sui endpoint/package ids (testnet default
+ *                            ../../relayer/.env.testnet; no default on mainnet)
  *   SUI_ENDPOINT_V2 | SUI_LZ_ENDPOINT_V2   Sui endpoint id (for the event type)
  *   SUI_LZ_PACKAGE_ID        Sui OApp package id (packet sender bytes32)
- *   SUI_JSONRPC_URL          override the Sui JSON-RPC (default publicnode)
- *   SUI_RELAYER_ADDR         the Sui sender to filter queryEvents by
+ *   SUI_JSONRPC_URL          Sui JSON-RPC (testnet default publicnode; required on mainnet)
+ *   SUI_RELAYER_ADDR         the Sui sender to filter queryEvents by (required on mainnet)
  *   RETURN_CONFIRMATIONS     DVN confirmations to attest (default 1)
  *   RETURN_MIN_NONCE         skip return packets below this nonce in loop mode
  *   RETURN_POLL_MS           loop poll interval (default 15000)
@@ -51,11 +55,14 @@ import * as dotenv from "dotenv";
 import {
   BOSPHOR_PROGRAM_ID,
   ENDPOINT_ID,
-  SOLANA_DEVNET_EID,
-  SUI_TESTNET_EID,
+  NETWORK,
+  PRESET,
+  SOLANA_EID,
+  SUI_EID,
   ULN_ID,
   connection,
   lzReceiveTypesPda,
+  setting,
   payer,
   storePda,
 } from "./config.ts";
@@ -69,11 +76,14 @@ const DISC_LZ_RECEIVE_TYPES = "dd11f69ff8801f60";
 
 // Load Sui endpoint/package ids from the relayer testnet env by default. These
 // are operational values (not secrets); SUI_ENV_PATH overrides the location, and
-// explicit SUI_ENDPOINT_V2 / SUI_LZ_PACKAGE_ID env vars take precedence.
+// explicit SUI_ENDPOINT_V2 / SUI_LZ_PACKAGE_ID env vars take precedence. On
+// mainnet there is no default file: never pick up testnet ids by accident.
 const SUI_ENV_PATH =
   process.env.SUI_ENV_PATH ??
-  resolve(import.meta.dirname, "../../../relayer/.env.testnet");
-dotenv.config({ path: SUI_ENV_PATH });
+  (NETWORK === "testnet"
+    ? resolve(import.meta.dirname, "../../../relayer/.env.testnet")
+    : undefined);
+if (SUI_ENV_PATH) dotenv.config({ path: SUI_ENV_PATH });
 
 const RUN = process.env.RUN === "1";
 const RETURN_CONF = BigInt(process.env.RETURN_CONFIRMATIONS ?? "1");
@@ -85,27 +95,23 @@ const SUI_ENDPOINT_V2 =
 const SUI_OAPP_PACKAGE_ID = process.env.SUI_LZ_PACKAGE_ID;
 if (!SUI_ENDPOINT_V2) {
   throw new Error(
-    "missing SUI_ENDPOINT_V2 / SUI_LZ_ENDPOINT_V2 (set it or point SUI_ENV_PATH at relayer/.env.testnet)",
+    "missing SUI_ENDPOINT_V2 / SUI_LZ_ENDPOINT_V2 (set it or point SUI_ENV_PATH at the relayer env file)",
   );
 }
 if (!SUI_OAPP_PACKAGE_ID) {
   throw new Error(
-    "missing SUI_LZ_PACKAGE_ID (set it or point SUI_ENV_PATH at relayer/.env.testnet)",
+    "missing SUI_LZ_PACKAGE_ID (set it or point SUI_ENV_PATH at the relayer env file)",
   );
 }
 
 const PACKET_SENT_EVENT = `${SUI_ENDPOINT_V2}::messaging_channel::PacketSentEvent`;
 
-// The official testnet fullnode rate-limits JSON-RPC hard and often returns
-// empty bodies; publicnode is a reliable free alternative. Override with
-// SUI_JSONRPC_URL.
-const SUI_JSONRPC =
-  process.env.SUI_JSONRPC_URL ?? "https://sui-testnet-rpc.publicnode.com";
+// Sui JSON-RPC. On testnet the official fullnode rate-limits JSON-RPC hard and
+// often returns empty bodies, so the preset uses publicnode. Required on mainnet.
+const SUI_JSONRPC = setting("SUI_JSONRPC_URL", PRESET.suiJsonRpcUrl);
 // The Sui relayer that sends the return proof. Filtering queryEvents by this
 // sender returns a small, recent set the public RPCs serve reliably.
-const SUI_RELAYER_ADDR =
-  process.env.SUI_RELAYER_ADDR ??
-  "0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366";
+const SUI_RELAYER_ADDR = setting("SUI_RELAYER_ADDR", PRESET.suiRelayerAddr);
 
 /** Left-pad a 0x hex value to a 32-byte (64 hex char) lowercase bytes32, no 0x. */
 function toBytes32Hex(hex: string): string {
@@ -127,8 +133,8 @@ const SOLANA_STORE_B32 = Buffer.from(storePda().toBuffer()).toString("hex");
 /** Is this a return packet on our pathway (Sui OApp -> our Store PDA on Solana)? */
 function isOurReturn(pkt: LzPacket): boolean {
   return (
-    pkt.srcEid === SUI_TESTNET_EID && // 40378 (Sui)
-    pkt.dstEid === SOLANA_DEVNET_EID && // 40168 (Solana devnet)
+    pkt.srcEid === SUI_EID && // Sui (40378 testnet, 30378 mainnet)
+    pkt.dstEid === SOLANA_EID && // Solana (40168 devnet, 30168 mainnet)
     toBytes32Hex(pkt.sender) === SUI_OAPP_SENDER_B32 &&
     toBytes32Hex(pkt.receiver) === SOLANA_STORE_B32
   );
@@ -305,7 +311,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
 
   // Build lz_receive params once (used both for account resolution and the ix).
   const params = serializeLzReceiveParams({
-    srcEid: SUI_TESTNET_EID,
+    srcEid: SUI_EID,
     sender: hexToBytes(pkt.sender),
     nonce: pkt.nonce,
     guid: hexToBytes(pkt.guid),
@@ -324,7 +330,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
       worker.publicKey as never,
       new PublicKey(hexToBytes(pkt.sender)) as never,
       storePda() as never,
-      SUI_TESTNET_EID,
+      SUI_EID,
       pkt.nonce.toString(),
     );
     epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
@@ -573,7 +579,7 @@ async function healReturnGap(tip: bigint): Promise<void> {
     const nonce = await endpoint.getNonce(
       connection() as never,
       storePda() as never,
-      SUI_TESTNET_EID,
+      SUI_EID,
       sender,
     );
     if (!nonce) return;
@@ -630,7 +636,7 @@ async function runOne(): Promise<void> {
 async function runLoop(): Promise<void> {
   const worker = payer();
   console.log(
-    `Solana return worker: Sui(${SUI_TESTNET_EID}) -> Solana devnet(${SOLANA_DEVNET_EID}); ` +
+    `Solana return worker [${NETWORK}]: ${PRESET.suiLabel}(${SUI_EID}) -> ${PRESET.solanaLabel}(${SOLANA_EID}); ` +
       `worker ${worker.publicKey.toBase58()}; store ${storePda().toBase58()}; RUN=${RUN}`,
   );
   const seen = new Set<string>();

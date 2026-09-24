@@ -16,7 +16,7 @@
  */
 import { Connection, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { EndpointProgram } from "@layerzerolabs/lz-solana-sdk-v2";
-import { connection, payer, storePda, ENDPOINT_ID, SUI_TESTNET_EID } from "./config.ts";
+import { connection, payer, storePda, ENDPOINT_ID, SUI_EID } from "./config.ts";
 
 const SUI_OAPP_PACKAGE_ID = process.env.SUI_LZ_PACKAGE_ID!;
 const RUN = process.env.RUN === "1";
@@ -55,10 +55,10 @@ async function main() {
   const senderPk = new PublicKey(senderBytes);
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
 
-  const nonce = await endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes);
+  const nonce = await endpoint.getNonce(conn as never, store as never, SUI_EID, senderBytes);
   if (!nonce) throw new Error("no Nonce account for this pathway");
   const frontier = BigInt(nonce.inboundNonce.toString());
-  console.log(`store ${store.toBase58()} srcEid ${SUI_TESTNET_EID}`);
+  console.log(`store ${store.toBase58()} srcEid ${SUI_EID}`);
   console.log(`inbound frontier ${frontier}; clearing ${frontier + 1n}..${to} (${to - frontier} nonces); RUN=${RUN} pairs/tx=${PAIRS_PER_TX}`);
   if (to <= frontier) {
     console.log("nothing to clear (to <= frontier)");
@@ -116,9 +116,9 @@ async function main() {
       const n = cur + BigInt(i);
       const initRaw = await rpc(() => endpoint.initVerify(
         conn as never, admin.publicKey as never, senderPk as never, store as never,
-        SUI_TESTNET_EID, n.toString(),
+        SUI_EID, n.toString(),
       ));
-      const skipRaw = await endpoint.skip(admin.publicKey, senderPk, store, SUI_TESTNET_EID, n.toString());
+      const skipRaw = await endpoint.skip(admin.publicKey, senderPk, store, SUI_EID, n.toString());
       if (initRaw) tx.add(normalizeIx(initRaw as never));
       if (skipRaw) tx.add(normalizeIx(skipRaw as never));
     }
@@ -131,7 +131,7 @@ async function main() {
       // batch==1 and still failing: likely hit a delivered nonce; let re-read resync
     }
     await sleep(SLEEP_MS);
-    const nn = await rpc(() => endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes));
+    const nn = await rpc(() => endpoint.getNonce(conn as never, store as never, SUI_EID, senderBytes));
     const next = nn ? BigInt(nn.inboundNonce.toString()) : cur;
     if (next <= cur) {
       console.log(`  frontier stuck at ${cur}; stopping`);
@@ -141,7 +141,7 @@ async function main() {
     cur = next;
   }
 
-  const after = await endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes);
+  const after = await endpoint.getNonce(conn as never, store as never, SUI_EID, senderBytes);
   console.log(`cleared ~${rounds} gap nonces; new inbound frontier ${after ? after.inboundNonce.toString() : "?"}`);
 }
 

@@ -1,9 +1,9 @@
 /**
  * Step 4: register the Sui receiver as this OApp's peer for the Sui endpoint id
- * (40378). LayerZero peers use the Sui PACKAGE id, not the OApp object id (same
+ * (40378 testnet, 30378 mainnet, per NETWORK). LayerZero peers use the Sui PACKAGE id, not the OApp object id (same
  * rule as the EVM adapter's setPeer for Sui).
  *
- * The reciprocal side (Sui's peer for Solana EID 40168 -> this Store PDA) is set
+ * The reciprocal side (Sui's peer for the Solana EID, 40168 devnet or 30168 mainnet, -> this Store PDA) is set
  * on Sui separately.
  *
  *   npm run set-peer
@@ -18,17 +18,17 @@ import {
 import { encodeSetPeerData } from "../../../sdk/src/solana/program.ts";
 import {
   BOSPHOR_PROGRAM_ID,
-  SUI_TESTNET_EID,
+  SUI_EID,
   connection,
   payer,
   peerPda,
   storePda,
+  PRESET,
+  setting,
 } from "./config.ts";
 
-/** Sui receiver = the Sui bosphor_lz PACKAGE id (v6). Override with SUI_RECEIVER. */
-const SUI_RECEIVER =
-  process.env.SUI_RECEIVER ??
-  "0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5";
+/** Sui receiver = the Sui bosphor_lz PACKAGE id (v6 on testnet; required on mainnet). */
+const SUI_RECEIVER = setting("SUI_RECEIVER", PRESET.suiOappPackageId);
 
 function receiverBytes(): Uint8Array {
   const hex = SUI_RECEIVER.startsWith("0x") ? SUI_RECEIVER.slice(2) : SUI_RECEIVER;
@@ -41,12 +41,12 @@ async function main(): Promise<void> {
   const conn = connection();
   const admin = payer();
   const store = storePda();
-  const peer = peerPda(store, SUI_TESTNET_EID);
+  const peer = peerPda(store, SUI_EID);
   const receiver = receiverBytes();
 
   console.log("Store PDA:   ", store.toBase58());
   console.log("Peer PDA:    ", peer.toBase58());
-  console.log("Sui EID:     ", SUI_TESTNET_EID);
+  console.log("Sui EID:     ", SUI_EID);
   console.log("Sui receiver:", SUI_RECEIVER);
 
   const ix = new TransactionInstruction({
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
       { pubkey: store, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    data: Buffer.from(encodeSetPeerData(SUI_TESTNET_EID, receiver)),
+    data: Buffer.from(encodeSetPeerData(SUI_EID, receiver)),
   });
 
   const sig = await sendAndConfirmTransaction(conn, new Transaction().add(ix), [admin], {

@@ -21,6 +21,7 @@
     "wire": "tsx scripts/util/wire.ts",
     "test:e2e": "tsx scripts/test/e2e-test.ts",
     "test:e2e:priced": "tsx scripts/test/e2e-priced.ts",
+    "test:e2e:priced:solana": "tsx scripts/test/e2e-priced-solana.ts",
     "new-deployment": "npm run deploy:sui && npm run deploy:evm && npm run wire && npm run test:e2e",
     "version:bump": "tsx scripts/release/version-bump.ts",
     "version:check": "tsx scripts/release/version-bump.ts --check",
