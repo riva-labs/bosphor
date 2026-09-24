@@ -18,8 +18,10 @@ passed as a `nativeFee` cap on submit). Build one with
 
 | Method | Signature | Returns |
 |--------|-----------|---------|
-| `storePriced` | `storePriced(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions)` | `Promise<StoreResult & { quote: PricedQuote }>` |
-| `store` | `store(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions)` | `Promise<StoreResult>` |
+| `storePriced` | `storePriced(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions)` | `Promise<StoreResult & { quote: PricedQuote }>` |
+| `store` | `store(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions)` |
+| `getEscrow` | `getEscrow(intentId: Hex)` | `Promise<SolanaEscrowState \| null>` |
+| `refundEscrow` | `refundEscrow(intentId: Hex)` | `Promise<{ txHash: string }>` | `Promise<StoreResult>` |
 | `priceQuote` | `priceQuote(encoded: EncodedIntent, opts?: { signal?: AbortSignal })` | `Promise<PricedQuote>` |
 | `submitPaid` | `submitPaid(encoded: EncodedIntent, quote: PricedQuote, opts?: SubmitOptions)` | `Promise<{ intentId: Hex; txHash: string }>` |
 | `encode` | `encode(data: Uint8Array, opts?: EncodeOptions)` | `Promise<EncodedIntent>` |
@@ -28,8 +30,24 @@ passed as a `nativeFee` cap on submit). Build one with
 | `awaitProof` | `awaitProof(intentId: Hex, opts?: AwaitProofOptions)` | `Promise<{ blobId: Hex; endEpoch: bigint }>` |
 
 `submitPaid` deposits `quote.escrowNative` into the intent's escrow vault; the
-proof releases it to the relayer. `priceQuote` reports the client's `nativeFee`
-cap as the forward LayerZero fee.
+proof releases it to the relayer. `priceQuote` uses the live LayerZero fee from
+the `quoteLzFee` option when set (the Keypair helper sets it), otherwise the
+`nativeFee` cap with `forwardIsUpperBound: true`. `refundEscrow` sends
+`refund_escrow` after the deadline, closing the vault back to the payer.
+
+## quoteSolanaStore and quoteSolanaLzFee
+
+```ts
+quoteSolanaStore(opts: QuoteSolanaStoreOptions): Promise<PricedQuote>
+quoteSolanaLzFee(opts: QuoteSolanaLzFeeOptions): Promise<bigint>
+```
+
+`quoteSolanaStore` prices a store without a wallet from a `connection` and the
+file (`data` or `sizeBytes`), like `priceQuote()`. `quoteSolanaLzFee` returns the
+live LayerZero fee in lamports by simulating the endpoint's `quote` instruction
+(read-only; nothing is signed or sent). Both need the optional peer
+`@layerzerolabs/lz-solana-sdk-v2`; without it `quoteSolanaLzFee` throws
+`LzSolanaSdkMissingError` and `quoteSolanaStore` falls back to the flagged cap.
 
 ## createBosphorSolanaClientFromKeypair
 

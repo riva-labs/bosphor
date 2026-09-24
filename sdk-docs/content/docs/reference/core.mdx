@@ -48,6 +48,22 @@ the wire as decimal strings and come back as `bigint`. Throws `BosphorError` on 
 non-2xx response or an unparseable body, never a fabricated price. The chain
 clients wrap it as `priceQuote()`. See [Pay for storage](/docs/pay-for-storage).
 
+## StoreProgress
+
+The events passed to the `onProgress` option of `store()` / `storePriced()`, in
+order: `encoded`, `quoted` (skipped by Solana `store()`), `submitted`, `uploaded`,
+`proven`. Each carries the data known at that point, for example `txHash` on
+`submitted` and `blobId`/`endEpoch` on `proven`.
+
+```ts
+type StoreProgress =
+  | { step: 'encoded'; encoded: EncodedIntent }
+  | { step: 'quoted'; amount: bigint; quote?: PricedQuote }
+  | { step: 'submitted'; intentId: Hex; txHash: string }
+  | { step: 'uploaded'; intentId: Hex }
+  | { step: 'proven'; intentId: Hex; blobId: Hex; endEpoch: bigint };
+```
+
 ## QuoteRequest
 
 <AutoTypeTable path="sdk/src/quote.ts" name="QuoteRequest" />
