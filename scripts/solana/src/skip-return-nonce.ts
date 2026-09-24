@@ -55,7 +55,7 @@ async function main() {
   const senderPk = new PublicKey(senderBytes);
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
 
-  const nonce = await endpoint.getNonce(conn, store, SUI_TESTNET_EID, senderBytes);
+  const nonce = await endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes);
   if (!nonce) throw new Error("no Nonce account for this pathway");
   const frontier = BigInt(nonce.inboundNonce.toString());
   console.log(`store ${store.toBase58()} srcEid ${SUI_TESTNET_EID}`);
@@ -131,7 +131,7 @@ async function main() {
       // batch==1 and still failing: likely hit a delivered nonce; let re-read resync
     }
     await sleep(SLEEP_MS);
-    const nn = await rpc(() => endpoint.getNonce(conn, store, SUI_TESTNET_EID, senderBytes));
+    const nn = await rpc(() => endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes));
     const next = nn ? BigInt(nn.inboundNonce.toString()) : cur;
     if (next <= cur) {
       console.log(`  frontier stuck at ${cur}; stopping`);
@@ -141,7 +141,7 @@ async function main() {
     cur = next;
   }
 
-  const after = await endpoint.getNonce(conn, store, SUI_TESTNET_EID, senderBytes);
+  const after = await endpoint.getNonce(conn as never, store as never, SUI_TESTNET_EID, senderBytes);
   console.log(`cleared ~${rounds} gap nonces; new inbound frontier ${after ? after.inboundNonce.toString() : "?"}`);
 }
 
