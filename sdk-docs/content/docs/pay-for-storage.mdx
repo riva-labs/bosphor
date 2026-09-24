@@ -1,0 +1,108 @@
+---
+title: Pay for storage
+description: Quote, pay, and store with storePriced(), and how the escrow is released or refunded.
+---
+
+Storing through Bosphor is paid in your origin chain's native token: ETH on EVM,
+SOL on Solana. You pay one all-in amount when you submit. The storage part is held
+in **escrow** on your chain and released to the relayer only when the proof of
+storage arrives back. If no proof arrives before the intent deadline, the escrow
+can be refunded to you.
+
+## The one-call path
+
+```ts
+const { intentId, blobId, endEpoch, txHash, quote } = await client.storePriced(bytes, {
+  epochs: 5,
+});
+```
+
+`storePriced()` works the same on the EVM and Solana clients:
+
+```
+encode -> priceQuote -> submitPaid -> upload -> awaitProof
+```
+
+The returned `quote` is the exact quote that was paid, so you can record or show
+it after the fact.
+
+## Show the price before the user signs
+
+Split the flow to put the price in front of the user first:
+
+```ts
+const encoded = await client.encode(bytes, { epochs: 5 });
+const quote = await client.priceQuote(encoded);
+
+// e.g. "0.00128 ETH ($3.42)"
+showPrice(quote.totalNative, quote.breakdown.totalUsd);
+
+// Later, on the user's confirm click (wallet signs here):
+const { intentId } = await client.submitPaid(encoded, quote);
+await client.upload(intentId, bytes);
+const { blobId, endEpoch } = await client.awaitProof(intentId);
+```
+
+A quote reflects live prices, so fetch a fresh one if the user waits long before
+confirming.
+
+## What the quote contains
+
+`priceQuote()` returns a [`PricedQuote`](/docs/reference/core#pricedquote):
+
+| Field | Meaning |
+|-------|---------|
+| `escrowNative` | Storage cost: Walrus storage, Sui gas, and the LayerZero return leg, with a buffer and margin. Held in escrow. |
+| `forwardNative` | The LayerZero fee for sending your intent to Sui. Paid directly, not escrowed. |
+| `totalNative` | `escrowNative + forwardNative`: what you pay at submit. |
+| `breakdown` | Every component in USD, plus `totalUsd`. |
+
+Amounts are `bigint`s in the chain's smallest unit (wei or lamports). As a guide,
+a 1 KB file for 5 epochs on testnet costs about 0.0013 ETH or 0.03 SOL today.
+Most of the cost is the LayerZero return leg, so the price grows slowly with size.
+
+## Where the money goes
+
+- **On proof**: when the storage proof arrives and its blob id matches your
+  commitment, the escrow is released to the relayer. The relayer cannot collect
+  without a valid proof.
+- **On timeout**: if no proof lands by the intent deadline, anyone can trigger a
+  refund and the escrow goes back to the payer. On EVM, call
+  `refund(intentId)` on the adapter, then `withdraw()` from the payer's wallet.
+  On Solana, the program's `refund_escrow` instruction returns the vault to the payer.
+  The SDK sets the deadline one hour after submit by default; change it with the
+  `deadline` option on `encode`/`storePriced` or `deadlineSeconds` on the client.
+- **Checking an escrow (EVM)**:
+
+```ts
+import { ethers } from 'ethers';
+import { ADAPTER_ABI, EscrowStatus, TESTNET } from '@bosphor/sdk/evm';
+
+const adapter = new ethers.Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, provider);
+const escrow = await adapter.getEscrow(intentId);
+if (Number(escrow.status) === EscrowStatus.Released) console.log('paid out on proof');
+```
+
+## Quoting without a client
+
+`fetchQuote` calls the relayer quote endpoint directly, for example on a server
+that shows prices before any wallet is connected:
+
+```ts
+import { TESTNET, fetchQuote } from '@bosphor/sdk';
+
+const quote = await fetchQuote(TESTNET.relayerUrl, {
+  sizeBytes: file.size,
+  epochs: 5,
+  originToken: 'ETH', // or 'SOL'
+});
+```
+
+Without `forwardLzFeeNative` the result covers only the storage (escrow) part;
+the client's `priceQuote()` adds the live LayerZero fee for you.
+
+## Free stores on testnet
+
+`store()` runs the same flow but pays only the LayerZero fee, with no escrow. The
+hosted testnet relayer accepts these today so you can experiment cheaply. Use
+`storePriced()` for anything you build on.
