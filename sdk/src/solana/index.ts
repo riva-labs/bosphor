@@ -74,3 +74,13 @@ export type {
   SolanaNetworkConfig,
   SuiNetworkConfig,
 } from "../networks.js";
+
+// Off-chain priced quoting via the relayer (shared across chains).
+export { fetchQuote } from "../quote.js";
+export type {
+  OriginToken,
+  QuoteRequest,
+  QuoteBreakdown,
+  PricedQuote,
+  FetchQuoteOptions,
+} from "../quote.js";
