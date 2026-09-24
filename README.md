@@ -83,29 +83,28 @@ npm test            # forge + move + relayer + sdk
 `npm run new-deployment` (deploy + wire + e2e) is a maintainer flow: it submits
 real testnet transactions and needs a funded wallet and a running relayer, so
 fill `.env` first (`cp .env.example .env`) and start the relayer. See
-[website/docs/deployment.md](website/docs/deployment.md) for the full setup.
+[website/docs/self-hosting.md](website/docs/self-hosting.md) for the full setup.
 
 ## Using the SDK
 
-To integrate Bosphor into an app, use `@bosphor/sdk` rather than the raw
-contracts. One `store()` call runs the whole cross-chain flow and returns a
-result verified against on-chain state.
+To integrate Bosphor into an app, use `@bosphor/sdk` against the hosted testnet;
+there is nothing to deploy. One `storePriced()` call quotes, pays, runs the whole
+cross-chain flow, and returns a result verified against on-chain state.
 
 ```bash
 npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 ```
 
 ```ts
-import { createBosphorClient } from "@bosphor/sdk/evm";
+import { createBosphorClientFromSigner } from "@bosphor/sdk/evm";
 
-const client = createBosphorClient({
-  adapter,                  // an ethers.Contract bound to BosphorAdapter (with a signer)
-  relayerUrl: "https://api.bosphor.xyz/testnet",
-  dstEid: 40378,            // Sui testnet
-});
+// `signer` is any ethers v6 Signer on Sepolia. Addresses come from the TESTNET preset.
+const client = await createBosphorClientFromSigner(signer);
 
-const { intentId, blobId, endEpoch } = await client.store(bytes, { epochs: 5 });
+const { intentId, blobId, endEpoch } = await client.storePriced(bytes, { epochs: 5 });
 ```
+
+Start with the [Quickstart](https://docs.bosphor.xyz/quickstart) (EVM and Solana).
 
 Full guides, the Solana path, and the API reference are at
 **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
@@ -141,13 +140,17 @@ See [website/docs/architecture.md](website/docs/architecture.md) for the full de
 | Walrus Blob | [1sfeIRiJ...](https://walruscan.com/testnet/blob/1sfeIRiJCxR_2HtapNCfGUkoMbsl5Mqj5sIwR8PLQvU) |
 | EVM Confirm | [0x941966...](https://sepolia.etherscan.io/tx/0x9419666133c7b876c1ccebecc73d83af9356a6972fed1c6728d1b7cc079c1309) |
 
-## Deployed Contracts
+## Deployed Contracts (testnet)
 
 | Contract | Network | Address |
 |----------|---------|---------|
-| BosphorAdapter | Sepolia | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
-| Sui Package | Sui Testnet | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |
-| Sui OApp | Sui Testnet | `0x4a5bf89e083c16bd8034b027454057d30ec336c734a7cc274e857a9125540026` |
+| BosphorEscrowAdapter | Sepolia (EID 40161) | `0x3296686Fc61076d27488278c1da5468E1e0A7156` |
+| Bosphor Solana program | Solana devnet (EID 40168) | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` |
+| Sui package (LayerZero peer) | Sui Testnet (EID 40378) | `0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5` |
+
+Hosted testnet relayer: `https://api.bosphor.xyz/testnet`. The SDK ships all of
+these as the `TESTNET` preset; the [testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet)
+is the single up-to-date list.
 
 ## Docker
 
