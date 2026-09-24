@@ -205,12 +205,22 @@ describe('IntentIngest with the durable staged queue', () => {
     // The cap is passed so the write enforces it atomically (not the fast-path read).
     expect(staged.upsertBytes).toHaveBeenCalledWith(
       INTENT_ID,
-      { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5 },
+      { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5, appId: null },
       268_435_456,
     );
     // Event-driven drain: staging nudges the processor to store without waiting
     // for the poll interval.
     expect(waker.wake).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries the integrator app id through to the staged row', async () => {
+    const bytes = Buffer.from('hello');
+    await ingest.ingest(INTENT_ID, bytes, 'my-dapp');
+    expect(staged.upsertBytes).toHaveBeenCalledWith(
+      INTENT_ID,
+      expect.objectContaining({ appId: 'my-dapp' }),
+      268_435_456,
+    );
   });
 
   it('does not wake the queue when the bytes are refused by backpressure', async () => {
