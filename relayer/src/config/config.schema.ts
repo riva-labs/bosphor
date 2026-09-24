@@ -154,5 +154,11 @@ export const configValidationSchema = Joi.object({
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
+  // Internal Prometheus scrape port. /metrics is NOT served on PORT (it exposes
+  // wallet balances); keep this port off the public tunnel / reverse proxy.
+  METRICS_PORT: Joi.number().integer().min(1).max(65535).default(9464),
+  METRICS_HOST: Joi.string().default('0.0.0.0'),
+  // Optional bearer token required on scrapes (defence in depth).
+  METRICS_TOKEN: Joi.string().optional().allow(''),
   LOG_LEVEL: Joi.string().default('info'),
 });
