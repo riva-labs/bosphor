@@ -37,6 +37,7 @@ function makeRow(o: Partial<StagedIntentRow> = {}): StagedIntentRow {
     endEpoch: undefined,
     storeDigest: undefined,
     returned: false,
+    ledgered: false,
     state: 'active',
     attempts: 0,
     nextAttemptAt: 0,

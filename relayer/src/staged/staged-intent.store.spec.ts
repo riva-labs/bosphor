@@ -33,7 +33,9 @@ class FakePool implements PgQueryable {
       for (const [id, r] of this.rows) {
         if (
           ['done', 'dead', 'expired'].includes(r.state as string) &&
-          (r.updated_at as number) < cutoff
+          (r.updated_at as number) < cutoff &&
+          // SQL: AND (store_digest IS NULL OR ledgered)
+          (r.store_digest == null || r.ledgered === true)
         ) {
           purged.push({ intent_id: id });
           this.rows.delete(id);
@@ -110,6 +112,17 @@ class FakePool implements PgQueryable {
       return { rows: r ? [this.project(r)] : [] };
     }
 
+    // pendingLedger($1 = limit): completed stores not yet recorded in the ledger.
+    if (sql.includes('store_digest is not null and not ledgered')) {
+      const limit = params[0] as number;
+      const due = [...this.rows.values()]
+        .filter((r) => r.store_digest != null && r.ledgered !== true)
+        .sort((a, b) => (a.created_at as number) - (b.created_at as number))
+        .slice(0, limit)
+        .map((r) => this.project(r));
+      return { rows: due };
+    }
+
     throw new Error(`unexpected query: ${text}`);
   }
 
@@ -154,6 +167,9 @@ class FakePool implements PgQueryable {
         existing.blob_id = params[2] as string;
         existing.size = params[3] as number;
         existing.updated_at = params[4] as number;
+        // COALESCE(EXCLUDED.app_id, existing): a re-ingest without an app id
+        // (e.g. byte recovery) never clears one recorded earlier.
+        existing.app_id = (params[7] as string | null) ?? existing.app_id;
         return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
       }
       existing.received = true;
@@ -189,6 +205,9 @@ class FakePool implements PgQueryable {
       next_attempt_at: now,
       claimed_by: null,
       lease_expires_at: null,
+      app_id: null,
+      stored_at: null,
+      ledgered: false,
       last_error: null,
       created_at: now,
       updated_at: now,
@@ -197,6 +216,7 @@ class FakePool implements PgQueryable {
       base.bytes = params[1] as Buffer;
       base.blob_id = params[2] as string;
       base.size = params[3] as number;
+      base.app_id = (params[7] as string | null) ?? null;
       this.rows.set(id, base);
       return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
     }
@@ -267,7 +287,10 @@ class FakePool implements PgQueryable {
       r.updated_at = params[4] as number;
     } else if (sql.includes('store_digest = $2')) {
       r.store_digest = params[1] as string;
+      r.stored_at = params[2] as number;
       r.updated_at = params[2] as number;
+    } else if (sql.includes('ledgered = true')) {
+      r.ledgered = true;
     } else if (sql.includes('returned = true')) {
       r.returned = true;
       r.updated_at = params[1] as number;
@@ -721,6 +744,54 @@ describe('StagedIntentStore', () => {
     expect((await store.get('0xexp'))?.state).toBe('expired');
     expect((await store.get('0xexp'))?.hasBytes).toBe(false);
     expect((await store.get('0xlive'))?.state).toBe('active');
+  });
+
+  describe('integrator app id + ops-ledger bookkeeping', () => {
+    it('records the app id on ingest and never clears it on an id-less re-ingest', async () => {
+      const pool = new FakePool();
+      const store = new StagedIntentStore(pool);
+      await store.upsertBytes('0xa', { bytes: bytes('x'), blobId: 'b', size: 1, appId: 'my-dapp' });
+      expect((await store.get('0xa'))?.appId).toBe('my-dapp');
+      // Byte recovery re-ingests without an app id: the recorded one survives.
+      await store.upsertBytes('0xa', { bytes: bytes('x'), blobId: 'b', size: 1 });
+      expect((await store.get('0xa'))?.appId).toBe('my-dapp');
+    });
+
+    it('a missing app id is recorded as absent', async () => {
+      const pool = new FakePool();
+      const store = new StagedIntentStore(pool);
+      await store.upsertBytes('0xa', { bytes: bytes('x'), blobId: 'b', size: 1 });
+      const row = await store.get('0xa');
+      expect(row?.appId).toBeUndefined();
+      expect(row?.ledgered).toBe(false);
+    });
+
+    it('stamps stored_at on persistStore and lists un-ledgered completed stores', async () => {
+      const pool = new FakePool();
+      const store = new StagedIntentStore(pool);
+      await store.upsertBytes('0xa', { bytes: bytes('x'), blobId: 'b', size: 1 });
+      await store.upsertBytes('0xb', { bytes: bytes('y'), blobId: 'c', size: 1 });
+      clock = 5_000;
+      await store.persistStore('0xa', '0xdigest');
+      expect((await store.get('0xa'))?.storedAt).toBe(5_000);
+
+      expect((await store.pendingLedger(10)).map((r) => r.intentId)).toEqual(['0xa']);
+      await store.markLedgered('0xa');
+      expect(await store.pendingLedger(10)).toEqual([]);
+    });
+
+    it('never purges a completed store the ledger has not recorded yet', async () => {
+      const pool = new FakePool();
+      const store = new StagedIntentStore(pool);
+      await store.upsertBytes('0xa', { bytes: bytes('x'), blobId: 'b', size: 1 });
+      await store.persistStore('0xa', '0xdigest');
+      await store.markDone('0xa');
+      clock = 10_000;
+      expect(await store.purgeTerminal(9_000)).toBe(0);
+      // Once ledgered, the normal retention applies.
+      await store.markLedgered('0xa');
+      expect(await store.purgeTerminal(9_000)).toBe(1);
+    });
   });
 
   it('purges terminal rows older than the cutoff, keeps active ones', async () => {

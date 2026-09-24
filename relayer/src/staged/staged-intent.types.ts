@@ -66,6 +66,12 @@ export interface StagedIntentRow {
   /** Epoch ms the current claim lease expires; past it, any process may claim. */
   leaseExpiresAt?: number;
   lastError?: string;
+  /** X-Bosphor-App integrator id captured on ingest; absent when none was sent. */
+  appId?: string;
+  /** Epoch ms execute_store completed (set by persistStore). */
+  storedAt?: number;
+  /** Whether the durable ops ledger (storage_op_ledger) has recorded this store. */
+  ledgered: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -96,6 +102,8 @@ export interface StagedBytes {
   blobId: string;
   /** Committed size in bytes. */
   size: number;
+  /** Validated X-Bosphor-App integrator id, or null/absent when none was sent. */
+  appId?: string | null;
 }
 
 /** Fields carried by the Sui IntentReceived event. */
