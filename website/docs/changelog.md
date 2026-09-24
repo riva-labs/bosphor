@@ -14,9 +14,9 @@ proof.
 
 - **Origin-chain payment flow**: the EVM `BosphorEscrowAdapter` and a Solana
   escrow vault escrow the user's payment at submit, release it to the relayer on
-  a genuine proof, and refund the payer after a deadline. The EVM (Sepolia) path
-  is live on testnet and validated end to end; the Solana release path is being
-  finalized. See [Payment flow](payment-flow.md) and the
+  a genuine proof, and refund the payer after a deadline. Both the EVM (Sepolia)
+  and Solana (devnet) paths are live on testnet and verified end to end. See
+  [Payment flow](payment-flow.md) and the
   [contract interface](contract-interface.md).
 
 - **Off-chain quoting**: a relayer `POST /quote` endpoint and the SDK
@@ -35,6 +35,22 @@ proof.
 - **USDC/CCTP scaffolding**: an opt-in USDC deposit via a Permit2 witness bound to
   the intent id, with CCTP settlement scaffolding behind mocks (live wiring is a
   fast-follow).
+
+- **Integrator path**: the [Quickstart](quickstart.md) now walks through the hosted
+  testnet with no deployment, and the self-deploy guide moved to
+  [Self-hosting](self-hosting.md). The SDK ships a `TESTNET` preset, the adapter
+  ABI, and one-call client helpers for EVM and Solana.
+
+### Deployed contracts (testnet, current)
+
+| Component | Address |
+|-----------|---------|
+| BosphorEscrowAdapter (Sepolia, EID 40161) | `0x3296686Fc61076d27488278c1da5468E1e0A7156` |
+| Bosphor Solana program (devnet, EID 40168) | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` |
+| Sui package, LayerZero peer (Sui testnet, EID 40378) | `0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5` |
+
+The [testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet) is the
+single up-to-date list.
 
 ## v0.2.0, Milestone 2: Proof Validation & System Stabilization
 
@@ -58,7 +74,9 @@ Operational hardening of the cross-chain pipeline: live monitoring, continuous v
 
 - **Relayer stabilization**: Reliability fixes for checkpoint handling, network-aware WAL coin type resolution, and consecutive Sui transaction sequencing.
 
-### Deployed contracts (testnet, current)
+### Deployed contracts (testnet, superseded)
+
+> Superseded by the Milestone 4 addresses above. Kept for history; do not integrate against these.
 
 | Component | Address |
 |-----------|---------|
@@ -90,7 +108,7 @@ The initial release establishing the complete cross-chain storage intent pipelin
 
 ### Deployed contracts (testnet)
 
-> Note: these are the v0.1.0-era addresses. They have since been superseded by the v0.2.0 addresses listed above. Use the v0.2.0 addresses for all current integration.
+> Superseded. These are the v0.1.0-era addresses, kept for history. Use the current addresses on the [testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet).
 
 | Component | Address |
 |-----------|---------|
