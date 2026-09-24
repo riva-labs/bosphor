@@ -4,11 +4,7 @@
 
 ### Bug Fixes
 
-- fix(relayer): add committed storage-epochs resolution policy
-- fix(relayer): persist committed storage epochs from IntentReceived
-- fix(relayer): store blobs for the committed epochs, capped by WALRUS_MAX_EPOCHS
-- fix(relayer): resolve committed epochs before spend and price the guard on them
-- fix(relayer): reject quotes for epochs above the storable max
+- fix(relayer): keep a stored row claimable so a failed return leg retries
 
 ## 0.13.2 (2026-09-24)
 
