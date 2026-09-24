@@ -119,26 +119,36 @@ fun init(ctx: &mut TxContext) {
 /// committed reference recorded at intent time, recording the execution, and
 /// transferring the blob and a `StorageReceipt` to the original sender.
 ///
-/// Beyond relayer auth, certification, dedup, and deadline, this asserts the
-/// certified blob matches the on-chain commitment fixed by `lz_receive`:
-///   1. the blob id equals the committed blob id (`EBlobIdMismatch`);
-///   2. the blob's end epoch covers `current_epoch + committed_storage_epochs`
+/// Beyond relayer auth, certification, and dedup, this asserts the execution
+/// matches the on-chain commitment fixed by `lz_receive`:
+///   1. the current time is at or before the committed deadline (`EDeadlineExpired`);
+///   2. the blob id equals the committed blob id (`EBlobIdMismatch`);
+///   3. the blob's end epoch covers `current_epoch + committed_storage_epochs`
 ///      (`EInsufficientStorageEpochs`).
-/// The committed values come from `lz_config`, not from relayer arguments.
+/// The committed values come from `lz_config`, not from relayer arguments. In
+/// particular there is no deadline argument: the deadline the user committed at
+/// intent time is the only one enforced (#374).
+///
+/// Signature note: the pre-#374 version took a relayer-supplied `deadline_ms: u64`
+/// between `blob` and `clock`. It was removed rather than kept alongside a new
+/// function because this change ships with a fresh publish, not a compatible
+/// upgrade: the receiver's stored `IntentRecord` gained `committed_deadline`
+/// (#373), a struct layout change that a compatible upgrade rejects, so the
+/// executor, which links against the receiver, is republished with it.
 ///
 /// * `config` - Shared ExecutorConfig (checks relayer authorization and dedup).
 /// * `lz_config` - Shared LzReceiverConfig holding the committed reference for the intent.
 /// * `system` - Walrus System object, used to read the current epoch.
 /// * `intent_id` - Unique identifier of the storage intent.
 /// * `blob` - Certified Walrus Blob object to be stored.
-/// * `deadline_ms` - Intent deadline in milliseconds; execution must happen before this.
 /// * `clock` - Sui Clock for timestamp verification.
 /// * `original_sender` - Address that initiated the intent on EVM; receives the blob and receipt.
 ///
 /// Aborts with `ENotRelayer` if the caller is not the authorized relayer.
 /// Aborts with `EBlobNotCertified` if the blob has not been certified.
 /// Aborts with `EIntentAlreadyExecuted` if this intent was already executed.
-/// Aborts with `EDeadlineExpired` if the current time exceeds the deadline.
+/// Aborts with `bosphor_lz::lz_receiver::EIntentNotReceived` if the intent was never received.
+/// Aborts with `EDeadlineExpired` if the current time is past the committed deadline.
 /// Aborts with `EBlobIdMismatch` if the blob id differs from the committed reference.
 /// Aborts with `EInsufficientStorageEpochs` if the blob does not cover the committed epochs.
 public fun execute_store(
@@ -147,7 +157,6 @@ public fun execute_store(
     system: &System,
     intent_id: vector<u8>,
     blob: Blob,
-    deadline_ms: u64,
     clock: &Clock,
     original_sender: address,
     ctx: &mut TxContext,
@@ -155,7 +164,10 @@ public fun execute_store(
     assert!(ctx.sender() == config.relayer, ENotRelayer);
     assert!(blob.certified_epoch().is_some(), EBlobNotCertified);
     assert!(!config.executed_intents.contains(intent_id), EIntentAlreadyExecuted);
-    assert!(clock.timestamp_ms() <= deadline_ms, EDeadlineExpired);
+
+    // Enforce the deadline the user committed, never a relayer-supplied value.
+    let committed_deadline = bosphor_lz::lz_receiver::committed_deadline(lz_config, intent_id);
+    assert_deadline(clock.timestamp_ms(), committed_deadline);
 
     // Verify the certified blob against the reference committed by `lz_receive`.
     let committed_id = bosphor_lz::lz_receiver::committed_blob_id(lz_config, intent_id);
@@ -239,6 +251,24 @@ public fun assert_reference(
         reference::covers_storage_epochs(committed_storage_epochs, actual_end_epoch, current_epoch),
         EInsufficientStorageEpochs,
     );
+}
+
+/// Deadline predicate applied by `execute_store`.
+///
+/// The committed deadline is a unix timestamp in SECONDS (EVM `block.timestamp`
+/// semantics, carried unchanged through the commitment), while the Sui clock is in
+/// MILLISECONDS. The comparison widens both sides to u128 before scaling the
+/// deadline by 1000, so any u64 deadline (including `u64::MAX` as "no deadline")
+/// compares exactly without overflow. Execution at exactly the deadline second
+/// boundary (`now_ms == deadline_s * 1000`) is allowed, matching the previous
+/// `timestamp_ms() <= deadline_ms` semantics.
+///
+/// * `now_ms` - Current Sui clock time in milliseconds.
+/// * `committed_deadline_s` - Committed intent deadline in unix seconds.
+///
+/// Aborts with `EDeadlineExpired` if `now_ms` is past the committed deadline.
+public fun assert_deadline(now_ms: u64, committed_deadline_s: u64) {
+    assert!((now_ms as u128) <= (committed_deadline_s as u128) * 1000, EDeadlineExpired);
 }
 
 // === Admin ===
