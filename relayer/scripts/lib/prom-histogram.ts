@@ -24,7 +24,11 @@ export function parseHistogram(text: string, metric: string): HistBucket[] {
  * Sum every series of a counter whose labels include all of `match`
  * (label order in the exposition does not matter). Returns 0 if absent.
  */
-export function sumCounter(text: string, metric: string, match: Record<string, string> = {}): number {
+export function sumCounter(
+  text: string,
+  metric: string,
+  match: Record<string, string> = {},
+): number {
   const re = new RegExp(`^${metric}(?:\\{([^}]*)\\})?\\s+([0-9.eE+-]+)`, 'gm');
   let total = 0;
   let m: RegExpExecArray | null;

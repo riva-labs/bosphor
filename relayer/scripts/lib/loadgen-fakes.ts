@@ -104,7 +104,12 @@ export class InMemoryStagedStore {
     this.patch(intentId, { state: 'dead', lastError });
   }
 
-  async reschedule(intentId: string, attempts: number, nextAt: number, lastError: string): Promise<void> {
+  async reschedule(
+    intentId: string,
+    attempts: number,
+    nextAt: number,
+    lastError: string,
+  ): Promise<void> {
     await this.db();
     this.patch(intentId, { attempts, nextAttemptAt: nextAt, lastError });
   }

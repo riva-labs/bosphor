@@ -54,7 +54,11 @@ export interface LocalOptions {
   timeoutMs: number;
 }
 
-export async function runLocalProfile(concurrency: number, intents: number, o: LocalOptions): Promise<ProfileResult> {
+export async function runLocalProfile(
+  concurrency: number,
+  intents: number,
+  o: LocalOptions,
+): Promise<ProfileResult> {
   const lat = (base: number, salt: number) => makeLatency(base, o.jitterMs, o.seed + salt);
   const io: IoLatency = {
     walrusUpload: lat(o.latency.walrusUpload, 1),
@@ -127,7 +131,8 @@ export async function runLocalProfile(concurrency: number, intents: number, o: L
   const started = Date.now();
   const deadline = started + o.timeoutMs;
   while (staged.count('active') > 0) {
-    if (Date.now() > deadline) throw new Error(`profile c=${concurrency} timed out after ${o.timeoutMs}ms`);
+    if (Date.now() > deadline)
+      throw new Error(`profile c=${concurrency} timed out after ${o.timeoutMs}ms`);
     const before = metrics.succeeded + metrics.failed;
     await proc.tick();
     // No progress means every remaining row is backing off after a failure:

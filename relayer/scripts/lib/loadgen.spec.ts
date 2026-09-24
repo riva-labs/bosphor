@@ -68,7 +68,16 @@ describe('loadgen stats', () => {
   it('formats a markdown row per profile', () => {
     const lat = { count: 1, p50Ms: 1, p95Ms: 2, p99Ms: 3, minMs: 0, meanMs: 1, maxMs: 4 };
     const md = formatMarkdown([
-      { concurrency: 10, intents: 5, completed: 5, failed: 0, wallMs: 1000, throughputPerSec: 5, compute: lat, processing: lat },
+      {
+        concurrency: 10,
+        intents: 5,
+        completed: 5,
+        failed: 0,
+        wallMs: 1000,
+        throughputPerSec: 5,
+        compute: lat,
+        processing: lat,
+      },
     ]);
     expect(md.split('\n')).toHaveLength(3);
     expect(md).toMatch(/^\| Concurrency/);
@@ -99,7 +108,10 @@ describe('prom-histogram', () => {
 
   it('diffs two scrapes to the window-only histogram and interpolates quantiles', () => {
     const before = parseHistogram(scrape([4, 8, 10], 0), 'bosphor_relayer_compute_latency_seconds');
-    const after = parseHistogram(scrape([14, 18, 20], 0), 'bosphor_relayer_compute_latency_seconds');
+    const after = parseHistogram(
+      scrape([14, 18, 20], 0),
+      'bosphor_relayer_compute_latency_seconds',
+    );
     const d = diffHistogram(before, after);
     expect(d.map((x) => x.cumulative)).toEqual([10, 10, 10]);
     // All 10 window observations fall in the first bucket (0, 0.1s].
@@ -153,7 +165,14 @@ describe('runLocalProfile (real IntentProcessor, stubbed I/O)', () => {
     jitterMs: 0,
     seed: 1,
     timeoutMs: 20_000,
-    latency: { walrusUpload: walrusMs, suiExecuteStore: 0, suiWait: 0, lzQuote: 0, lzSend: 0, walTopUp: 0 },
+    latency: {
+      walrusUpload: walrusMs,
+      suiExecuteStore: 0,
+      suiWait: 0,
+      lzQuote: 0,
+      lzSend: 0,
+      walTopUp: 0,
+    },
   });
 
   it('settles every seeded intent and records one compute sample each', async () => {

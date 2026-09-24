@@ -124,7 +124,11 @@ async function runLive(args: Map<string, string>): Promise<void> {
     for (let i = 0; i < n; i++) {
       drives.push(
         new Promise((resolve) => {
-          const child = spawn(cmd, { shell: true, stdio: 'inherit', env: { ...process.env, LOADGEN_WORKER: String(i) } });
+          const child = spawn(cmd, {
+            shell: true,
+            stdio: 'inherit',
+            env: { ...process.env, LOADGEN_WORKER: String(i) },
+          });
           child.on('exit', (code) => resolve(code ?? 1));
         }),
       );
@@ -136,10 +140,20 @@ async function runLive(args: Map<string, string>): Promise<void> {
   const t1 = await scrape(url);
   const wallMs = Date.now() - startedAt;
 
-  const compute = diffHistogram(parseHistogram(t0, COMPUTE_METRIC), parseHistogram(t1, COMPUTE_METRIC));
-  const processing = diffHistogram(parseHistogram(t0, PROCESSING_METRIC), parseHistogram(t1, PROCESSING_METRIC));
-  const ok = sumCounter(t1, PROCESSED_METRIC, { result: 'success' }) - sumCounter(t0, PROCESSED_METRIC, { result: 'success' });
-  const failed = sumCounter(t1, PROCESSED_METRIC, { result: 'failure' }) - sumCounter(t0, PROCESSED_METRIC, { result: 'failure' });
+  const compute = diffHistogram(
+    parseHistogram(t0, COMPUTE_METRIC),
+    parseHistogram(t1, COMPUTE_METRIC),
+  );
+  const processing = diffHistogram(
+    parseHistogram(t0, PROCESSING_METRIC),
+    parseHistogram(t1, PROCESSING_METRIC),
+  );
+  const ok =
+    sumCounter(t1, PROCESSED_METRIC, { result: 'success' }) -
+    sumCounter(t0, PROCESSED_METRIC, { result: 'success' });
+  const failed =
+    sumCounter(t1, PROCESSED_METRIC, { result: 'failure' }) -
+    sumCounter(t0, PROCESSED_METRIC, { result: 'failure' });
   const n = histogramCount(compute);
   if (n === 0) throw new Error('no intents completed inside the window; nothing to report');
 
