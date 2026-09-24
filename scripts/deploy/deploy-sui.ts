@@ -1,14 +1,18 @@
 /**
  * deploy-sui.ts
  *
- * Publishes the Bosphor LZ OApp package to Sui testnet, registers it with
+ * Publishes the Bosphor LZ OApp package to Sui (testnet by default, or mainnet
+ * with NETWORK=mainnet), registers it with
  * the LayerZero endpoint (OAppInfoV1 format), configures send/receive
  * libraries, DVN, and executor. If EVM_ADAPTER_ADDRESS is set in .env,
  * also configures set_peer.
  *
  * Usage: npm run deploy:sui
- * Required env: SUI_DEPLOYER_KEY, SUI_RPC_URL
- * Optional env: EVM_ADAPTER_ADDRESS (for automatic peer setup)
+ * Required env: SUI_DEPLOYER_KEY, SUI_LZ_* LayerZero object ids (see requiredEnv)
+ * Required on NETWORK=mainnet: SUI_GRPC_URL, SUI_JSONRPC_URL, EVM_EID (the
+ *   chosen EVM chain's LayerZero EID; the chain is a deployment parameter)
+ * Optional env: NETWORK (testnet|mainnet, default testnet),
+ *   EVM_ADAPTER_ADDRESS (for automatic peer setup)
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -24,6 +28,7 @@ config({ path: ENV_PATH });
 import { Transaction } from "@mysten/sui/transactions";
 import { bcs } from "@mysten/sui/bcs";
 import { createSuiClient, createSuiSigner, signAndExecute, getWorkerCapAddress } from "../util/sui-client.js";
+import { presetEid, presetEnv, resolveNetwork, suiJsonRpcUrls } from "../util/network.js";
 
 // --- LZ Infrastructure (from .env) ---
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
@@ -34,10 +39,14 @@ const LZ_DVN_SUI = process.env.SUI_LZ_DVN_PKG!;
 const LZ_EXECUTOR_OBJ = process.env.SUI_LZ_EXECUTOR_OBJ!;
 const CLOCK = "0x6";
 
-const EVM_EID = Number(process.env.EVM_EID) || 40161;
+// Sepolia and Sui testnet on testnet; on mainnet EVM_EID, SUI_GRPC_URL and
+// SUI_JSONRPC_URL are required (no testnet fallback).
+const NETWORK = resolveNetwork();
+const EVM_EID = presetEid("EVM_EID", NETWORK);
 
 // --- Config from env ---
-const SUI_GRPC_URL = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
+const SUI_GRPC_URL = presetEnv("SUI_GRPC_URL", NETWORK);
+const SUI_JSONRPC_URLS = suiJsonRpcUrls(NETWORK);
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY;
 const EVM_ADAPTER_ADDRESS = process.env.EVM_ADAPTER_ADDRESS;
 
@@ -88,7 +97,7 @@ async function exec(tx: Transaction, label: string): Promise<any> {
   return result;
 }
 
-// Testnet gRPC intermittently aborts the wait with a timeout even though the
+// Sui gRPC (notably on testnet) intermittently aborts the wait with a timeout even though the
 // transaction is already on-chain. Retry before giving up so a slow indexer
 // does not abort a multi-step deploy.
 async function waitTx(digest: string) {
@@ -107,11 +116,7 @@ async function waitTx(digest: string) {
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
-  const rpcs = [
-    process.env.SUI_JSONRPC_URL,
-    "https://sui-testnet-rpc.publicnode.com",
-    "https://rpc-testnet.suiscan.xyz",
-  ].filter(Boolean) as string[];
+  const rpcs = SUI_JSONRPC_URLS;
   for (let attempt = 1; attempt <= 60; attempt++) {
     for (const rpc of rpcs) {
       try {
@@ -140,11 +145,7 @@ async function waitTx(digest: string) {
 // Look up a created object of a given type from a tx's objectChanges via
 // JSON-RPC (the gRPC response shape for created objects is version-dependent).
 async function findCreatedByType(digest: string, typeSubstr: string): Promise<string> {
-  const rpcs = [
-    process.env.SUI_JSONRPC_URL,
-    "https://sui-testnet-rpc.publicnode.com",
-    "https://rpc-testnet.suiscan.xyz",
-  ].filter(Boolean) as string[];
+  const rpcs = SUI_JSONRPC_URLS;
   for (let attempt = 1; attempt <= 20; attempt++) {
     for (const rpc of rpcs) {
       try {
@@ -223,9 +224,17 @@ interface PublishResult {
 
 async function publish(): Promise<PublishResult> {
   console.log("\n=== Step 1: Publish bosphor_lz package ===");
-  // Detect network from SUI_RPC_URL and switch sui client env
-  const isMainnet = SUI_GRPC_URL.includes("mainnet");
-  if (isMainnet) {
+  // Switch the sui CLI to mainnet for a mainnet publish. NETWORK=mainnet is
+  // authoritative and a failed switch aborts (never publish to the wrong
+  // network); on testnet keep the historical URL sniffing, best effort.
+  if (NETWORK === "mainnet") {
+    execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" });
+    const activeEnv = execSync("sui client active-env", { encoding: "utf-8" }).trim();
+    if (activeEnv !== "mainnet") {
+      throw new Error(`sui client active env is "${activeEnv}", expected "mainnet"`);
+    }
+    console.log("  Switched sui client to mainnet");
+  } else if (SUI_GRPC_URL.includes("mainnet")) {
     try { execSync("sui client switch --env mainnet", { encoding: "utf-8", stdio: "pipe" }); } catch {}
     console.log("  Switched sui client to mainnet");
   }
@@ -488,7 +497,7 @@ async function setRelayer(packageId: string, configId: string, oappId: string, a
 async function main() {
   console.log("=== Bosphor Sui Deployment ===");
   console.log(`  Deployer: ${deployerAddress}`);
-  console.log(`  Network:  ${SUI_GRPC_URL}`);
+  console.log(`  Network:  ${NETWORK} (${SUI_GRPC_URL}, EVM EID ${EVM_EID})`);
 
   // Verify active sui address matches deployer key
   try {

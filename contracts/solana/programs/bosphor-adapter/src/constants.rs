@@ -35,9 +35,22 @@ pub const INTENT_SEED: &[u8] = b"intent";
 /// list PDA using the standard LayerZero derivation.
 pub const LZ_RECEIVE_TYPES_SEED: &[u8] = oapp::LZ_RECEIVE_TYPES_SEED;
 
-/// Sui testnet LayerZero endpoint id. The Sui receiver peer is registered here.
+/// Sui LayerZero endpoint id for the network this program is built for. It is
+/// only reported as the `src_eid` of the `IntentExecuted` event emitted by the
+/// owner-gated `confirm_execution` fallback; peers and `lz_receive` use the eid
+/// carried by the instruction params, so routing never depends on it.
+///
+/// Selected at build time: the default build is the Sui testnet eid (40378),
+/// byte-identical to the deployed devnet program; `--features mainnet` selects
+/// the Sui mainnet eid (30378).
+#[cfg(not(feature = "mainnet"))]
 #[constant]
-pub const SUI_TESTNET_EID: u32 = 40378;
+pub const SUI_EID: u32 = 40378;
+
+/// Sui mainnet LayerZero endpoint id (see the testnet variant above).
+#[cfg(feature = "mainnet")]
+#[constant]
+pub const SUI_EID: u32 = 30378;
 
 /// Seed prefix for the per-intent `EscrowVault` PDA: `[b"escrow", intent_id]`.
 ///

@@ -16,7 +16,7 @@ import {
 import { EndpointProgram } from "@layerzerolabs/lz-solana-sdk-v2";
 import {
   ENDPOINT_ID,
-  SUI_TESTNET_EID,
+  SUI_EID,
   ULN_ID,
   connection,
   payer,
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
 
   console.log("Store PDA:", store.toBase58());
   console.log("ULN302:   ", ULN_ID.toBase58());
-  console.log("Sui EID:  ", SUI_TESTNET_EID);
+  console.log("Sui EID:  ", SUI_EID);
 
   async function send(label: string, ix: TransactionInstruction): Promise<void> {
     try {
@@ -55,17 +55,17 @@ async function main(): Promise<void> {
   console.log("\nSend library (dst Sui):");
   await send(
     "init_send_library",
-    endpoint.initSendLibrary(admin.publicKey, store, SUI_TESTNET_EID),
+    endpoint.initSendLibrary(admin.publicKey, store, SUI_EID),
   );
   await send(
     "set_send_library",
-    endpoint.setSendLibrary(admin.publicKey, store, ULN_ID, SUI_TESTNET_EID),
+    endpoint.setSendLibrary(admin.publicKey, store, ULN_ID, SUI_EID),
   );
 
   console.log("\nReceive library (src Sui):");
   await send(
     "init_receive_library",
-    endpoint.initReceiveLibrary(admin.publicKey, store, SUI_TESTNET_EID),
+    endpoint.initReceiveLibrary(admin.publicKey, store, SUI_EID),
   );
   await send(
     "set_receive_library",
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
       admin.publicKey,
       store,
       ULN_ID,
-      SUI_TESTNET_EID,
+      SUI_EID,
       BigInt(0),
     ),
   );

@@ -1,8 +1,8 @@
 /**
  * deploy-evm-escrow.ts
  *
- * Builds and deploys the M4 BosphorEscrowAdapter (origin-chain escrow) to
- * Sepolia, configures setPeer for the Sui LZ OApp when SUI_LZ_PACKAGE_ID is set,
+ * Builds and deploys the M4 BosphorEscrowAdapter (origin-chain escrow) to the
+ * EVM chain behind EVM_RPC_URL (Sepolia on testnet), configures setPeer for the Sui LZ OApp when SUI_LZ_PACKAGE_ID is set,
  * and optionally wires Permit2 for the opt-in USDC path (PERMIT2_ADDRESS).
  * Writes the deployed address to EVM_ESCROW_ADAPTER_ADDRESS in the env file.
  *
@@ -12,7 +12,10 @@
  *
  * Usage: BOSPHOR_ENV_FILE=.env.testnet npm run deploy:evm-escrow
  * Required env: EVM_RPC_URL, EVM_RELAYER_KEY
- * Optional env: SUI_LZ_PACKAGE_ID (peer), PERMIT2_ADDRESS (USDC path), TRUSTED_RELAYER
+ * Required on NETWORK=mainnet: LZ_ENDPOINT_ADDRESS (the chain's EndpointV2),
+ *   EVM_CHAIN_ID (checked against the RPC so the wrong chain is never used)
+ * Optional env: NETWORK (testnet|mainnet, default testnet), SUI_EID,
+ *   SUI_LZ_PACKAGE_ID (peer), PERMIT2_ADDRESS (USDC path), TRUSTED_RELAYER
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -25,6 +28,7 @@ const ENV_PATH = process.env.BOSPHOR_ENV_FILE
 config({ path: ENV_PATH });
 
 import { ethers } from "ethers";
+import { presetEid, presetEnv, resolveNetwork } from "../util/network.js";
 
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
 const EVM_RELAYER_KEY = process.env.EVM_RELAYER_KEY;
@@ -36,8 +40,14 @@ if (!EVM_RPC_URL || !EVM_RELAYER_KEY) {
   process.exit(1);
 }
 
-const LZ_ENDPOINT = process.env.LZ_ENDPOINT_ADDRESS || "0x6EDCE65403992e310A62460808c4b910D972f10f";
-const SUI_EID = Number(process.env.SUI_EID) || 40378;
+// Sepolia defaults on testnet only; on mainnet the endpoint must be explicit.
+const NETWORK = resolveNetwork();
+const LZ_ENDPOINT = presetEnv("LZ_ENDPOINT_ADDRESS", NETWORK);
+const SUI_EID = presetEid("SUI_EID", NETWORK);
+if (NETWORK === "mainnet" && !process.env.EVM_CHAIN_ID) {
+  console.error("NETWORK=mainnet requires EVM_CHAIN_ID (the target EVM chain) in the env file");
+  process.exit(1);
+}
 
 const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, { staticNetwork: true });
 const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
@@ -55,7 +65,13 @@ function updateEnv(updates: Record<string, string>) {
 async function main() {
   const deployer = wallet.address;
   const trustedRelayer = process.env.TRUSTED_RELAYER || deployer;
+  // On mainnet, refuse to deploy unless the RPC is on the chain we intend.
+  const { chainId } = await provider.getNetwork();
+  if (process.env.EVM_CHAIN_ID && chainId !== BigInt(process.env.EVM_CHAIN_ID)) {
+    throw new Error(`EVM_RPC_URL is on chain ${chainId}, expected EVM_CHAIN_ID=${process.env.EVM_CHAIN_ID}`);
+  }
   console.log("=== Bosphor EVM Escrow Deployment (M4) ===");
+  console.log(`  Network:         ${NETWORK} (chain ${chainId}, Sui EID ${SUI_EID})`);
   console.log(`  Deployer:        ${deployer}`);
   console.log(`  Trusted relayer: ${trustedRelayer}`);
   console.log(`  RPC:             ${EVM_RPC_URL}`);

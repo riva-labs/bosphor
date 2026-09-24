@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::{INTENT_SEED, STORE_SEED, SUI_TESTNET_EID},
+    constants::{INTENT_SEED, STORE_SEED, SUI_EID},
     error::BosphorError,
     events::IntentExecuted,
     state::{IntentState, Store},
@@ -65,7 +65,7 @@ pub fn handle_confirm_execution(
         end_epoch,
         // The proof logically originates from Sui execution; it is delivered
         // off-chain by the relayer rather than via the LayerZero endpoint.
-        src_eid: SUI_TESTNET_EID,
+        src_eid: SUI_EID,
     });
 
     Ok(())

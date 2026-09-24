@@ -24,6 +24,10 @@ idl-build = ["anchor-lang/idl-build"]
 anchor-debug = []
 custom-heap = []
 custom-panic = []
+# Build for mainnet: selects the Sui mainnet LayerZero eid (30378) reported by
+# confirm_execution. The default (no feature) build targets Sui testnet (40378)
+# and is identical to the deployed devnet program.
+mainnet = []
 
 [dependencies]
 # Anchor pinned to the LayerZero v2 Solana OApp toolchain (0.32.1). The LZ crates

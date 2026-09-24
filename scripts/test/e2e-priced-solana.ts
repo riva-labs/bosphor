@@ -41,7 +41,7 @@ import { resolve } from "node:path";
 import { parse } from "dotenv";
 import { BosphorSolanaClient } from "../../sdk/src/solana/client.ts";
 import { defaultComputeBlob } from "../../sdk/src/blob.ts";
-import { connection, payer, SUI_TESTNET_EID } from "../solana/src/config.ts";
+import { connection, payer, SUI_EID } from "../solana/src/config.ts";
 import { assertDevnet, base58, createHttpSolanaChain } from "../solana/src/http-chain.ts";
 import { pollUntil, sleep, withBackoff } from "../solana/src/rpc.ts";
 import {
@@ -84,7 +84,7 @@ const chain = createHttpSolanaChain(conn, wallet);
 const bosphor = new BosphorSolanaClient({
   chain,
   relayerUrl: RELAYER_URL,
-  dstEid: SUI_TESTNET_EID,
+  dstEid: SUI_EID,
   nativeFee: NATIVE_FEE,
   defaultEpochs: STORAGE_EPOCHS,
   computeBlob: defaultComputeBlob,

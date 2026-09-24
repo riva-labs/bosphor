@@ -24,6 +24,25 @@ The relayer does not have custody of user funds. It triggers execution and proof
 
 ## Configuration
 
+### Network presets
+
+`NETWORK` selects a preset: `testnet` (the default) or `mainnet`.
+
+- `testnet` keeps the historical defaults listed below (Sepolia, Solana devnet, Sui testnet), so an existing testnet relayer that never sets `NETWORK` behaves exactly as before.
+- `mainnet` has no testnet fallbacks. The relayer refuses to start unless the chain-specific values below are set, and it rejects obvious testnet leftovers (a `40xxx` endpoint id, a testnet chain id such as Sepolia, or an RPC URL containing `testnet`, `devnet` or `sepolia`).
+
+| Variable | `testnet` default | `mainnet` default |
+|----------|-------------------|-------------------|
+| `EVM_DST_EID` | `40161` (Sepolia) | required, for example `30101` (Ethereum), `30184` (Base), `30110` (Arbitrum) |
+| `EVM_CHAIN_ID` | `11155111` (Sepolia) | required, must match `EVM_DST_EID` for the known chains |
+| `SUI_NETWORK` | `testnet` | `mainnet` (must not be `testnet`) |
+| `SUI_GRPC_URL` | `https://sui-testnet.mystenlabs.com` | required |
+| `SOLANA_SRC_EID` | `40168` (Solana devnet) | `30168` (Solana mainnet) |
+| `QUOTE_RETURN_LZ_FEE_MIST` | `1760000000` (testnet-calibrated) | required, measure the live Sui to origin LayerZero fee |
+| `BREAK_EVEN_GUARD_ENABLED` | `false` | `true` |
+
+On mainnet the WAL auto top-up does not swap (the SUI to WAL exchange only exists on Walrus testnet). A low WAL balance raises the top-up failure metric and must be funded manually.
+
 ### Required environment variables
 
 | Variable | Description |
@@ -40,9 +59,10 @@ The relayer does not have custody of user funds. It triggers execution and proof
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `EVM_DST_EID` | `40161` | EVM destination endpoint ID for proof verification |
-| `EVM_CHAIN_ID` | `11155111` | Chain id of the network behind `EVM_RPC_URL`. Pins the provider to a static network so startup never depends on runtime chain-id discovery over a flaky RPC |
-| `SUI_GRPC_URL` | `https://sui-testnet.mystenlabs.com` | Sui gRPC endpoint |
+| `NETWORK` | `testnet` | Network preset, `testnet` or `mainnet` (see [Network presets](#network-presets)) |
+| `EVM_DST_EID` | preset | EVM destination endpoint ID for proof verification |
+| `EVM_CHAIN_ID` | preset | Chain id of the network behind `EVM_RPC_URL`. Pins the provider to a static network so startup never depends on runtime chain-id discovery over a flaky RPC |
+| `SUI_GRPC_URL` | preset | Sui gRPC endpoint |
 | `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
@@ -50,7 +70,7 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SOLANA_RPC_URL` | - | Solana RPC endpoint. Set with `SOLANA_PROGRAM_ID` to accept Solana-origin intents; unset keeps the relayer EVM-only |
 | `SOLANA_PROGRAM_ID` | - | Bosphor Solana adapter program id, watched for `IntentSubmitted` so ingest and `execute_store` work for Solana origins |
 | `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
-| `SOLANA_SRC_EID` | `40168` | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
+| `SOLANA_SRC_EID` | preset | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
 | `SOLANA_RELAYER_KEYPAIR` | - | Store-admin keypair (inline JSON secret-key array or a path) that signs the Solana return leg `confirm_execution`. Unset disables the return leg |
 | `WALRUS_STORE_EPOCHS` | `5` | Legacy fallback only. Blobs are stored for the intent's committed `storageEpochs`; this default applies only to a commitment recorded without epochs, and the relayer logs each such fallback |
 | `WALRUS_MAX_EPOCHS` | `53` | Largest committed storage duration the relayer stores (Walrus's own max epochs ahead also applies). Larger commitments are dead-lettered before any WAL spend, never shortened, and the escrow refunds on the deadline |

@@ -12,7 +12,7 @@ function make(
   return new ChainEscrowReader(
     { getEscrow: jest.fn().mockResolvedValue(null), ...evm } as EvmEscrowSource,
     { getEscrow: jest.fn().mockResolvedValue(null), ...solana } as SolanaEscrowSource,
-    { get: (_k: string, d?: unknown) => solanaSrcEid ?? d } as unknown as ConfigService,
+    { getOrThrow: (_k: string) => solanaSrcEid } as unknown as ConfigService,
   );
 }
 

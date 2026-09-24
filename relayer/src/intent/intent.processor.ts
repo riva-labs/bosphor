@@ -131,7 +131,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
-    this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
+    // Network-preset values: always set by the config schema (see
+    // config/network-presets.ts), so there is no code-level testnet fallback.
+    this.solanaSrcEid = this.config.getOrThrow<number>('SOLANA_SRC_EID');
     this.storeConcurrency = this.config.get<number>('STORE_CONCURRENCY') ?? 4;
     this.batchSize = this.config.get<number>('STORE_BATCH_SIZE') ?? 20;
     this.backoffBaseMs = this.config.get<number>('STORE_BACKOFF_BASE_MS') ?? 2000;
@@ -147,13 +149,11 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Give the client's normal blob delivery a head start before self-healing.
     this.bytesRecoveryGraceMs = this.config.get<number>('BYTES_RECOVERY_GRACE_MS') ?? 45000;
     this.bytesRecoveryBackoffMs = this.config.get<number>('BYTES_RECOVERY_BACKOFF_MS') ?? 60000;
-    // Never-lose-money gate. Off by default; enabled once the escrow contracts are
-    // live and the escrow reader is wired (#395). The return-leg + Sui-gas cost
-    // used for the live break-even recompute mirror the QuoteService estimates.
-    this.breakEvenEnabled = this.config.get<string>('BREAK_EVEN_GUARD_ENABLED', 'false') === 'true';
-    this.guardReturnLzFeeMist = BigInt(
-      this.config.get<string>('QUOTE_RETURN_LZ_FEE_MIST', '1760000000'),
-    );
+    // Never-lose-money gate. Off by default on testnet, on by default on mainnet
+    // (NETWORK preset). The return-leg + Sui-gas cost used for the live
+    // break-even recompute mirror the QuoteService estimates.
+    this.breakEvenEnabled = this.config.getOrThrow<string>('BREAK_EVEN_GUARD_ENABLED') === 'true';
+    this.guardReturnLzFeeMist = BigInt(this.config.getOrThrow<string>('QUOTE_RETURN_LZ_FEE_MIST'));
     this.guardSuiGasMist = BigInt(this.config.get<string>('QUOTE_SUI_GAS_MIST', '30000000'));
   }
 
@@ -699,7 +699,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Solana-origin return leg. Mirror the EVM path: deliver the execution proof
-   * over a genuine LayerZero send (Sui -> Solana, dstEid = solanaSrcEid = 40168).
+   * over a genuine LayerZero send (Sui -> Solana, dstEid = solanaSrcEid).
    * Our self-operated solana-return worker (scripts/solana) then verifies +
    * commitVerification + runs lz_receive on Solana, which RELEASES the escrow.
    * If the LZ send path is unavailable, fall back to the owner-gated

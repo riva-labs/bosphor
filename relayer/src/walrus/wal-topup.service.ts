@@ -32,6 +32,9 @@ export class WalTopUpService implements OnModuleInit {
   private topUpSuiMist!: bigint;
   private suiReserveMist!: bigint;
   private walCoinType!: string;
+  // The SUI->WAL exchange only exists on Walrus testnet. On mainnet WAL has to
+  // be bought and funded by the operator, so a low balance alerts instead.
+  private swapSupported = true;
   // Serialize top-ups so N concurrent intents never launch two swaps at once.
   private inFlight: Promise<void> | null = null;
 
@@ -47,7 +50,16 @@ export class WalTopUpService implements OnModuleInit {
     this.suiReserveMist = BigInt(
       this.config.get<number>('WAL_TOPUP_SUI_RESERVE_MIST', 1_000_000_000),
     );
-    this.walCoinType = walCoinType(this.config.get<string>('SUI_NETWORK'));
+    const suiNetwork = this.config.get<string>('SUI_NETWORK');
+    this.walCoinType = walCoinType(suiNetwork);
+    this.swapSupported = suiNetwork !== 'mainnet';
+    if (!this.swapSupported) {
+      this.logger.log(
+        `WAL auto top-up: floor ${this.fmt(this.minBalanceMist)} WAL, swap disabled on mainnet ` +
+          '(no SUI->WAL exchange); a low balance alerts and must be funded manually',
+      );
+      return;
+    }
     this.logger.log(
       `WAL auto top-up: floor ${this.fmt(this.minBalanceMist)} WAL, ` +
         `swap ${this.fmt(this.topUpSuiMist)} SUI, keep ${this.fmt(this.suiReserveMist)} SUI reserve`,
@@ -99,6 +111,17 @@ export class WalTopUpService implements OnModuleInit {
     }
 
     if (walBalance >= this.minBalanceMist) return;
+
+    // Mainnet: never call the testnet-only exchange. Fail loudly so the alert
+    // pages and the operator funds WAL.
+    if (!this.swapSupported) {
+      this.metrics.recordWalTopUp('failure');
+      this.logger.error(
+        `WAL low (${this.fmt(walBalance)} < ${this.fmt(this.minBalanceMist)} WAL) on mainnet: ` +
+          'auto-swap is unavailable, fund the relayer WAL balance manually.',
+      );
+      return;
+    }
 
     // WAL is low: we need a SUI reading to decide whether a swap is possible.
     if (suiBalance === null) {

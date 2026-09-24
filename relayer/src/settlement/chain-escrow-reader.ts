@@ -38,7 +38,8 @@ export class ChainEscrowReader implements EscrowReader {
     @Inject('SOLANA_ESCROW_SOURCE') private readonly solana: SolanaEscrowSource,
     config: ConfigService,
   ) {
-    this.solanaSrcEid = config.get<number>('SOLANA_SRC_EID') ?? 40168;
+    // Always set by the config schema (per-network preset); no code-level fallback.
+    this.solanaSrcEid = config.getOrThrow<number>('SOLANA_SRC_EID');
   }
 
   async getEscrow(intentId: string, srcEid?: number): Promise<EscrowInfo | null> {

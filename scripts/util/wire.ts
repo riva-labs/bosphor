@@ -22,13 +22,17 @@ config({
 import { ethers } from "ethers";
 import { Transaction } from "@mysten/sui/transactions";
 import { createSuiClient, createSuiSigner, signAndExecute } from "./sui-client.js";
+import { presetEid, presetEnv, resolveNetwork } from "./network.js";
 
 // --- LZ constants (from .env) ---
 const OAPP_PKG = process.env.SUI_LZ_OAPP_PKG!;
 const BYTES32_PKG = process.env.SUI_LZ_BYTES32_PKG!;
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
-const EVM_EID = Number(process.env.EVM_EID) || 40161;
-const SUI_EID = Number(process.env.SUI_EID) || 40378;
+// Sepolia / Sui testnet on testnet; on mainnet EVM_EID is required (the EVM
+// chain is a deployment choice) and SUI_EID defaults to Sui mainnet (30378).
+const NETWORK = resolveNetwork();
+const EVM_EID = presetEid("EVM_EID", NETWORK);
+const SUI_EID = presetEid("SUI_EID", NETWORK);
 
 // --- Config from env ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
@@ -39,7 +43,7 @@ const SUI_LZ_OAPP_ID = process.env.SUI_LZ_OAPP_ID!;
 const SUI_LZ_ADMIN_CAP_ID = process.env.SUI_LZ_ADMIN_CAP_ID!;
 const SUI_LZ_MESSAGING_CHANNEL = process.env.SUI_LZ_MESSAGING_CHANNEL!;
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY!;
-const SUI_GRPC_URL = process.env.SUI_GRPC_URL || "https://sui-testnet.mystenlabs.com";
+const SUI_GRPC_URL = presetEnv("SUI_GRPC_URL", NETWORK);
 
 for (const [k, v] of Object.entries({
   EVM_RPC_URL, EVM_RELAYER_KEY, EVM_ADAPTER_ADDRESS, SUI_LZ_PACKAGE_ID,

@@ -9,15 +9,20 @@ import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { presetEnv, resolveNetwork } from "./network.js";
 
 /**
- * Create a SuiGrpcClient. If no url is provided, reads SUI_GRPC_URL
- * from the environment (falls back to Sui testnet).
+ * Create a SuiGrpcClient. If no url is provided, reads SUI_GRPC_URL from the
+ * environment, falling back to Sui testnet only when NETWORK=testnet (the
+ * default). With NETWORK=mainnet a missing SUI_GRPC_URL throws.
  */
 export function createSuiClient(url?: string): SuiGrpcClient {
-  const grpcUrl = url ?? process.env.SUI_GRPC_URL ?? "https://sui-testnet.mystenlabs.com";
-  const network = grpcUrl.includes("mainnet") ? "mainnet" as const : "testnet" as const;
-  return new SuiGrpcClient({ network, baseUrl: grpcUrl });
+  const network = resolveNetwork();
+  const grpcUrl = url || presetEnv("SUI_GRPC_URL", network);
+  // Testnet keeps the historical URL sniffing; NETWORK=mainnet is authoritative.
+  const clientNetwork =
+    network === "mainnet" || grpcUrl.includes("mainnet") ? "mainnet" as const : "testnet" as const;
+  return new SuiGrpcClient({ network: clientNetwork, baseUrl: grpcUrl });
 }
 
 /**

@@ -35,13 +35,15 @@ const ENV_PATH = process.env.BOSPHOR_ENV_FILE
 config({ path: ENV_PATH });
 
 import { ethers } from "ethers";
+import { presetEid, presetEnv, resolveNetwork } from "./network.js";
 
 const EVM_RPC_URL = process.env.EVM_RPC_URL!;
 const EVM_RELAYER_KEY = process.env.EVM_RELAYER_KEY!;
-const LZ_ENDPOINT = process.env.LZ_ENDPOINT_ADDRESS || "0x6EDCE65403992e310A62460808c4b910D972f10f";
+const NETWORK = resolveNetwork();
+const LZ_ENDPOINT = presetEnv("LZ_ENDPOINT_ADDRESS", NETWORK);
 const OLD_ADAPTER = process.env.EVM_ADAPTER_ADDRESS!;
 const NEW_ADAPTER = process.env.EVM_ESCROW_ADAPTER_ADDRESS!;
-const SUI_EID = Number(process.env.SUI_EID) || 40378;
+const SUI_EID = presetEid("SUI_EID", NETWORK);
 const RECEIVE_LIB_OVERRIDE = process.env.EVM_RECEIVE_ULN302;
 
 // LayerZero CONFIG_TYPE_ULN. Executor config is 1; ULN (DVN set) is 2.

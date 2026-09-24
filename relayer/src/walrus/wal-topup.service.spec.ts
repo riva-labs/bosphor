@@ -115,6 +115,15 @@ describe('WalTopUpService', () => {
     expect(metrics.setWalBalance).toHaveBeenCalledWith(24);
   });
 
+  it('never swaps on mainnet (testnet-only exchange) and alerts instead', async () => {
+    const { svc, metrics, signAndExecute } = build({ wal: GWEI / 10n, sui: 10n * GWEI }, 'mainnet');
+
+    await svc.ensureWal();
+
+    expect(signAndExecute).not.toHaveBeenCalled();
+    expect(metrics.recordWalTopUp).toHaveBeenCalledWith('failure');
+  });
+
   it('serializes concurrent calls into a single swap', async () => {
     const { svc, signAndExecute } = build({ wal: GWEI / 10n, sui: 10n * GWEI });
 

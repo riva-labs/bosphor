@@ -34,6 +34,7 @@ import {
   simulateWithOutputs,
   getWorkerCapAddress,
 } from "./sui-client.js";
+import { presetEid } from "./network.js";
 
 const SUI_DEPLOYER_KEY = process.env.SUI_DEPLOYER_KEY!;
 const LZ_ENDPOINT_OBJ = process.env.SUI_LZ_ENDPOINT_V2_OBJ!;
@@ -44,7 +45,7 @@ const OAPP_ID = process.env.SUI_LZ_OAPP_ID!;
 const ADMIN_CAP = process.env.SUI_LZ_ADMIN_CAP_ID!;
 const EXECUTOR_OBJ = process.env.SUI_LZ_EXECUTOR_OBJ!;
 const LZ_PACKAGE_ID = process.env.SUI_LZ_PACKAGE_ID!;
-const EVM_EID = Number(process.env.EVM_EID) || 40161;
+const EVM_EID = presetEid("EVM_EID");
 
 const ExecutorConfigBcs = bcs.struct("ExecutorConfig", {
   max_message_size: bcs.u64(),
