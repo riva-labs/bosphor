@@ -94,6 +94,7 @@ function build(
   };
   const suiLz = {
     quoteLzFee: jest.fn().mockResolvedValue(1000n),
+    readCommittedStorageEpochs: jest.fn().mockRejectedValue(new Error('not on chain')),
     lzSendProof: jest.fn().mockResolvedValue('0xlz'),
   };
   const evm = {
@@ -395,14 +396,25 @@ describe('IntentProcessor durable queue', () => {
     expect(walrus.upload).toHaveBeenCalledWith(expect.any(Buffer), 5);
   });
 
-  it('does not re-resolve epochs for a row whose blob is already uploaded', async () => {
-    const { proc, walrus } = build([
-      makeRow({ walrusObjectId: '0xobj', walrusBlobId: COMMITTED_B64URL, endEpoch: 42 }),
-    ]);
+  it('reads the committed epochs from Sui for a row recorded before they were persisted', async () => {
+    const { proc, walrus, suiLz } = build([makeRow({ storageEpochs: undefined })]);
+    suiLz.readCommittedStorageEpochs.mockResolvedValueOnce(12);
     await proc.tick();
 
-    expect(walrus.resolveStoreEpochs).not.toHaveBeenCalled();
+    expect(suiLz.readCommittedStorageEpochs).toHaveBeenCalledWith('0xintent');
+    expect(walrus.resolveStoreEpochs).toHaveBeenCalledWith(12);
+    expect(walrus.upload).toHaveBeenCalledWith(expect.any(Buffer), 12);
+  });
+
+  it('never dead-letters an already uploaded row when the epoch cap moved', async () => {
+    const { proc, staged, walrus } = build([
+      makeRow({ walrusObjectId: '0xobj', walrusBlobId: COMMITTED_B64URL, endEpoch: 42 }),
+    ]);
+    walrus.resolveStoreEpochs.mockResolvedValueOnce({ ok: false, reason: 'cap moved' });
+    await proc.tick();
+
     expect(walrus.upload).not.toHaveBeenCalled();
+    expect(staged.markDead).not.toHaveBeenCalled();
   });
 
   it('counts a return settled over the LayerZero proof path as mode=proof', async () => {

@@ -72,11 +72,16 @@ describe('QuoteService', () => {
   it('rejects epochs the relayer will not store (above WALRUS_MAX_EPOCHS)', async () => {
     await expect(
       service.quote({ sizeBytes: 1024, epochs: 54, originToken: 'ETH' }),
-    ).rejects.toThrow(/between 1 and 53/);
-    await expect(service.quote({ sizeBytes: 1024, epochs: 0, originToken: 'ETH' })).rejects.toThrow(
-      /between 1 and 53/,
-    );
+    ).rejects.toThrow(/between 0 and 53/);
+    await expect(
+      service.quote({ sizeBytes: 1024, epochs: -1, originToken: 'ETH' }),
+    ).rejects.toThrow(/between 0 and 53/);
     expect(mockEstimateWal).not.toHaveBeenCalled();
+  });
+
+  it('prices a committed 0 as the one epoch the store path buys', async () => {
+    await service.quote({ sizeBytes: 1024, epochs: 0, originToken: 'ETH' });
+    expect(mockEstimateWal).toHaveBeenCalledWith(1024, 1);
   });
 
   it('propagates an oracle failure (no fabricated quote)', async () => {
