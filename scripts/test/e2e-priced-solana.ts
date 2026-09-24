@@ -71,7 +71,8 @@ for (const key of ["RELAYER_URL", "SOLANA_RPC_URL"]) {
 
 type Hex = `0x${string}`;
 
-const RELAYER_URL = process.env.RELAYER_URL!;
+// From the file itself: a RELAYER_URL already exported in the shell must not win.
+const RELAYER_URL = fileEnv.RELAYER_URL!;
 const NATIVE_FEE = BigInt(process.env.NATIVE_FEE ?? "3000000");
 const STORAGE_EPOCHS = Number(process.env.WALRUS_STORE_EPOCHS) || 5;
 const PROOF_TIMEOUT_MS = (Number(process.env.PROOF_TIMEOUT_MIN) || 30) * 60_000;
@@ -154,6 +155,12 @@ async function phaseRelease(): Promise<void> {
   const closeSig = await chain.latestSignature(opened.address);
   if (!closeSig) throw new Error("no transaction found for the escrow vault");
   const { meta, keys } = await chain.txMeta(closeSig);
+  // The vault closes on release AND on refund, and with the default keypair the
+  // payer and beneficiary are the same key, so balances alone cannot tell them
+  // apart. Require the closing tx to be the LayerZero delivery.
+  if (!(meta.logMessages ?? []).some((l: string) => l.includes("Instruction: LzReceive"))) {
+    throw new Error(`escrow closed by ${closeSig}, which is not an lz_receive (refund, not a release?)`);
+  }
   const beneficiary = base58(opened.vault.beneficiary);
   const idx = keys.indexOf(beneficiary);
   if (idx === -1) throw new Error(`beneficiary ${beneficiary} not in release tx ${closeSig}`);

@@ -12,7 +12,7 @@ This page reports how fast the Bosphor relayer processes storage intents and how
 The relayer exposes two latency histograms (see [Relayer: latency metrics](relayer.md#latency-metrics-and-the-sub-3s-kpi)):
 
 - **Compute latency** (`bosphor_relayer_compute_latency_seconds`): the store span minus the time spent waiting on external I/O the relayer does not control (Walrus upload relay, Sui `execute_store` and finality wait, LayerZero fee quote and send, WAL top-up, escrow reads, price fetches). This is the relayer's own processing time and the M4 "median relay latency under 3 s" KPI.
-- **End-to-end store latency** (`bosphor_relayer_processing_latency_seconds`): the same span with the I/O included. On public testnet each external round-trip takes seconds, so this is I/O-bound and typically 10 to 30 s. It is reported for visibility, not as the KPI.
+- **End-to-end store latency** (`bosphor_relayer_processing_latency_seconds`): the same span with the I/O included. On public testnet each external round-trip takes seconds, so this is I/O-bound: roughly 10 to 30 s (an estimate; issue #411 recorded a median of about 13.7 s on testnet, and the Grafana relayer dashboard shows the live value). It is reported for visibility, not as the KPI.
 
 External I/O is timed per intent by the relayer's I/O clock (`relayer/src/intent/io-clock.ts`). Any call left untimed counts toward compute, so the compute figure can only over-report.
 
@@ -93,7 +93,7 @@ npx tsx scripts/loadgen.ts --concurrency 1,10,50 --intents 500 \
 - **Relayer compute is small next to the 3 s budget.** Without queue latency, compute stays at or below 2 ms at p99 up to 50 concurrent stores (one 6 ms outlier at concurrency 1 in profile 1). With 1 ms per queue call it is 7 to 8 ms at p50 and at most 11 ms, still orders of magnitude under 3 s.
 - **Concurrency does not inflate compute.** Going from 1 to 50 concurrent stores leaves the compute percentiles flat in profiles 2 and 3, because the stores overlap on I/O waits rather than competing for the event loop.
 - **Throughput is I/O-bound and scales with store concurrency.** With about 155 ms of stubbed I/O per intent, throughput tracks `concurrency / store span`: 6.5, 60.7, and 294.6 intents/s at 1, 10, and 50. The production default is `STORE_CONCURRENCY=4`; raising it is the throughput lever once real I/O latency is known.
-- **End-to-end latency is set by the chains.** The store span column is essentially the stubbed I/O. On testnet the same span is dominated by Walrus, Sui finality, and LayerZero, which is why the end-to-end gauge sits in the 10 to 30 s range while compute stays small.
+- **End-to-end latency is set by the chains.** The store span column is essentially the stubbed I/O. On testnet the same span is dominated by Walrus, Sui finality, and LayerZero, which is why the end-to-end gauge sits in the seconds range (see above) while compute stays small.
 
 To reproduce, run the commands above. Add `--out-json <file>` and `--out-md <file>` to save the raw results, and `--help` for every option.
 

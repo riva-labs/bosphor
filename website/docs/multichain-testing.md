@@ -73,7 +73,7 @@ The return proof reaches the adapter through the endpoint's `lzReceive`, which i
 
 ## Solana compute units
 
-There is no LiteSVM or local-validator test setup for the Solana program yet, so compute units are measured by simulation against devnet with `scripts/solana/src/measure-cu.ts`. The script is read-only: it uses `simulateTransaction` with signature verification off, so it needs only a funded public key and never sends a transaction. It refuses to run against any cluster whose genesis hash is not devnet's.
+There is no LiteSVM or local-validator test setup for the Solana program yet, so compute units are measured by simulation against devnet with `scripts/solana/src/measure-cu.ts`. The script is read-only: it uses `simulateTransaction` with signature verification off, so it needs only a funded public key and never sends a transaction. It refuses to run against any cluster whose genesis hash is not devnet's unless you set `CU_ALLOW_NON_DEVNET=1` (still read-only).
 
 ```bash
 cd scripts/solana
@@ -81,10 +81,10 @@ npm install
 BOSPHOR_ENV_FILE=../../.env.testnet-e2e npm run measure-cu
 
 # Also measure refund_escrow on an expired, still-pending escrow
-REFUND_INTENT_ID=0x<intent id> npm run measure-cu
+BOSPHOR_ENV_FILE=../../.env.testnet-e2e REFUND_INTENT_ID=0x<intent id> npm run measure-cu
 
 # Read compute units from already-confirmed transactions (e.g. lz_receive releases)
-CU_SIGNATURES=<sig1>,<sig2> npm run measure-cu
+BOSPHOR_ENV_FILE=../../.env.testnet-e2e CU_SIGNATURES=<sig1>,<sig2> npm run measure-cu
 ```
 
 It prints a table of `submit_intent` (priced, including the LayerZero `send` CPI), optionally `refund_escrow`, and any confirmed transactions you name. The simulation sets the 1.4M per-transaction ceiling so it reports true usage rather than a cap. `submit_intent` is sent with a 400,000 CU limit in practice because the endpoint CPI exceeds the 200k default.

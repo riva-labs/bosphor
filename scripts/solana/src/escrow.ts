@@ -83,6 +83,8 @@ export interface TxMeta {
   fee: number;
   preBalances: number[];
   postBalances: number[];
+  /** Program logs, when the source fetched them (used to tell a release from a refund). */
+  logMessages?: string[];
 }
 
 /** Net lamport change of the account at `index` in a confirmed transaction. */

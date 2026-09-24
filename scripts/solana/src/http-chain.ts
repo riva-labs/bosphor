@@ -153,7 +153,12 @@ export function createHttpSolanaChain(conn: Connection, wallet: Keypair): HttpSo
       if (!tx?.meta) throw new Error(`transaction ${sig} not found`);
       const keys = tx.transaction.message.getAccountKeys().staticAccountKeys.map((k) => k.toBase58());
       return {
-        meta: { fee: tx.meta.fee, preBalances: tx.meta.preBalances, postBalances: tx.meta.postBalances },
+        meta: {
+          fee: tx.meta.fee,
+          preBalances: tx.meta.preBalances,
+          postBalances: tx.meta.postBalances,
+          logMessages: tx.meta.logMessages ?? [],
+        },
         keys,
       };
     },
