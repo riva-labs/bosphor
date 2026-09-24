@@ -244,6 +244,7 @@ const tx = await adapter.submitIntent(
   { value: fee.nativeFee + priced.escrowNative }
 );
 const receipt = await tx.wait();
+if (!receipt) throw new Error("submitIntent produced no receipt");
 
 // Read the intentId from the IntentSubmitted event.
 const submitted = receipt.logs
