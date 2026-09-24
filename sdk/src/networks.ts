@@ -18,6 +18,8 @@ export interface EvmNetworkConfig {
   chainName: string;
   /** EVM chain id (e.g. 11155111 for Sepolia). */
   chainId: number;
+  /** A public RPC URL for the chain (rate limited; bring your own for production). */
+  rpcUrl: string;
   /** LayerZero endpoint id of this EVM chain. */
   eid: number;
   /** The deployed Bosphor escrow adapter contract. */
@@ -103,6 +105,7 @@ export const TESTNET: BosphorNetwork = {
   evm: {
     chainName: "Ethereum Sepolia",
     chainId: 11155111,
+    rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
     eid: 40161,
     adapterAddress: "0x3296686Fc61076d27488278c1da5468E1e0A7156",
     lzEndpoint: "0x6EDCE65403992e310A62460808c4b910D972f10f",

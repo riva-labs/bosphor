@@ -9,6 +9,7 @@ test("TESTNET preset carries the live testnet deployment", () => {
   assert.equal(TESTNET.sui.eid, 40378);
   assert.equal(TESTNET.evm.eid, 40161);
   assert.equal(TESTNET.evm.chainId, 11155111);
+  assert.equal(TESTNET.evm.rpcUrl, "https://ethereum-sepolia-rpc.publicnode.com");
   assert.equal(TESTNET.evm.adapterAddress, "0x3296686Fc61076d27488278c1da5468E1e0A7156");
   assert.equal(TESTNET.solana.eid, 40168);
   assert.equal(TESTNET.solana.programId, "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF");
