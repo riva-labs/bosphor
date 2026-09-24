@@ -20,7 +20,9 @@ import { resolve } from "node:path";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import * as dotenv from "dotenv";
 
-dotenv.config();
+// BOSPHOR_ENV_FILE selects an explicit env file (e.g. .env.testnet-e2e) so a
+// devnet run never silently picks up the repo-root .env, which may be mainnet.
+dotenv.config(process.env.BOSPHOR_ENV_FILE ? { path: resolve(process.env.BOSPHOR_ENV_FILE) } : undefined);
 
 // --- network preset ---
 
@@ -139,6 +141,7 @@ const STORE_SEED = Buffer.from("store");
 const PEER_SEED = Buffer.from("peer");
 const NONCE_SEED = Buffer.from("nonce");
 const INTENT_SEED = Buffer.from("intent");
+const ESCROW_SEED = Buffer.from("escrow");
 const LZ_RECEIVE_TYPES_SEED = Buffer.from("LzReceiveTypes");
 
 /** The singleton Store (OApp) PDA. It is the LayerZero sender/receiver identity. */
@@ -176,6 +179,17 @@ export function intentPda(intentId: Uint8Array): PublicKey {
     BOSPHOR_PROGRAM_ID,
   )[0];
 }
+
+/** Per-intent escrow vault PDA (M4): seeds [b"escrow", intent_id]. */
+export function escrowPda(intentId: Uint8Array): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [ESCROW_SEED, Buffer.from(intentId)],
+    BOSPHOR_PROGRAM_ID,
+  )[0];
+}
+
+/** Genesis hash of Solana devnet; scripts that must never touch mainnet assert it. */
+export const DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 
 // --- connection + payer ---
 

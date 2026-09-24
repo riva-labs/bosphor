@@ -138,6 +138,61 @@ The test prints a 6-checkpoint summary with TX hashes and explorer links:
 - Return phase: 15 minutes
 - Poll interval: 15 seconds
 
+## Priced end-to-end tests (M4)
+
+The priced tests exercise the origin-chain payment flow (see [Payment flow](payment-flow.md)) on live testnet infrastructure. Neither runs in CI.
+
+### EVM
+
+```bash
+BOSPHOR_ENV_FILE=.env.testnet-e2e npm run test:e2e:priced
+```
+
+Happy path: quote, pay escrow plus LayerZero fee, upload, await the proof, then assert the escrow went Pending to Released and the relayer was credited. Refund path: submit with a 60 s deadline, never upload, call `refund()` after the deadline, and assert the payer was credited the full escrow.
+
+### Solana priced end-to-end test
+
+```bash
+(cd scripts/solana && npm install)
+BOSPHOR_ENV_FILE=.env.testnet-e2e npm run test:e2e:priced:solana
+```
+
+`scripts/test/e2e-priced-solana.ts` mirrors the EVM script on Solana devnet, using the SDK's `BosphorSolanaClient` with an HTTP-only chain backend from `scripts/solana`.
+
+1. **Phase A, release.** Encode a blob, fetch a SOL quote, submit with the escrow deposit, and check the per-intent escrow vault opened Pending with the quoted amount. Upload the bytes once the relayer knows the intent (it retries `404` while the forward leg reaches Sui), await the proof, then assert the vault was closed by the proof-driven `lz_receive` and that the closing transaction credited the beneficiary the whole vault (escrow plus rent). A proof that arrives through the owner-gated `confirm_execution` fallback does not release the escrow, so the phase fails loudly in that case.
+2. **Phase B, refund on timeout.** Submit a priced intent with a short deadline (`REFUND_DEADLINE_S`, default 90 s) and never upload its bytes, so the relayer cannot store it. Wait until the chain clock passes the deadline, call `refund_escrow`, and assert the payer was credited the whole vault minus the refund transaction fee and the vault is closed.
+
+It needs the devnet adapter, a relayer with `/quote` and `/blob`, the self-DVN forward leg, and the `solana-return` worker (which runs `lz_receive` on Solana).
+
+| Variable | Required | Notes |
+|----------|----------|-------|
+| `BOSPHOR_ENV_FILE` | Yes | The script refuses to run without it; `RELAYER_URL` and `SOLANA_RPC_URL` must be in that file |
+| `RELAYER_URL` | Yes | Relayer base URL |
+| `SOLANA_RPC_URL` | Yes | Must be devnet; the script checks the genesis hash and refuses anything else |
+| `SOLANA_KEYPAIR` | No | Funded devnet payer, default `~/.config/solana/bosphor-devnet.json` |
+| `NATIVE_FEE` | No | LayerZero forward fee in lamports, default `3000000` |
+| `PROOF_TIMEOUT_MIN` | No | Upload and proof timeout, default 30 |
+| `SKIP_PHASE_A` / `SKIP_PHASE_B` | No | Set to `1` to run one phase only |
+
+The public devnet RPC rate-limits hard (HTTP 429). The script never opens a websocket: confirmations poll `getSignatureStatuses`, and every RPC call retries rate-limit errors with capped exponential backoff.
+
+The pure helpers behind it (escrow vault codec, refund instruction encoding, balance accounting, backoff) are unit-tested offline:
+
+```bash
+cd scripts/solana && npm test
+```
+
+## Benchmarks
+
+Relayer latency and throughput are measured with the load generator, which drives the real `IntentProcessor` with external I/O stubbed:
+
+```bash
+cd relayer
+npm run loadgen -- --concurrency 1,10,50 --intents 500
+```
+
+Methodology, results, and the live-measurement command are on [Relayer benchmarks](benchmarks.md). Gas, compute units, and fee-abstraction results are on [Multi-chain testing](multichain-testing.md).
+
 ## CI pipeline
 
 The CI runs on every push to `main` and every pull request. See `.github/workflows/ci.yml`.
@@ -157,3 +212,4 @@ All three jobs run in parallel. The E2E test is not included in CI because it re
 - [Contract Interface](contract-interface.md) for function signatures referenced in tests
 - [Relayer](relayer.md) for the relayer configuration that tests mock
 - [Deployment](deployment.md) for setting up the environment needed by E2E tests
+- [Multi-chain testing](multichain-testing.md) for gas, compute-unit, and fee-abstraction results

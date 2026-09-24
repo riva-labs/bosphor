@@ -23,6 +23,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { BenchmarkHarness, LatencySample } from '../src/intent/benchmark-harness';
+import { histogramQuantileMs, parseHistogram } from './lib/prom-histogram';
 
 const COMPUTE_METRIC = 'bosphor_relayer_compute_latency_seconds';
 
@@ -44,47 +45,6 @@ function loadSamples(file: string): LatencySample[] {
     throw new Error(`BENCH_SAMPLES_FILE ${file} did not contain a non-empty samples array`);
   }
   return parsed;
-}
-
-/** One cumulative Prometheus histogram bucket: upper bound `le` and count. */
-interface HistBucket {
-  le: number;
-  cumulative: number;
-}
-
-/** Parse a metric's histogram buckets from Prometheus text exposition. */
-function parseHistogram(text: string, metric: string): HistBucket[] {
-  const buckets: HistBucket[] = [];
-  const re = new RegExp(`^${metric}_bucket\\{le="([^"]+)"\\}\\s+([0-9.eE+-]+)`, 'gm');
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    buckets.push({ le: m[1] === '+Inf' ? Infinity : Number(m[1]), cumulative: Number(m[2]) });
-  }
-  return buckets.sort((a, b) => a.le - b.le);
-}
-
-/**
- * Estimate a quantile from cumulative histogram buckets, matching Prometheus
- * histogram_quantile: linear interpolation within the bucket that crosses the
- * rank. Returns milliseconds (buckets are in seconds).
- */
-function histogramQuantileMs(buckets: HistBucket[], q: number): number {
-  const total = buckets.length ? buckets[buckets.length - 1].cumulative : 0;
-  if (total <= 0) throw new Error(`${COMPUTE_METRIC} has no observations yet (count=0)`);
-  const rank = q * total;
-  let lowerBound = 0;
-  let lowerCumulative = 0;
-  for (const b of buckets) {
-    if (b.cumulative >= rank) {
-      if (!Number.isFinite(b.le)) return lowerBound * 1000; // +Inf bucket: no upper edge
-      const span = b.cumulative - lowerCumulative;
-      const frac = span > 0 ? (rank - lowerCumulative) / span : 0;
-      return (lowerBound + (b.le - lowerBound) * frac) * 1000;
-    }
-    lowerBound = b.le;
-    lowerCumulative = b.cumulative;
-  }
-  return lowerBound * 1000;
 }
 
 async function runMetricsMode(url: string, targetMs: number): Promise<void> {
