@@ -28,6 +28,8 @@ export { BosphorError, ProofTimeoutError, RelayerUploadError } from "./errors.js
 
 // Shared store-flow vocabulary (identical on every chain subpath).
 export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "./store-flow.js";
+// Integrator attribution header (set via the client `appId` option).
+export { APP_ID_HEADER } from "./store-flow.js";
 
 // Off-chain priced quoting via the relayer (the single pricing source of truth).
 export { fetchQuote } from "./quote.js";
