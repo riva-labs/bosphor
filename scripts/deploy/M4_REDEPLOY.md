@@ -143,13 +143,46 @@ docker build -t bosphor-relayer:testnet ./relayer && docker restart <testnet-rel
 
 ## Step 7: End-to-end priced round-trip
 
+EVM (automated, both paths in one run):
+
 ```bash
 BOSPHOR_ENV_FILE=relayer/.env.testnet npm run test:e2e:priced
 ```
 
-Verifies, on EVM and Solana: submit-with-payment escrows the surplus, the proof
-releases the escrow to the relayer, `withdraw()` pays out, and the refund path
-returns the payer after the deadline when no proof lands.
+Verifies on EVM: submit-with-payment opens the escrow, a genuine return proof
+flips it Pending -> Released and credits the relayer beneficiary, and the refund
+path returns the full opened escrow to the payer after the deadline when no proof
+lands. The assertion reads the ACTUAL opened escrow (the contract escrows
+`msg.value` minus the forward LZ fee it charges, which is volatile on testnet),
+not the quote.
+
+Solana-origin priced round-trip (needs a funded devnet wallet, `>= 0.05 SOL`):
+
+```bash
+# 1. submit with escrow (writes /tmp/solana-rt.json)
+DATA="bosphor-sol-$(date +%s)" ESCROW_AMOUNT=5000000 npm --prefix scripts/solana run submit-intent
+# 2. after the forward leg delivers (IntentReceived on Sui), hand the bytes over
+RELAYER_URL=https://api.bosphor.xyz/testnet npm --prefix scripts/solana run roundtrip-upload
+# 3. the dvn-solana-return worker delivers the proof on Solana, releasing the escrow PDA
+```
+
+## Step 8: Operational recovery (return channel)
+
+The Sui->EVM and Sui->Solana return workers deliver LayerZero packets in strict
+nonce order. If a worker falls far behind (downtime / RPC burst) an old nonce can
+be skipped, and LZ then rejects every later nonce with `LZ_InvalidNonce`, stalling
+all returns and escrow releases. The EVM return worker now self-heals gaps each
+tick; to force a manual fill, use the bosphor-dvn tools:
+
+```bash
+# locate the gap (prints lazyInboundNonce + the first uncommitted nonce)
+SUI_OAPP_SENDER=<sui-oapp-pkg> npx tsx src/diag-return-gap.ts <scanTo>
+# fill it (dry-run without RUN=1)
+RUN=1 npx tsx src/recover-return-gap.ts <fromNonce> <toNonce>
+```
+
+If a return worker is stuck on `sui rpc 503`, its HTTP client is wedged; restart
+the container (e.g. `docker restart bosphor-dvn-solana-return`).
 
 ## Rollback
 

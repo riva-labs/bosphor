@@ -137,12 +137,19 @@ async function refundPath(): Promise<void> {
   console.log("  waiting for the deadline to pass...");
   await new Promise((r) => setTimeout(r, 65_000));
 
+  // Assert against the ACTUAL on-chain escrow, not quote.escrowNative: the
+  // contract escrows msg.value minus the forward LZ fee it charges at submit,
+  // which is volatile on testnet, so the opened escrow can be slightly below the
+  // quote. The invariant that matters is that refund() returns the full opened
+  // escrow to the payer.
+  const opened: bigint = (await adapter.getEscrow(intentId)).amount;
   const payerBefore: bigint = await adapter.withdrawable(wallet.address);
   await (await adapter.refund(intentId)).wait();
   const payerAfter: bigint = await adapter.withdrawable(wallet.address);
-  console.log(`  payer withdrawable: ${payerBefore} -> ${payerAfter} wei`);
+  console.log(`  opened escrow: ${opened} wei; payer withdrawable: ${payerBefore} -> ${payerAfter} wei`);
 
-  if (payerAfter - payerBefore !== quote.escrowNative) {
+  if (opened <= 0n) throw new Error("escrow opened with zero amount");
+  if (payerAfter - payerBefore !== opened) {
     throw new Error("refund did not credit the payer the full escrow");
   }
   console.log("  [OK] deadline refund returned the escrow to the payer");
