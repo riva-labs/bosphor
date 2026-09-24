@@ -109,6 +109,10 @@ LayerZero fee, keyed by the intent id. Release is gated on a genuine proof; the
 owner `confirmExecution` fallback marks executed but never moves escrowed funds.
 See the [payment flow](./payment-flow.md) for the model and the SDK usage.
 
+This is the adapter deployed on the hosted testnet: `0x3296686Fc61076d27488278c1da5468E1e0A7156`
+on Sepolia (see the [testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet)).
+Its full integrator ABI ships in the SDK as `ADAPTER_ABI` from `@bosphor/sdk/evm`.
+
 ```solidity
 // Deposit at submit: msg.value = LZ fee + escrow. Only the fee reaches the
 // endpoint; the surplus is escrowed for this intent.
@@ -199,30 +203,23 @@ event RelayerUpdated(address indexed oldRelayer, address indexed newRelayer);
 
 ## Usage Examples (ethers.js)
 
-The raw path below computes the commitment fields, submits the intent, then uploads the bytes out-of-band. Most integrators should prefer `@bosphor/sdk`, which does all of this in a single `store()` call; see [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
+The raw path below computes the commitment fields, submits the intent, then uploads the bytes out-of-band. Most integrators should prefer `@bosphor/sdk`, which does all of this in a single `storePriced()` call; see [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
 
 ### Submit an intent
 
 ```typescript
 import { ethers } from "ethers";
-// The SDK exposes the Walrus blob-id derivation used to build the commitment.
-import { defaultComputeBlob } from "@bosphor/sdk/evm";
+// The SDK exposes the ABI, the testnet preset, the Walrus blob-id derivation,
+// and the relayer quote client.
+import { ADAPTER_ABI, TESTNET, defaultComputeBlob, fetchQuote } from "@bosphor/sdk/evm";
 
-const provider = new ethers.JsonRpcProvider(process.env.EVM_RPC_URL);
-const signer = new ethers.Wallet(process.env.EVM_RELAYER_KEY, provider);
+const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
 
-const adapter = new ethers.Contract(
-  ADAPTER_ADDRESS,
-  [
-    "function quote(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) view returns (tuple(uint256 nativeFee, uint256 lzTokenFee))",
-    "function submitIntent(uint32,bytes32,uint32,uint8,uint32,uint64,bytes) payable returns (bytes32)",
-    "event IntentSubmitted(bytes32 indexed intentId, address indexed sender, uint64 targetChainId, bytes32 blobId, uint32 size, uint8 encodingType, uint32 storageEpochs, uint64 nonce, uint64 deadline)",
-  ],
-  signer
-);
+const adapter = new ethers.Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, signer);
 
-const RELAYER_BASE_URL = "https://api.bosphor.xyz/testnet"; // mainnet: https://api.bosphor.xyz
-const dstEid = 40378; // Sui testnet
+const RELAYER_BASE_URL = TESTNET.relayerUrl; // https://api.bosphor.xyz/testnet
+const dstEid = TESTNET.sui.eid; // 40378, Sui testnet
 const data = new TextEncoder().encode("Hello Walrus");
 
 // Derive the Walrus blob id, size, and encoding client-side.
@@ -232,13 +229,19 @@ const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
 // LZ execution options: type 3 (lzReceive), gas limit 200,000 (see "LZ Options" below)
 const options = "0x00030100110100000000000000000000000000030d40";
 
-// Get fee estimate
+// Get the LayerZero fee, then the storage price (escrow) from the relayer.
 const fee = await adapter.quote(dstEid, blobId, size, encodingType, storageEpochs, deadline, options);
+const priced = await fetchQuote(RELAYER_BASE_URL, {
+  sizeBytes: size,
+  epochs: storageEpochs,
+  originToken: "ETH",
+  forwardLzFeeNative: fee.nativeFee,
+});
 
-// Submit intent
+// Submit intent, paying LZ fee + escrow.
 const tx = await adapter.submitIntent(
   dstEid, blobId, size, encodingType, storageEpochs, deadline, options,
-  { value: fee.nativeFee }
+  { value: fee.nativeFee + priced.escrowNative }
 );
 const receipt = await tx.wait();
 
