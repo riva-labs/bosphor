@@ -136,6 +136,25 @@ the Walrus SDK.
 
 See `examples/store-file.evm.ts` for a runnable end-to-end script.
 
+### Identifying your app (`appId`)
+
+Pass an optional `appId` (a short slug such as `"my-dapp"`) to either client.
+The SDK sends it as the `X-Bosphor-App` header on quote and upload requests, and
+the relayer records it with every intent, so usage from your app can be counted
+separately from scripts and tests. It is attribution only, not authentication.
+
+```ts
+const client = createBosphorClient({
+  adapter: fromEthersContract(contract),
+  relayerUrl: "https://api.bosphor.xyz/testnet",
+  dstEid: 40378,
+  appId: "my-dapp", // letters, digits, "-", "_", "."; max 64 chars
+});
+```
+
+A malformed `appId` throws at construction. Omitting it is fine: the intent is
+recorded without an app.
+
 ## Solana: store a file in one call
 
 The Solana path has the SAME one-line API. `store(data, { epochs })` runs the whole
