@@ -47,6 +47,18 @@ describe('BreakEvenGuardService', () => {
     expect(d.proceed).toBe(true);
   });
 
+  it('prices the live WAL cost for the committed epochs the store will use', async () => {
+    await service.check({
+      escrowNative: 800_000_000_000_000n,
+      originToken: 'ETH',
+      sizeBytes: 2048,
+      epochs: 26,
+      returnLzFeeMist: 1_760_000_000n,
+      suiGasMist: 10_000_000n,
+    });
+    expect(mockEstimateWal).toHaveBeenCalledWith(2048, 26);
+  });
+
   it('skips when the recomputed live cost outruns the escrow', async () => {
     const d = await service.check({
       escrowNative: 400_000_000_000_000n, // 0.0004 ETH = $1.00 < cost

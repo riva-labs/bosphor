@@ -168,7 +168,7 @@ export class SuiCheckpointService {
           committedBlobId: strVal(structFields.committed_blob_id) ?? '0',
           size: numVal(structFields.size) ?? 0,
           encodingType: numVal(structFields.encoding_type) ?? 0,
-          storageEpochs: numVal(structFields.storage_epochs) ?? 0,
+          storageEpochs: numVal(structFields.storage_epochs),
           deadline: BigInt(strVal(structFields.deadline) ?? '0'),
           srcEid: numVal(structFields.src_eid) ?? 0,
           nonce: BigInt(strVal(structFields.nonce) ?? '0'),

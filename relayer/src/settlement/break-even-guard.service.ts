@@ -12,6 +12,11 @@ export interface BreakEvenCheck {
   originToken: OriginToken;
   /** Blob size for the live WAL-cost recompute. */
   sizeBytes: number;
+  /**
+   * Storage duration the store will actually buy (the intent's resolved committed
+   * epochs). Omitted only for a legacy row, where the WALRUS_STORE_EPOCHS default
+   * applies, matching the store.
+   */
   epochs?: number;
   /** Live return-leg fee (SUI MIST) and Sui gas (SUI MIST) at execution time. */
   returnLzFeeMist: bigint;

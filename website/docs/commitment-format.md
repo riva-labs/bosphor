@@ -35,8 +35,15 @@ Storage is committed as a **duration** (`storageEpochs`), never as an absolute e
 epoch. Origin chains do not know the current Walrus epoch, so an absolute end epoch
 would not be verifiable at submission time. The Sui executor turns the duration into
 an end-epoch check at execution: it asserts the certified blob's end epoch is at least
-`current_epoch + storageEpochs`. The default `storageEpochs` matches the relayer's
-`WALRUS_STORE_EPOCHS` (5).
+`current_epoch + storageEpochs`.
+
+The relayer stores each blob for exactly the committed `storageEpochs`, so the
+stored duration always covers the commitment. The SDK default is 5 epochs; pass
+`{ epochs }` to commit a different duration. The relayer caps the duration at
+`WALRUS_MAX_EPOCHS` (default 53) and at Walrus's own maximum epochs ahead. A
+commitment above the cap is never stored for a shorter duration: the relayer
+declines it before spending anything and the origin escrow refunds on the
+intent deadline.
 
 ## Intent identifier
 

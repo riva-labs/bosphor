@@ -164,6 +164,7 @@ class FakePool implements PgQueryable {
       // COALESCE(EXCLUDED.delivery_digest, existing): a later event without a
       // digest never clobbers one already captured.
       existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
+      existing.storage_epochs = (params[6] as number | null) ?? existing.storage_epochs;
       return { rows: [] };
     }
 
@@ -180,6 +181,7 @@ class FakePool implements PgQueryable {
       walrus_object_id: null,
       walrus_blob_id: null,
       end_epoch: null,
+      storage_epochs: null,
       store_digest: null,
       delivery_digest: null,
       bytes_recovery_at: null,
@@ -205,6 +207,7 @@ class FakePool implements PgQueryable {
     base.committed_blob_id = params[2] as string;
     base.deadline = params[3] as number;
     base.delivery_digest = (params[5] as string | null) ?? null;
+    base.storage_epochs = (params[6] as number | null) ?? null;
     this.rows.set(id, base);
     return { rows: [] };
   }
@@ -356,6 +359,21 @@ describe('StagedIntentStore', () => {
     // A backfilled re-observation without a digest must keep the captured one.
     await store.markReceived('0xd', RX);
     expect((await store.get('0xd'))?.deliveryDigest).toBe('0xdeliver');
+  });
+
+  it('persists the committed storage epochs and never clobbers them with a later epochs-less event', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.markReceived('0xe', { ...RX, storageEpochs: 12 });
+    expect((await store.get('0xe'))?.storageEpochs).toBe(12);
+
+    await store.markReceived('0xe', RX);
+    expect((await store.get('0xe'))?.storageEpochs).toBe(12);
+
+    // A legacy row (event recorded without epochs) reads as undefined.
+    await store.markReceived('0xlegacy', RX);
+    expect((await store.get('0xlegacy'))?.storageEpochs).toBeUndefined();
   });
 
   it('claimForByteRecovery selects received-without-bytes past grace, and backs off', async () => {
