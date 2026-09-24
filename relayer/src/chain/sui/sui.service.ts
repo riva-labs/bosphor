@@ -44,7 +44,11 @@ export interface SuiLzEvent {
   /** Committed blob size in bytes. */
   size: number;
   encodingType: number;
-  storageEpochs: number;
+  /**
+   * Committed storage duration in Walrus epochs. Undefined only when the event
+   * carries no storage_epochs field (never defaulted to a fabricated value).
+   */
+  storageEpochs?: number;
   /** Committed intent deadline as a unix timestamp in seconds. */
   deadline: bigint;
   srcEid: number;

@@ -190,6 +190,7 @@ describe('IntentProcessor durable queue', () => {
       committedBlobId: COMMITTED_HEX,
       deadline: 1_700_000_000_000, // ms
       deliveryDigest: '0xdeliver',
+      storageEpochs: 5,
     });
   });
 

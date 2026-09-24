@@ -118,6 +118,7 @@ describe('SuiCheckpointService.processCheckpoint', () => {
           intent_id: intentBytes,
           committed_blob_id: '123',
           size: 3,
+          storage_epochs: 12,
           deadline: '1700000000',
           src_eid: 40161,
           nonce: '1',
@@ -132,6 +133,8 @@ describe('SuiCheckpointService.processCheckpoint', () => {
     expect(event.intentId).toMatch(/^0x[0-9a-f]{64}$/);
     expect(event.committedBlobId).toBe('123');
     expect(event.size).toBe(3);
+    // The committed storage duration drives how long the relayer stores the blob.
+    expect(event.storageEpochs).toBe(12);
     expect(event.deadline).toBe(1700000000n);
     expect(event.srcEid).toBe(40161);
     // The delivery tx digest rides along as the "Delivered to Sui" proof.

@@ -233,6 +233,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         committedBlobId: u256ToHex(event.committedBlobId),
         deadline: Number(event.deadline) * 1000, // seconds -> ms
         deliveryDigest: event.deliveryDigest || undefined,
+        storageEpochs: event.storageEpochs,
       });
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
       // The row may now be ready (bytes already ingested): drain without waiting
