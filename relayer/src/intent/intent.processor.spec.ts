@@ -101,6 +101,7 @@ function build(
     recordIntentProcessed: jest.fn(),
     observeWalrusUpload: jest.fn(),
     observeProcessingLatency: jest.fn(),
+    observeComputeLatency: jest.fn(),
     recordWalStorageCost: jest.fn(),
     recordLzSend: jest.fn(),
     recordReturnMode: jest.fn(),

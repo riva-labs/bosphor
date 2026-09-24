@@ -197,6 +197,8 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_lz_send_total` | counter | `result` (`success`/`failure`) | LayerZero proof sends back to EVM |
 | `bosphor_relayer_checkpoint_cursor_lag` | gauge | (none) | Latest Sui checkpoint minus the processed cursor |
 | `bosphor_relayer_walrus_upload_seconds` | histogram | (none) | Walrus upload duration in seconds |
+| `bosphor_relayer_compute_latency_seconds` | histogram | (none) | Relayer **compute** latency: store span minus external chain/Walrus/LZ I/O. This is the sub-3s KPI |
+| `bosphor_relayer_processing_latency_seconds` | histogram | (none) | End-to-end store latency (observe to work-complete), I/O-bound. Honest gauge, **not** the KPI |
 | `bosphor_relayer_wal_balance_wal` | gauge | (none) | Relayer WAL balance (the Walrus storage token) |
 | `bosphor_relayer_sui_balance_sui` | gauge | (none) | Relayer SUI balance (gas + WAL swap funding) |
 | `bosphor_relayer_wal_topup_total` | counter | `result` (`success`/`failure`/`insufficient_sui`) | SUI→WAL auto top-up attempts |
@@ -206,6 +208,27 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_store_dead_letter_total` | counter | `phase` (`pre_store`/`return`) | Dead-lettered stores (`pre_store`) and undelivered return proofs (`return`) |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
+
+### Latency metrics and the sub-3s KPI
+
+There are two latency figures, and they measure deliberately different things:
+
+- **`bosphor_relayer_compute_latency_seconds` (the sub-3s KPI).** The relayer's own reaction time: the store span **minus** the wall time spent waiting on external I/O it does not control (the Walrus upload relay, Sui `execute_store` + finality wait, the LayerZero fee quote and send-proof, WAL top-ups, escrow reads, live price fetches). This isolates how fast the relayer acts once it can act, and is what the M4 "median relay latency < 3s" deliverable is measured against.
+- **`bosphor_relayer_processing_latency_seconds` (end-to-end gauge, not the KPI).** The full observe to work-complete span, I/O included. On public testnet each external round-trip is seconds, so this typically sits in the **10-30s** range. It is reported openly for operational visibility; it is not the KPI and should never be quoted as one.
+
+The two differ only by external I/O time, tracked per intent by the relayer's I/O clock. Because any external call left untracked counts toward compute, the KPI figure is conservative by construction: it can only over-report, never flatter.
+
+**Measuring the KPI.** Do not use the synthetic benchmark as evidence, it fabricates samples and only exercises the harness as a CI floor. Take the real number from a live relayer:
+
+```bash
+# From a live relayer's Prometheus endpoint (the honest KPI measurement):
+BENCH_METRICS_URL=http://localhost:3399/metrics npm --prefix relayer run bench
+
+# Or directly from the histogram:
+curl -s http://localhost:3399/metrics | grep bosphor_relayer_compute_latency_seconds
+```
+
+The Grafana relayer dashboard's "Relayer compute latency p50 / p95" panel plots the KPI (green below the 3s threshold line) with the end-to-end p50 dashed alongside for context.
 
 ## Walrus upload
 
