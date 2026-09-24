@@ -37,6 +37,43 @@ The locally computed Walrus blob descriptor.
 
 <AutoTypeTable path="sdk/src/types.ts" name="BlobEncoding" />
 
+## fetchQuote
+
+```ts
+fetchQuote(relayerUrl: string, request: QuoteRequest, opts?: FetchQuoteOptions): Promise<PricedQuote>
+```
+
+Calls the relayer `POST /quote` endpoint and returns a typed quote. Amounts cross
+the wire as decimal strings and come back as `bigint`. Throws `BosphorError` on a
+non-2xx response or an unparseable body, never a fabricated price. The chain
+clients wrap it as `priceQuote()`. See [Pay for storage](/docs/pay-for-storage).
+
+## QuoteRequest
+
+<AutoTypeTable path="sdk/src/quote.ts" name="QuoteRequest" />
+
+## PricedQuote
+
+The all-in price, returned by `fetchQuote`, `priceQuote()`, and `storePriced()`.
+
+<AutoTypeTable path="sdk/src/quote.ts" name="PricedQuote" />
+
+## QuoteBreakdown
+
+Every cost component in USD.
+
+<AutoTypeTable path="sdk/src/quote.ts" name="QuoteBreakdown" />
+
+## Network preset
+
+`TESTNET` (also `networks.testnet`) is a `BosphorNetwork` with every value of the
+hosted testnet. The values are listed on the [Testnet reference](/docs/reference/testnet).
+
+<AutoTypeTable path="sdk/src/networks.ts" name="BosphorNetwork" />
+
+- `walrusBlobUrl(blobId, network?)`: the Walrus aggregator URL that serves a stored blob.
+- `blobIdToBase64Url(blobId)`: converts the SDK's `0x` blob id to the base64url form Walrus uses.
+
 ## Errors
 
 Every failure extends `BosphorError`. See [Handle errors](/docs/errors) for the
