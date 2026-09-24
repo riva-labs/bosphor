@@ -3,38 +3,58 @@ title: Store from EVM
 description: Submit a storage intent from an EVM wallet and drive the flow step by step.
 ---
 
-The EVM client wraps an `ethers` contract bound to a signer. The one-call path is
-in the [Quickstart](/docs/quickstart); this guide covers the pieces you reach for
-when you need more control.
+The EVM client wraps the Bosphor adapter contract bound to your `ethers` signer.
+The one-call path is in the [Quickstart](/docs/quickstart); this guide covers the
+pieces you reach for when you need more control.
 
 ## One call
 
 ```ts
-import { createBosphorClient, fromEthersContract } from '@bosphor/sdk/evm';
+import { createBosphorClientFromSigner } from '@bosphor/sdk/evm';
+
+const client = await createBosphorClientFromSigner(signer); // hosted testnet
+
+const { intentId, blobId, endEpoch, txHash } = await client.storePriced(fileBytes, { epochs: 5 });
+```
+
+`createBosphorClientFromSigner` binds the adapter with the SDK's bundled
+`ADAPTER_ABI`, wires the `queryProof` reader used to resolve `endEpoch`, and fills
+the adapter address, relayer URL, Sui endpoint id, and LayerZero options from the
+`TESTNET` preset. Override any of them in the second argument, for example
+`{ network: myPreset }` or `{ relayerUrl }`. See [Pay for storage](/docs/pay-for-storage)
+for what `storePriced()` charges.
+
+## Wire it by hand
+
+For a custom deployment or your own `ethers` setup, build the pieces yourself:
+
+```ts
+import { ethers } from 'ethers';
+import { ADAPTER_ABI, TESTNET, createBosphorClient, fromEthersContract } from '@bosphor/sdk/evm';
+
+const contract = new ethers.Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, signer);
 
 const client = createBosphorClient({
   adapter: fromEthersContract(contract),
-  relayerUrl: 'https://api.bosphor.xyz/testnet',
-  dstEid: 40378,
+  relayerUrl: TESTNET.relayerUrl,
+  dstEid: TESTNET.sui.eid,
+  options: TESTNET.evm.lzOptions, // required: the adapter rejects empty options
 });
-
-const { intentId, blobId, endEpoch, txHash } = await client.store(fileBytes, { epochs: 5 });
 ```
 
 `fromEthersContract(contract)` builds the full adapter surface from an
-`ethers.Contract` (including the `queryProof` reader used to resolve `endEpoch`),
-so you never cast with `as unknown as AdapterContract` or hand-write proof-log
-parsing. `store()` returns the origin `txHash` alongside the verified result.
+`ethers.Contract` (including the `queryProof` reader), so you never cast with
+`as unknown as AdapterContract` or hand-write proof-log parsing.
 
 ## Drive the steps yourself
 
-Every step `store()` orchestrates is public, so you can split signing across
+Every step `storePriced()` orchestrates is public, so you can split signing across
 separate user interactions (for wallet popups) or persist between steps:
 
 ```ts
 const encoded = await client.encode(fileBytes, { epochs: 5 });
-const fee = await client.quote(encoded);
-const { intentId, txHash } = await client.submit(encoded, fee); // wallet signs here
+const quote = await client.priceQuote(encoded);
+const { intentId, txHash } = await client.submitPaid(encoded, quote); // wallet signs here
 await client.upload(intentId, fileBytes);
 const { blobId, endEpoch } = await client.awaitProof(intentId, {
   timeoutMs: 300_000,
@@ -42,7 +62,10 @@ const { blobId, endEpoch } = await client.awaitProof(intentId, {
 });
 ```
 
-Splitting `submit` from later steps matters in the browser: a wallet popup must
+For the free testnet path, `quote(encoded)` and `submit(encoded, fee)` replace
+`priceQuote` and `submitPaid`.
+
+Splitting `submitPaid` from later steps matters in the browser: a wallet popup must
 open in direct response to a user gesture, so each signature belongs in its own
 event handler.
 
@@ -84,4 +107,5 @@ await client.store(fileBytes, { epochs: 5, signal: ac.signal });
 
 The on-chain intent is not rolled back. See [Resume after a crash](/docs/resume).
 
-A runnable end-to-end script lives at `sdk/examples/store-file.evm.ts`.
+Runnable end-to-end scripts live at `sdk/examples/store-file-priced.evm.ts` and
+`sdk/examples/store-file.evm.ts`.
