@@ -179,8 +179,9 @@ export class SolanaService implements OnModuleInit {
    * guard. The EscrowVault account is
    * `disc(8) ++ payer(32) ++ beneficiary(32) ++ amount(u64) ++ deadline(u64) ++
    * status(u8) ++ bump(u8)`, so `amount` is at byte 72 and `status` at byte 88.
-   * Returns null when the vault does not exist (unpriced intent) or status is None,
-   * so the guard is simply not applied rather than failing the intent.
+   * Status is the program's own enum (0 Pending, 1 Released, 2 Refunded); there
+   * is no "None": an unpriced intent simply has no vault, which returns null so
+   * the guard is not applied. The caller decides which statuses count.
    */
   async getEscrow(intentId: string): Promise<{ amount: bigint; status: number } | null> {
     if (!this.connection || !this.program) return null;
@@ -193,7 +194,6 @@ export class SolanaService implements OnModuleInit {
       if (!acc || acc.data.length < 90) return null;
       const amount = acc.data.readBigUInt64LE(72);
       const status = acc.data[88];
-      if (status === 0) return null; // None
       return { amount, status };
     } catch {
       return null;
