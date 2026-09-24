@@ -34,6 +34,7 @@ import {
   validateAppId,
   type AwaitProofOptions,
   type EncodeOptions,
+  type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
 } from "../store-flow.js";
@@ -78,6 +79,18 @@ export interface SolanaIntentState {
   endEpoch: bigint;
 }
 
+/** An intent's Solana escrow vault. `status`: 0 Pending, 1 Released, 2 Refunded. */
+export interface SolanaEscrowState {
+  /** The payer's base58 address (refunds go here). */
+  payer: string;
+  /** Escrowed lamports, excluding rent. */
+  amount: bigint;
+  /** Unix seconds after which anyone may refund. */
+  deadline: bigint;
+  /** 0 Pending, 1 Released, 2 Refunded. */
+  status: number;
+}
+
 /**
  * Minimal structural surface of the Solana chain, mirroring the EVM
  * `AdapterContract`. A real backend builds + sends the `submit_intent` instruction
@@ -97,19 +110,35 @@ export interface SolanaChain {
    * exist yet.
    */
   readIntent(intentId: Hex): Promise<SolanaIntentState | null>;
+  /**
+   * Optional: read the per-intent escrow vault (`[b"escrow", intentId]`). Returns
+   * `null` if it does not exist (never opened, or closed by a refund).
+   */
+  readEscrow?(intentId: Hex): Promise<SolanaEscrowState | null>;
+  /** Optional: send `refund_escrow` for the intent and return the tx signature. */
+  refundEscrow?(intentId: Hex): Promise<{ signature: string }>;
 }
 
 export interface BosphorSolanaClientOptions {
   /** A `SolanaChain` backend bound to the deployed adapter and a funded wallet. */
   chain: SolanaChain;
-  /** Base URL of the relayer's ingest endpoint, e.g. `https://relayer.bosphor.xyz`. */
+  /** Base URL of the relayer's ingest endpoint, e.g. `https://api.bosphor.xyz/testnet` (`TESTNET.relayerUrl`). */
   relayerUrl: string;
   /** LayerZero endpoint id of the destination chain (e.g. 40378 for Sui testnet). */
   dstEid: number;
   /** LayerZero messaging options as 0x hex; defaults to `0x`. */
   options?: Hex;
-  /** Native fee (lamports) for the LayerZero `send` CPI; defaults to 0n. */
+  /**
+   * Upper bound (lamports) on the LayerZero fee passed with `submit_intent`; the
+   * endpoint charges only the live fee. Defaults to 0n.
+   */
   nativeFee?: bigint;
+  /**
+   * Live LayerZero fee source used by `priceQuote()` (e.g. `quoteSolanaLzFee`).
+   * Resolve to `null` to fall back to the `nativeFee` cap, which the quote then
+   * flags with `forwardIsUpperBound: true`. Without it the cap is always used.
+   */
+  quoteLzFee?: () => Promise<bigint | null>;
   /** Default storage duration in epochs when `store`/`encode` is called without one. */
   defaultEpochs?: number;
   /** Seconds added to `now` to derive the deadline when not supplied. */
@@ -155,6 +184,7 @@ export class BosphorSolanaClient {
   private readonly dstEid: number;
   private readonly options: Hex;
   private readonly nativeFee: bigint;
+  private readonly quoteLzFee: (() => Promise<bigint | null>) | undefined;
   private readonly defaultEpochs: number;
   private readonly deadlineSeconds: number;
   private readonly computeBlobFn: ComputeBlob;
@@ -171,6 +201,7 @@ export class BosphorSolanaClient {
     this.dstEid = opts.dstEid;
     this.options = opts.options ?? "0x";
     this.nativeFee = opts.nativeFee ?? 0n;
+    this.quoteLzFee = opts.quoteLzFee;
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
     this.computeBlobFn = opts.computeBlob ?? createDefaultComputeBlob(opts.network ?? "testnet");
@@ -260,6 +291,32 @@ export class BosphorSolanaClient {
   }
 
   /**
+   * Read the intent's escrow vault. `status` is 0 Pending, 1 Released,
+   * 2 Refunded. Returns `null` when there is no vault, which includes after a
+   * refund (the refund closes the vault and returns its balance to the payer).
+   */
+  async getEscrow(intentId: Hex): Promise<SolanaEscrowState | null> {
+    if (!this.chain.readEscrow) {
+      throw new Error("the Solana chain backend does not implement readEscrow()");
+    }
+    return this.chain.readEscrow(intentId);
+  }
+
+  /**
+   * Refund an intent's pending escrow to its payer after the deadline, with the
+   * program's `refund_escrow` instruction. Anyone may send it (the sender pays
+   * the tx fee); the escrow and the vault rent always go to the recorded payer.
+   * Fails with the program error before the deadline or if not pending.
+   */
+  async refundEscrow(intentId: Hex): Promise<{ txHash: string }> {
+    if (!this.chain.refundEscrow) {
+      throw new Error("the Solana chain backend does not implement refundEscrow()");
+    }
+    const { signature } = await this.chain.refundEscrow(intentId);
+    return { txHash: signature };
+  }
+
+  /**
    * One-call flow: encode -> submit -> upload -> awaitProof. Returns the verified
    * `{ intentId, blobId, endEpoch }`. Every step fails loudly; no value is
    * fabricated on error. (Solana has no separate quote step: the LayerZero fee is
@@ -279,13 +336,18 @@ export class BosphorSolanaClient {
    */
   async store(
     data: Uint8Array,
-    opts: EncodeOptions & SubmitOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const { intentId, txHash } = await this.submit(encoded, opts);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash };
   }
 
@@ -293,18 +355,24 @@ export class BosphorSolanaClient {
    * Fetch an all-in priced quote (SOL) from the relayer for this intent: the
    * forward LayerZero fee plus the relayer-fronted escrow bucket, as one
    * origin-native amount with a full USD breakdown.
+   *
+   * The forward fee is the live LayerZero fee when a `quoteLzFee` source is
+   * configured (the default with `createBosphorSolanaClientFromKeypair` when the
+   * LayerZero Solana SDK is installed). Otherwise it is the `nativeFee` cap and the
+   * quote carries `forwardIsUpperBound: true`: the real charge is then lower.
    */
   async priceQuote(
     encoded: EncodedIntent,
     opts: { signal?: AbortSignal | undefined } = {},
   ): Promise<PricedQuote> {
-    return fetchQuote(
+    const live = this.quoteLzFee ? await this.quoteLzFee() : null;
+    const quote = await fetchQuote(
       this.relayerUrl,
       {
         sizeBytes: encoded.size,
         epochs: encoded.storageEpochs,
         originToken: "SOL",
-        forwardLzFeeNative: this.nativeFee,
+        forwardLzFeeNative: live ?? this.nativeFee,
       },
       {
         fetch: this.fetchFn,
@@ -312,6 +380,7 @@ export class BosphorSolanaClient {
         ...(this.appId ? { appId: this.appId } : {}),
       },
     );
+    return { ...quote, forwardIsUpperBound: live === null };
   }
 
   /**
@@ -324,7 +393,11 @@ export class BosphorSolanaClient {
     quote: PricedQuote,
     opts: SubmitOptions = {},
   ): Promise<{ intentId: Hex; txHash: string }> {
-    return this.submit(encoded, { ...opts, escrowAmount: quote.escrowNative });
+    // Pass the larger of the cap and the quoted forward fee as the LayerZero fee
+    // bound, so a live quote above the configured cap cannot fail the submit.
+    const cap = opts.nativeFee ?? this.nativeFee;
+    const nativeFee = quote.forwardNative > cap ? quote.forwardNative : cap;
+    return this.submit(encoded, { ...opts, nativeFee, escrowAmount: quote.escrowNative });
   }
 
   /**
@@ -335,14 +408,20 @@ export class BosphorSolanaClient {
    */
   async storePriced(
     data: Uint8Array,
-    opts: EncodeOptions & SubmitOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult & { quote: PricedQuote }> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const quote = await this.priceQuote(encoded, { signal: opts.signal });
+    emit({ step: "quoted", amount: quote.totalNative, quote });
     const { intentId, txHash } = await this.submitPaid(encoded, quote, opts);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash, quote };
   }
 }

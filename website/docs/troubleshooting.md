@@ -125,7 +125,8 @@ Run `git submodule update --init --recursive` to fetch all dependencies. The EVM
 
 ## Related
 
-- [Quickstart](quickstart.md) for initial setup
+- [Quickstart](quickstart.md) for your first store on the hosted testnet
+- [Self-hosting](self-hosting.md) for running your own deployment
 - [Deployment](deployment.md) for deployment steps
 - [Relayer](relayer.md) for relayer configuration
 - [Known Limitations](known-limitations.md) for protocol constraints

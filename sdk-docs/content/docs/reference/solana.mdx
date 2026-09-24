@@ -9,18 +9,67 @@ tables below are generated from the SDK source.
 
 ## BosphorSolanaClient
 
-Same one-line API as EVM, minus the `quote` step (the LayerZero fee is passed as
-`nativeFee` on submit).
+Same one-line API as EVM, minus the on-chain `quote` step (the LayerZero fee is
+passed as a `nativeFee` cap on submit). Build one with
+`createBosphorSolanaClientFromKeypair` (hosted testnet) or
+`new BosphorSolanaClient(options)`.
 
 ### Methods
 
 | Method | Signature | Returns |
 |--------|-----------|---------|
-| `store` | `store(data: Uint8Array, opts?: EncodeOptions & AwaitProofOptions)` | `Promise<StoreResult>` |
+| `storePriced` | `storePriced(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions)` | `Promise<StoreResult & { quote: PricedQuote }>` |
+| `store` | `store(data: Uint8Array, opts?: EncodeOptions & SubmitOptions & AwaitProofOptions & ProgressOptions)` |
+| `getEscrow` | `getEscrow(intentId: Hex)` | `Promise<SolanaEscrowState \| null>` |
+| `refundEscrow` | `refundEscrow(intentId: Hex)` | `Promise<{ txHash: string }>` | `Promise<StoreResult>` |
+| `priceQuote` | `priceQuote(encoded: EncodedIntent, opts?: { signal?: AbortSignal })` | `Promise<PricedQuote>` |
+| `submitPaid` | `submitPaid(encoded: EncodedIntent, quote: PricedQuote, opts?: SubmitOptions)` | `Promise<{ intentId: Hex; txHash: string }>` |
 | `encode` | `encode(data: Uint8Array, opts?: EncodeOptions)` | `Promise<EncodedIntent>` |
 | `submit` | `submit(encoded: EncodedIntent, opts?: SubmitOptions)` | `Promise<{ intentId: Hex; txHash: string }>` |
 | `upload` | `upload(intentId: Hex, data: Uint8Array, opts?: { signal?: AbortSignal })` | `Promise<void>` |
 | `awaitProof` | `awaitProof(intentId: Hex, opts?: AwaitProofOptions)` | `Promise<{ blobId: Hex; endEpoch: bigint }>` |
+
+`submitPaid` deposits `quote.escrowNative` into the intent's escrow vault; the
+proof releases it to the relayer. `priceQuote` uses the live LayerZero fee from
+the `quoteLzFee` option when set (the Keypair helper sets it), otherwise the
+`nativeFee` cap with `forwardIsUpperBound: true`. `refundEscrow` sends
+`refund_escrow` after the deadline, closing the vault back to the payer.
+
+## quoteSolanaStore and quoteSolanaLzFee
+
+```ts
+quoteSolanaStore(opts: QuoteSolanaStoreOptions): Promise<PricedQuote>
+quoteSolanaLzFee(opts: QuoteSolanaLzFeeOptions): Promise<bigint>
+```
+
+`quoteSolanaStore` prices a store without a wallet from a `connection` and the
+file (`data` or `sizeBytes`), like `priceQuote()`. `quoteSolanaLzFee` returns the
+live LayerZero fee in lamports by simulating the endpoint's `quote` instruction
+(read-only; nothing is signed or sent). Both need the optional peer
+`@layerzerolabs/lz-solana-sdk-v2`; without it `quoteSolanaLzFee` throws
+`LzSolanaSdkMissingError` and `quoteSolanaStore` falls back to the flagged cap.
+
+## createBosphorSolanaClientFromKeypair
+
+```ts
+createBosphorSolanaClientFromKeypair(opts: CreateSolanaClientFromKeypairOptions): Promise<BosphorSolanaClient>
+```
+
+Builds a client from a `Connection` and a `Keypair`. Defaults come from the
+`network` option (default [`TESTNET`](/docs/reference/testnet)): program id,
+LayerZero send accounts (`testnetEndpointAccounts(wallet.publicKey)`), options,
+`nativeFee` cap, compute-unit limit, `dstEid`, relayer URL, and Walrus network.
+
+<AutoTypeTable path="sdk/src/solana/endpoint-accounts.ts" name="CreateSolanaClientFromKeypairOptions" />
+
+## LayerZero send accounts
+
+- `testnetEndpointAccounts(payer)`: the testnet send accounts with the payer filled
+  in, as `{ pubkey, isSigner, isWritable }[]` for `createDefaultSolanaChain`.
+- `TESTNET_SEND_ACCOUNTS`: the raw snapshot, with `PAYER_PLACEHOLDER` in the payer slot.
+- `resolveEndpointAccounts({ connection, payer, network? })`: resolves the live list
+  on-chain with `getSendIXAccountMetaForCPI` (needs the optional peer
+  `@layerzerolabs/lz-solana-sdk-v2`). Use it if the snapshot goes stale.
 
 ## BosphorSolanaClientOptions
 
@@ -52,6 +101,8 @@ The decoded `IntentState` PDA, the on-chain proof of record.
 ## Functions
 
 - `createBosphorSolanaClient(options)`: factory that mirrors `new BosphorSolanaClient(options)`.
+- `fetchQuote(relayerUrl, request, opts?)`: the relayer quote client (see [Core](/docs/reference/core#fetchquote)).
+- `walrusBlobUrl(blobId, network?)`: Walrus aggregator URL for a returned blob id.
 - `createDefaultSolanaChain(options)`: builds the default `SolanaChain` backend (lazily loads `@solana/web3.js`).
 - `createDefaultComputeBlob(network)`: build the blob-id computation bound to `"testnet"` or `"mainnet"` (the client also accepts a `network` option).
 - `decodeIntentState(data)` / `readSolanaProof(data)`: decode the `IntentState` account bytes.

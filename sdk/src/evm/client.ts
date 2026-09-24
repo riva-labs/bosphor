@@ -27,6 +27,7 @@ import {
   validateAppId,
   type AwaitProofOptions,
   type EncodeOptions,
+  type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
 } from "../store-flow.js";
@@ -87,6 +88,12 @@ export interface AdapterContract {
     nonce: bigint,
   ): Promise<Hex>;
   nonces?(sender: string): Promise<bigint>;
+  /** Optional (escrow adapter): the escrow record for an intent. */
+  getEscrow?(intentId: Hex): Promise<RawEscrowRecord>;
+  /** Optional (escrow adapter): refund a pending escrow to its payer after the deadline. */
+  refund?(intentId: Hex): Promise<EvmContractTransaction>;
+  /** Optional (escrow adapter): withdraw the caller's released or refunded balance. */
+  withdraw?(): Promise<EvmContractTransaction>;
   interface: {
     parseLog(log: { topics: readonly string[]; data: string }): {
       name: string;
@@ -99,6 +106,29 @@ export interface AdapterContract {
   runner?: { getAddress?(): Promise<string> } | null;
 }
 
+/** The escrow record as the adapter's `getEscrow` returns it (ethers `Result` fields). */
+export interface RawEscrowRecord {
+  payer: string;
+  token: string;
+  amount: bigint;
+  deadline: bigint;
+  status: bigint | number;
+}
+
+/** An intent's escrow, normalized. `status` is an `EscrowStatus` value (0 to 3). */
+export interface EscrowRecord {
+  /** The address that paid, and that a refund goes to. */
+  payer: string;
+  /** `0x0000...0000` for native ETH. */
+  token: string;
+  /** Escrowed amount in wei. */
+  amount: bigint;
+  /** Unix seconds after which `refund` is allowed. */
+  deadline: bigint;
+  /** 0 None, 1 Pending, 2 Released, 3 Refunded. */
+  status: number;
+}
+
 /** The LayerZero messaging fee, as returned by `quote`. */
 export interface MessagingFee {
   nativeFee: bigint;
@@ -108,7 +138,7 @@ export interface MessagingFee {
 export interface BosphorEvmClientOptions {
   /** An `ethers.Contract` bound to the deployed BosphorAdapter, with a signer. */
   adapter: AdapterContract;
-  /** Base URL of the relayer's ingest endpoint, e.g. `https://relayer.bosphor.xyz`. */
+  /** Base URL of the relayer's ingest endpoint, e.g. `https://api.bosphor.xyz/testnet` (`TESTNET.relayerUrl`). */
   relayerUrl: string;
   /** LayerZero endpoint id of the destination chain (e.g. 40378 for Sui testnet). */
   dstEid: number;
@@ -356,14 +386,20 @@ export class BosphorEvmClient {
    */
   async store(
     data: Uint8Array,
-    opts: EncodeOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const fee = await this.quote(encoded);
+    emit({ step: "quoted", amount: fee.nativeFee });
     const { intentId, txHash } = await this.submit(encoded, fee);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash };
   }
 
@@ -376,15 +412,72 @@ export class BosphorEvmClient {
    */
   async storePriced(
     data: Uint8Array,
-    opts: EncodeOptions & AwaitProofOptions = {},
+    opts: EncodeOptions & AwaitProofOptions & ProgressOptions = {},
   ): Promise<StoreResult & { quote: PricedQuote }> {
+    const emit = opts.onProgress ?? (() => {});
     opts.signal?.throwIfAborted();
     const encoded = await this.encode(data, opts);
+    emit({ step: "encoded", encoded });
     const quote = await this.priceQuote(encoded, { signal: opts.signal });
+    emit({ step: "quoted", amount: quote.escrowNative + quote.forwardNative, quote });
     const { intentId, txHash } = await this.submitPaid(encoded, quote);
+    emit({ step: "submitted", intentId, txHash });
     await this.upload(intentId, data, { signal: opts.signal });
+    emit({ step: "uploaded", intentId });
     const { blobId, endEpoch } = await this.awaitProof(intentId, opts);
+    emit({ step: "proven", intentId, blobId, endEpoch });
     return { intentId, blobId, endEpoch, txHash, quote };
+  }
+
+  /**
+   * Read the escrow record of an intent (escrow adapter only). `status` is an
+   * `EscrowStatus` value: 0 None, 1 Pending, 2 Released, 3 Refunded.
+   */
+  async getEscrow(intentId: Hex): Promise<EscrowRecord> {
+    const raw = await this.requireMember("getEscrow").call(this.adapter, intentId);
+    return {
+      payer: raw.payer,
+      token: raw.token,
+      amount: raw.amount,
+      deadline: raw.deadline,
+      status: Number(raw.status),
+    };
+  }
+
+  /**
+   * Refund an intent's pending escrow to its payer once the deadline has passed.
+   * Anyone may call it; the funds are credited to the recorded payer, who then
+   * collects them with {@link withdraw}. Reverts `DeadlineNotReached` before the
+   * deadline and `EscrowNotPending` if already released or refunded.
+   */
+  async refund(intentId: Hex): Promise<{ txHash: string }> {
+    const tx = await this.requireMember("refund").call(this.adapter, intentId);
+    await tx.wait();
+    return { txHash: tx.hash };
+  }
+
+  /**
+   * Withdraw the signer's credited balance (refunds for a payer, releases for the
+   * relayer). The adapter uses pull payments, so a refund is not sent until this
+   * is called. Reverts `NothingToWithdraw` when the balance is zero.
+   */
+  async withdraw(): Promise<{ txHash: string }> {
+    const tx = await this.requireMember("withdraw").call(this.adapter);
+    await tx.wait();
+    return { txHash: tx.hash };
+  }
+
+  private requireMember<K extends "getEscrow" | "refund" | "withdraw">(
+    name: K,
+  ): NonNullable<AdapterContract[K]> {
+    const fn = this.adapter[name];
+    if (!fn) {
+      throw new Error(
+        `the adapter does not expose ${name}(); bind it with ADAPTER_ABI (connectAdapter or ` +
+          `createBosphorClientFromSigner) against the escrow adapter`,
+      );
+    }
+    return fn as NonNullable<AdapterContract[K]>;
   }
 
   /**

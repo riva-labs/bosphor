@@ -27,7 +27,14 @@ export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "./types.js";
 export { BosphorError, ProofTimeoutError, RelayerUploadError } from "./errors.js";
 
 // Shared store-flow vocabulary (identical on every chain subpath).
-export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "./store-flow.js";
+export type {
+  EncodeOptions,
+  AwaitProofOptions,
+  EncodedIntent,
+  FetchLike,
+  StoreProgress,
+  ProgressOptions,
+} from "./store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
 export { APP_ID_HEADER } from "./store-flow.js";
 
@@ -39,4 +46,14 @@ export type {
   QuoteBreakdown,
   PricedQuote,
   FetchQuoteOptions,
+  StoreSize,
 } from "./quote.js";
+
+// Network presets: addresses, endpoint ids, and URLs for the hosted testnet.
+export { TESTNET, networks, walrusBlobUrl, blobIdToBase64Url } from "./networks.js";
+export type {
+  BosphorNetwork,
+  EvmNetworkConfig,
+  SolanaNetworkConfig,
+  SuiNetworkConfig,
+} from "./networks.js";

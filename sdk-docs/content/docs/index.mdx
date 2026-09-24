@@ -59,13 +59,16 @@ The SDK is ESM-only and targets Node.js 22 or newer.
 
 ## Quick start
 
-Point the client at the relayer and a wallet, then call `store`. The whole
-cross-chain flow runs in one call and returns a result verified against
-on-chain state.
+Build a client from your wallet, then call `storePriced`. The whole paid
+cross-chain flow runs in one call against the hosted testnet and returns a result
+verified against on-chain state.
 
 ```ts
-const result = await client.store(bytes, { epochs: 5 });
-// { intentId, blobId, endEpoch }
+import { createBosphorClientFromSigner } from '@bosphor/sdk/evm';
+
+const client = await createBosphorClientFromSigner(signer);
+const result = await client.storePriced(bytes, { epochs: 5 });
+// { intentId, blobId, endEpoch, txHash, quote }
 ```
 
 The [Quickstart](/docs/quickstart) takes you from install to a verified

@@ -8,11 +8,24 @@
 
 export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./client.js";
 export { fromEthersContract } from "./adapter.js";
+export { ADAPTER_ABI, EscrowStatus } from "./abi.js";
+export { connectAdapter, createBosphorClientFromSigner } from "./signer.js";
+export { quoteEvmStore } from "./quote-store.js";
+export type { QuoteEvmStoreOptions } from "./quote-store.js";
+export type {
+  EthersRunnerLike,
+  EthersSignerLike,
+  EthersModuleLike,
+  ConnectAdapterOptions,
+  CreateClientFromSignerOptions,
+} from "./signer.js";
 export type { EthersContractLike, FromEthersContractOptions } from "./adapter.js";
 export type {
   AdapterContract,
   BosphorEvmClientOptions,
   MessagingFee,
+  EscrowRecord,
+  RawEscrowRecord,
   EvmLog,
   EvmContractTransaction,
   EvmTransactionReceipt,
@@ -22,7 +35,14 @@ export type {
 export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
-export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
+export type {
+  EncodeOptions,
+  AwaitProofOptions,
+  EncodedIntent,
+  FetchLike,
+  StoreProgress,
+  ProgressOptions,
+} from "../store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
 export { APP_ID_HEADER } from "../store-flow.js";
 
@@ -40,3 +60,23 @@ export {
 } from "../commitment-codec.js";
 export type { Commitment } from "../commitment-codec.js";
 export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.js";
+
+// Network presets: addresses, endpoint ids, and URLs for the hosted testnet.
+export { TESTNET, networks, walrusBlobUrl, blobIdToBase64Url } from "../networks.js";
+export type {
+  BosphorNetwork,
+  EvmNetworkConfig,
+  SolanaNetworkConfig,
+  SuiNetworkConfig,
+} from "../networks.js";
+
+// Off-chain priced quoting via the relayer (shared across chains).
+export { fetchQuote } from "../quote.js";
+export type {
+  OriginToken,
+  QuoteRequest,
+  QuoteBreakdown,
+  PricedQuote,
+  FetchQuoteOptions,
+  StoreSize,
+} from "../quote.js";

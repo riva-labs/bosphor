@@ -1,45 +1,85 @@
 ---
 title: Testnet reference
-description: The deployed testnet addresses, LayerZero endpoint IDs, and relayer URL, ready to paste.
+description: The deployed testnet addresses, LayerZero endpoint IDs, and relayer URL. The single up-to-date list.
 ---
 
-Everything you need to run against testnet. These values are fixed for the
-current deployment.
+This page is the single up-to-date list of the hosted Bosphor testnet deployment.
+The same values ship in the SDK as the `TESTNET` preset (exported from
+`@bosphor/sdk`, `@bosphor/sdk/evm`, and `@bosphor/sdk/solana`), so in code you
+never need to copy them.
 
 <Callout type="info" title="Testnet only">
-These are Sepolia and Sui testnet addresses. There is no mainnet deployment yet;
-for mainnet, inject your own `computeBlob` and point the client at your own
-adapter. See [Store from EVM](/docs/evm#blob-id-computation).
+Mainnet is not open for integrations yet. For your own deployment, build a
+network preset from `TESTNET` with your addresses; see
+[Self-hosting](https://docs.bosphor.xyz/self-hosting).
 </Callout>
-
-## EVM (Sepolia)
-
-| Value | |
-|-------|--|
-| Bosphor adapter | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
-| LayerZero endpoint | `0x6EDCE65403992e310A62460808c4b910D972f10f` |
-| Sepolia EID | `40161` |
-| Destination EID (`dstEid`) | `40378` (Sui testnet) |
-
-## Sui (testnet)
-
-| Value | |
-|-------|--|
-| Package | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |
-| Sui testnet EID | `40378` |
 
 ## Relayer
 
-| Value | |
-|-------|--|
-| Testnet relayer URL | `https://api.bosphor.xyz/testnet` |
+| Value | | Preset field |
+|-------|--|--------------|
+| Relayer base URL | `https://api.bosphor.xyz/testnet` | `TESTNET.relayerUrl` |
+| Health | `GET https://api.bosphor.xyz/testnet/health` | |
+| Price quote | `POST https://api.bosphor.xyz/testnet/quote` | |
+| Public intent feed | `GET https://api.bosphor.xyz/testnet/public/intents` | |
 
-## Client config, filled in
+## EVM origin: Ethereum Sepolia
 
-```ts title="testnet.ts"
-const client = new BosphorEvmClient({
-  adapter, // ethers.Contract at 0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10
-  relayerUrl: 'https://api.bosphor.xyz/testnet',
-  dstEid: 40378,
-});
+| Value | | Preset field |
+|-------|--|--------------|
+| Bosphor escrow adapter | `0x3296686Fc61076d27488278c1da5468E1e0A7156` | `TESTNET.evm.adapterAddress` |
+| Chain id | `11155111` | `TESTNET.evm.chainId` |
+| Public RPC | `https://ethereum-sepolia-rpc.publicnode.com` | `TESTNET.evm.rpcUrl` |
+| LayerZero EID | `40161` | `TESTNET.evm.eid` |
+| LayerZero endpoint | `0x6EDCE65403992e310A62460808c4b910D972f10f` | `TESTNET.evm.lzEndpoint` |
+| LayerZero options | `0x00030100110100000000000000000000000000030d40` | `TESTNET.evm.lzOptions` |
+| Explorer | [sepolia.etherscan.io](https://sepolia.etherscan.io/address/0x3296686Fc61076d27488278c1da5468E1e0A7156) | `TESTNET.evm.explorerUrl` |
+
+The adapter ABI ships as `ADAPTER_ABI` from `@bosphor/sdk/evm`. Always pass the
+LayerZero options above (the SDK does): the adapter rejects an empty `0x`.
+
+## Solana origin: devnet
+
+| Value | | Preset field |
+|-------|--|--------------|
+| Bosphor program | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` | `TESTNET.solana.programId` |
+| LayerZero EID | `40168` | `TESTNET.solana.eid` |
+| Public RPC | `https://api.devnet.solana.com` | `TESTNET.solana.rpcUrl` |
+| LayerZero endpoint program | `76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6` | `TESTNET.solana.lzEndpointProgram` |
+| LayerZero ULN program | `7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH` | `TESTNET.solana.lzUlnProgram` |
+| LayerZero options | `0x00030100110100000000000000000000000000030d40` | `TESTNET.solana.lzOptions` |
+| LayerZero fee cap | `10000000` lamports (0.01 SOL) | `TESTNET.solana.nativeFee` |
+| Compute-unit limit | `400000` | `TESTNET.solana.computeUnitLimit` |
+| Explorer | [Solscan (devnet)](https://solscan.io/account/7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF?cluster=devnet) | |
+
+The LayerZero send accounts for this pathway ship as `TESTNET_SEND_ACCOUNTS` and
+`testnetEndpointAccounts(payer)` from `@bosphor/sdk/solana`. See
+[Store from Solana](/docs/solana#layerzero-send-accounts).
+
+## Destination: Sui and Walrus testnet
+
+| Value | | Preset field |
+|-------|--|--------------|
+| Bosphor Sui package (LayerZero peer of both origins) | `0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5` | `TESTNET.sui.packageId` |
+| Sui LayerZero EID (`dstEid`) | `40378` | `TESTNET.sui.eid` |
+| Walrus network | `testnet` (one epoch is one day) | `TESTNET.walrusNetwork` |
+| Walrus aggregator | `https://aggregator.walrus-testnet.walrus.space` | `TESTNET.walrusAggregatorUrl` |
+| LayerZero Scan | `https://testnet.layerzeroscan.com` | `TESTNET.layerZeroScanUrl` |
+
+## Using the preset
+
+```ts
+import { TESTNET, createBosphorClientFromSigner } from '@bosphor/sdk/evm';
+
+const client = await createBosphorClientFromSigner(signer); // TESTNET is the default
+console.log(TESTNET.evm.adapterAddress, TESTNET.sui.eid, TESTNET.relayerUrl);
 ```
+
+## Superseded deployments
+
+Earlier testnet deployments are retired. Do not integrate against these:
+
+| Deployment | Address |
+|------------|---------|
+| Milestone 2 EVM adapter (Sepolia) | `0x3c8B7A1c684dD10aEd6Bb392651c678f1CE05E10` |
+| Milestone 2 Sui package | `0x169f0ece587a5b54cf39218cdf5319ba7ecbb7d403b022802f1f329dbee3e596` |

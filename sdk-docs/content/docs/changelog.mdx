@@ -3,7 +3,7 @@ title: Changelog
 description: Notable changes to @bosphor/sdk, newest first.
 ---
 
-The current release is **`@bosphor/sdk` 0.10.0**. The full, authoritative
+The latest published release is **`@bosphor/sdk` 0.11.0**. The full, authoritative
 changelog lives in the repo:
 [CHANGELOG.md](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md),
 and each release is tagged
@@ -13,6 +13,26 @@ and each release is tagged
 The SDK is pre-1.0. `feat` bumps the minor version and `fix` bumps the patch;
 breaking changes bump the minor while pre-1.0. Pin a version in production.
 </Callout>
+
+## 0.13.0
+
+- **feat:** `TESTNET` network preset (addresses, endpoint ids, LayerZero options, relayer URL) exported from every entry point, plus `walrusBlobUrl` and `blobIdToBase64Url`.
+- **feat:** `ADAPTER_ABI` and `EscrowStatus` from `@bosphor/sdk/evm`, and `createBosphorClientFromSigner(signer)` / `connectAdapter(signer)` to build a client with no ABI or address wiring.
+- **feat:** Solana LayerZero send accounts: `testnetEndpointAccounts(payer)`, `TESTNET_SEND_ACCOUNTS`, and `resolveEndpointAccounts(...)`, plus `createBosphorSolanaClientFromKeypair({ connection, wallet })`.
+- **feat:** `fetchQuote` and the quote types are re-exported from `@bosphor/sdk/evm` and `@bosphor/sdk/solana`.
+- **feat:** wallet-free quotes: `quoteEvmStore({ provider, sizeBytes })` and `quoteSolanaStore({ connection, sizeBytes })`.
+- **feat:** `onProgress` on `store()` / `storePriced()` (steps `encoded`, `quoted`, `submitted`, `uploaded`, `proven`).
+- **feat:** refund helpers: EVM `getEscrow`, `refund`, `withdraw`; Solana `getEscrow`, `refundEscrow`.
+- **feat:** `TESTNET.evm.rpcUrl` (a public Sepolia RPC).
+- **fix:** Solana `priceQuote()` uses the live LayerZero fee (`quoteSolanaLzFee`) instead of the 0.01 SOL cap; `PricedQuote.forwardIsUpperBound` flags a cap-based quote.
+
+## 0.12.0
+
+- **feat:** optional `appId` on the EVM and Solana clients (and the quote helpers), sent as the `X-Bosphor-App` header on quote and upload so the relayer can attribute your traffic.
+
+## 0.11.0
+
+- **feat:** paid storage: `storePriced()`, `priceQuote()`, and `submitPaid()` on the EVM and Solana clients, and `fetchQuote()` in the core. See [Pay for storage](/docs/pay-for-storage).
 
 ## 0.10.0
 

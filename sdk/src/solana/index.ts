@@ -16,6 +16,7 @@ export type {
   SolanaSubmitFields,
   SolanaSubmitResult,
   SolanaIntentState,
+  SolanaEscrowState,
   BosphorSolanaClientOptions,
   SubmitOptions,
 } from "./client.js";
@@ -24,7 +25,14 @@ export type {
 export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
-export type { EncodeOptions, AwaitProofOptions, EncodedIntent, FetchLike } from "../store-flow.js";
+export type {
+  EncodeOptions,
+  AwaitProofOptions,
+  EncodedIntent,
+  FetchLike,
+  StoreProgress,
+  ProgressOptions,
+} from "../store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
 export { APP_ID_HEADER } from "../store-flow.js";
 
@@ -36,7 +44,30 @@ export {
 export type { DecodedIntentState } from "./proof.js";
 
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
-export type { DefaultSolanaChainOptions } from "./backend.js";
+export type { DefaultSolanaChainOptions, SolanaAccountMetaInput } from "./backend.js";
+
+// Wallet-free store quote.
+export { quoteSolanaStore } from "./quote-store.js";
+export type { QuoteSolanaStoreOptions } from "./quote-store.js";
+
+// Read-only LayerZero fee quote (simulated endpoint `quote`).
+export { quoteSolanaLzFee, LzSolanaSdkMissingError, FORWARD_MESSAGE_LEN } from "./lz-fee.js";
+export type { QuoteSolanaLzFeeOptions } from "./lz-fee.js";
+
+// LayerZero send accounts + one-call client from a Keypair.
+export {
+  PAYER_PLACEHOLDER,
+  TESTNET_SEND_ACCOUNTS,
+  testnetEndpointAccounts,
+  resolveEndpointAccounts,
+  createBosphorSolanaClientFromKeypair,
+} from "./endpoint-accounts.js";
+export type {
+  PublicKeyLike,
+  LzSolanaSdkLike,
+  ResolveEndpointAccountsOptions,
+  CreateSolanaClientFromKeypairOptions,
+} from "./endpoint-accounts.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 export type { WalrusNetwork } from "../blob.js";
@@ -52,3 +83,23 @@ export {
 } from "../commitment-codec.js";
 export type { Commitment } from "../commitment-codec.js";
 export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "../types.js";
+
+// Network presets: addresses, endpoint ids, and URLs for the hosted testnet.
+export { TESTNET, networks, walrusBlobUrl, blobIdToBase64Url } from "../networks.js";
+export type {
+  BosphorNetwork,
+  EvmNetworkConfig,
+  SolanaNetworkConfig,
+  SuiNetworkConfig,
+} from "../networks.js";
+
+// Off-chain priced quoting via the relayer (shared across chains).
+export { fetchQuote } from "../quote.js";
+export type {
+  OriginToken,
+  QuoteRequest,
+  QuoteBreakdown,
+  PricedQuote,
+  FetchQuoteOptions,
+  StoreSize,
+} from "../quote.js";

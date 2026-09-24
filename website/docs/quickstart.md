@@ -5,124 +5,259 @@ title: Quickstart
 
 # Quickstart
 
-Get Bosphor running on Sepolia + Sui Testnet in about 15 minutes.
+Store a file on Walrus from an Ethereum Sepolia or Solana devnet wallet, and get a
+verified proof back on the chain you started from. You use the hosted Bosphor
+testnet, so there is nothing to deploy: install the SDK, fund a wallet, and call
+one function. Plan on about 15 minutes, most of it waiting for faucets.
 
-:::tip Building an app? Use the SDK.
-This guide deploys the full protocol yourself. To **integrate** Bosphor into an
-app, you do not deploy anything, install `@bosphor/sdk` and call `store()` (free
-tier) or `storePriced()` for the Milestone 4 [origin-chain payment flow](payment-flow.md).
-See the SDK docs at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)** for the EVM and
-Solana guides and the API reference.
-:::
-
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 import AgentPrompt from '@site/src/components/AgentPrompt';
 
-<AgentPrompt prompt="Clone the Bosphor repo with submodules, install dependencies, and set up the environment for Sepolia + Sui testnet. I need Node.js 22, Foundry, and the Sui CLI. Then copy .env.example to .env, help me fill in the required variables (EVM_RPC_URL, EVM_RELAYER_KEY, SUI_DEPLOYER_KEY, SUI_RELAYER_KEY), and run `npm run new-deployment` to deploy everything and verify with the E2E test." />
+<AgentPrompt prompt="Create a new Node.js 22 TypeScript project that stores a file on Walrus through the hosted Bosphor testnet. Install @bosphor/sdk with ethers, @mysten/walrus and @mysten/sui. Build the client with createBosphorClientFromSigner(signer) from @bosphor/sdk/evm (it defaults to the TESTNET preset), print the priced quote with client.priceQuote, then call client.storePriced(bytes, { epochs: 5 }) and print the intentId, blobId, endEpoch, the Sepolia Etherscan link for txHash, and walrusBlobUrl(blobId). Read the Sepolia RPC URL and private key from environment variables." />
 
-## Prerequisites
+:::tip Want to run the whole protocol yourself?
+This page is the integrator path against the hosted testnet. To deploy your own
+contracts and relayer, see [Self-hosting](self-hosting.md).
+:::
 
-### Node.js 22
+## What happens when you store
 
-Bosphor requires Node.js 22 (pinned via `.nvmrc`).
+1. The SDK computes the Walrus blob id of your file locally.
+2. Your wallet submits a small **intent** (the blob id, size, and storage terms) to
+   the Bosphor adapter on your chain, and pays for it.
+3. LayerZero carries the intent to Sui. The relayer receives your file bytes over
+   HTTPS, checks them against the intent, and stores them on Walrus.
+4. A proof travels back over LayerZero and marks the intent as executed on your
+   chain. The SDK resolves with `{ intentId, blobId, endEpoch, txHash }`.
 
-```bash
-nvm install 22
-nvm use 22
-```
+A round trip usually takes one to three minutes.
 
-### Foundry
+## 1. Prerequisites
 
-Install Foundry for EVM contract compilation and deployment:
+- **Node.js 22 or newer.** The SDK is ESM only.
+- **A wallet on the origin chain**, funded as below.
+- **An RPC endpoint.** Public ones work for a first try; use your own (Alchemy,
+  Infura, Helius, QuickNode) for anything more.
 
-```bash
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-```
+Every deployment value (adapter address, program id, endpoint ids, relayer URL)
+ships in the SDK as the `TESTNET` preset, and is listed on the
+[testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet). You do not
+need to copy any of them.
 
-Verify with `forge --version`.
+### Fund your wallet
 
-### Sui CLI
+A paid store costs the storage price plus the LayerZero messaging fee. At current
+testnet prices, storing a 1 KB file for 5 epochs costs roughly:
 
-Install the Sui CLI for Sui contract deployment. See the [Sui install guide](https://docs.sui.io/guides/developer/getting-started/sui-install) for full instructions.
+| Origin | Cost per store (1 KB, 5 epochs) | Get test funds | Suggested balance |
+|--------|---------------------------------|----------------|-------------------|
+| Ethereum Sepolia | about 0.0015 ETH, plus gas | [Alchemy](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) faucet | 0.02 ETH |
+| Solana devnet | about 0.03 SOL, including account rent | [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 1 --url devnet` | 0.5 SOL |
 
-After installation, configure for testnet:
-
-```bash
-sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
-sui client switch --env testnet
-```
-
-### Testnet tokens
-
-- **Sepolia ETH** for EVM gas and LayerZero fees. Use the [Alchemy Sepolia Faucet](https://www.alchemy.com/faucets/ethereum-sepolia) or [Google Cloud Sepolia Faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia).
-- **Sui testnet SUI** for Sui gas:
-
-```bash
-sui client faucet
-```
-
-Or use the [Sui Testnet Faucet](https://faucet.testnet.sui.io/).
-
-## Setup
+Prices follow the live token prices. Ask the relayer for a live quote at any time
+(`sizeBytes` is your file size, `originToken` is `ETH` or `SOL`):
 
 ```bash
-git clone --recurse-submodules https://github.com/riva-labs/bosphor.git
-cd bosphor
-nvm use
-npm install
+curl -s -X POST https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1024,"epochs":5,"originToken":"ETH"}'
 ```
 
-## Environment
+`totalNative` in the response is the storage part in wei (or lamports for `SOL`).
+The SDK adds the live LayerZero fee for you in `priceQuote()`, or without a wallet
+in `quoteEvmStore({ provider, sizeBytes })` / `quoteSolanaStore({ connection, sizeBytes })`.
+
+## 2. Install
+
+<Tabs groupId="origin-chain">
+<TabItem value="evm" label="EVM (Sepolia)">
 
 ```bash
-cp .env.example .env
+npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 ```
 
-Fill in the required variables:
-
-| Variable | Description |
-|----------|-------------|
-| `EVM_RPC_URL` | Sepolia RPC endpoint |
-| `EVM_RELAYER_KEY` | Private key with Sepolia ETH |
-| `SUI_DEPLOYER_KEY` | Sui private key (`suiprivkey1...` format) |
-| `SUI_RELAYER_KEY` | Sui private key for relayer operations |
-
-## One-command deployment
+</TabItem>
+<TabItem value="solana" label="Solana (devnet)">
 
 ```bash
-npm run new-deployment
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui @layerzerolabs/lz-solana-sdk-v2
 ```
 
-This runs the full sequence: deploy Sui contracts, deploy EVM contracts, wire peers, and run the E2E test.
+`@layerzerolabs/lz-solana-sdk-v2` is optional. With it, quotes contain the exact
+LayerZero fee; without it they use a 0.01 SOL cap and set
+`quote.forwardIsUpperBound` (you are then charged less than `totalNative`).
 
-## Individual steps
+</TabItem>
+</Tabs>
 
-If you prefer to run each step separately:
+`ethers` or `@solana/web3.js` signs the intent. `@mysten/walrus` and
+`@mysten/sui` compute the Walrus blob id locally; they make no network call and
+need no SUI or WAL.
+
+## 3. Create a client
+
+<Tabs groupId="origin-chain">
+<TabItem value="evm" label="EVM (Sepolia)">
+
+```ts title="client.ts"
+import { ethers } from "ethers";
+import { createBosphorClientFromSigner } from "@bosphor/sdk/evm";
+
+const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
+
+// Uses the TESTNET preset: adapter address, ABI, relayer URL, LayerZero options.
+export const client = await createBosphorClientFromSigner(signer);
+```
+
+Any `ethers` v6 signer works, including a browser wallet
+(`await new ethers.BrowserProvider(window.ethereum).getSigner()`).
+
+</TabItem>
+<TabItem value="solana" label="Solana (devnet)">
+
+```ts title="client.ts"
+import { readFileSync } from "node:fs";
+import { Connection, Keypair } from "@solana/web3.js";
+import { TESTNET, createBosphorSolanaClientFromKeypair } from "@bosphor/sdk/solana";
+
+const connection = new Connection(process.env.SOLANA_RPC_URL ?? TESTNET.solana.rpcUrl, "confirmed");
+const secret = JSON.parse(readFileSync(process.env.KEYPAIR!, "utf8")) as number[];
+const wallet = Keypair.fromSecretKey(Uint8Array.from(secret));
+
+// Uses the TESTNET preset: program id, LayerZero accounts, fee cap, relayer URL.
+export const client = await createBosphorSolanaClientFromKeypair({ connection, wallet });
+```
+
+</TabItem>
+</Tabs>
+
+## 4. Check the price
+
+`priceQuote()` returns the single amount you will pay and a USD breakdown, so you
+can show it to your user before they sign. To price before a wallet is connected,
+use `quoteEvmStore` or `quoteSolanaStore` (see [Payment flow](payment-flow.md#quote-without-a-wallet)).
+
+```ts
+const bytes = new TextEncoder().encode("hello, permanence");
+
+const encoded = await client.encode(bytes, { epochs: 5 });
+const quote = await client.priceQuote(encoded);
+
+console.log(quote.totalNative);          // wei (EVM) or lamports (Solana)
+console.log(quote.breakdown.totalUsd);   // the same amount in USD
+```
+
+## 5. Store the file
+
+`storePriced()` quotes, pays, submits the intent, uploads the bytes to the relayer,
+and waits for the proof, in one call. Your payment is held in escrow on your chain
+and released to the relayer only when the proof arrives. If no proof arrives
+before the intent deadline, the escrow can be refunded to you. See
+[Payment flow](payment-flow.md).
+
+```ts
+const { intentId, blobId, endEpoch, txHash, quote } = await client.storePriced(bytes, {
+  epochs: 5,
+  // Optional: called after each step (encoded, quoted, submitted, uploaded, proven).
+  onProgress: (e) => console.log(e.step, e.step === "submitted" ? e.txHash : ""),
+});
+
+console.log({ intentId, blobId, endEpoch, txHash, paid: quote.totalNative });
+```
+
+`epochs` is how long Walrus keeps the file (one Walrus testnet epoch is one day).
+`endEpoch` is the Walrus epoch at which the storage expires.
+
+:::note Free stores on testnet
+`client.store(bytes, { epochs })` runs the same flow but pays only the LayerZero
+fee, with no escrow. The hosted testnet relayer accepts these today so you can
+experiment cheaply. Build against `storePriced()`: it is the path paid storage
+uses.
+:::
+
+## 6. Verify the result
+
+Nothing in the result is taken on trust: `storePriced()` only resolves once the
+intent is marked executed on your chain and the committed blob id matches. You can
+check every step yourself.
+
+<Tabs groupId="origin-chain">
+<TabItem value="evm" label="EVM (Sepolia)">
+
+```ts
+import { TESTNET, walrusBlobUrl } from "@bosphor/sdk/evm";
+
+console.log(`${TESTNET.evm.explorerUrl}/tx/${txHash}`);              // Etherscan
+console.log(`${TESTNET.layerZeroScanUrl}/tx/${txHash}`);             // LayerZero Scan
+console.log(walrusBlobUrl(blobId));                                  // Walrus aggregator
+```
+
+- **Etherscan** shows your `submitIntent` transaction and its `IntentSubmitted`
+  event. The adapter's events tab later shows `IntentExecuted` for your intent id.
+- **LayerZero Scan** shows the message to Sui as `Delivered`.
+- **The Walrus aggregator** URL downloads your file.
+
+</TabItem>
+<TabItem value="solana" label="Solana (devnet)">
+
+```ts
+import { TESTNET, walrusBlobUrl } from "@bosphor/sdk/solana";
+
+console.log(`https://solscan.io/tx/${txHash}?cluster=devnet`);       // Solscan
+console.log(`${TESTNET.layerZeroScanUrl}/tx/${txHash}`);             // LayerZero Scan
+console.log(walrusBlobUrl(blobId));                                  // Walrus aggregator
+```
+
+- **Solscan** shows your `submit_intent` transaction.
+- **LayerZero Scan** shows the message to Sui as `Delivered`.
+- **The Walrus aggregator** URL downloads your file.
+
+</TabItem>
+</Tabs>
+
+The relayer's public feed shows each hop of recent intents (submitted, received,
+stored on Walrus, recorded on Sui, proof sent, confirmed):
 
 ```bash
-npm run deploy:sui      # Deploy Sui package + register OApp + set peer
-npm run deploy:evm      # Deploy EVM adapter + set peer
-npm run wire            # Update peers only
-npm run test:e2e        # Run E2E test with LZ polling
+curl -s "https://api.bosphor.xyz/testnet/public/intents?limit=5"
 ```
 
-## What success looks like
+## 7. Handle failures
 
-After a successful deployment, you should see:
+Every failure throws a typed error. The two you are likely to see:
 
-1. **Sui deploy** prints the package ID and OApp object ID.
-2. **EVM deploy** prints the BosphorAdapter contract address.
-3. **Wire** confirms peers are set on both chains.
-4. **E2E test** submits an intent on Sepolia, waits for LayerZero delivery, and confirms the `IntentReceived` event on Sui. Output ends with a success message and transaction hashes for both chains.
+```ts
+import { ProofTimeoutError, RelayerUploadError } from "@bosphor/sdk";
 
-## Verify deployment
+try {
+  await client.storePriced(bytes, { epochs: 5 });
+} catch (e) {
+  if (e instanceof ProofTimeoutError) {
+    // The intent is on-chain; the proof has not landed yet. Poll again:
+    await client.awaitProof(e.intentId);
+  } else if (e instanceof RelayerUploadError) {
+    // The relayer refused the bytes: e.status and e.reason explain why.
+  } else {
+    throw e;
+  }
+}
+```
 
-After deployment, check:
+A timeout is not a loss: the intent and your escrow are on-chain, and the flow
+can be resumed. If no proof ever lands, refund the escrow after the deadline with
+`client.refund(intentId)` then `client.withdraw()` (EVM) or
+`client.refundEscrow(intentId)` (Solana). See [Troubleshooting](troubleshooting.md) and the SDK guide to
+[resuming after a crash](https://sdk.bosphor.xyz/docs/resume).
 
-- **LZ Explorer**: `https://testnet.layerzeroscan.com/tx/<evm_tx_hash>` for message status DELIVERED
-- **SuiScan**: `https://suiscan.xyz/testnet/object/<SUI_LZ_OAPP_ID>` for OApp object
-- **Etherscan**: `https://sepolia.etherscan.io/address/<EVM_ADAPTER_ADDRESS>` for contract verification
+## Next steps
 
-## Troubleshooting
-
-If you run into issues during setup or deployment, see the [Troubleshooting](troubleshooting.md) page for solutions to common problems including setup errors, deployment failures, relayer issues, and cross-chain debugging.
+- [Payment flow](payment-flow.md): how the escrow, release, and refund work.
+- [SDK documentation](https://sdk.bosphor.xyz): the full API for the EVM and Solana
+  clients, including the lower-level steps.
+- [Integration checklist](integration-checklist.md): what to check before you ship.
+- [Contract interface](contract-interface.md): calling the adapter directly from
+  Solidity or without the SDK.
+- [Testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet): every
+  deployed address and endpoint id.

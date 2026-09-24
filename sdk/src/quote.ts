@@ -47,7 +47,23 @@ export interface PricedQuote {
   forwardNative: bigint;
   /** escrowNative + forwardNative = msg.value at submit. */
   totalNative: bigint;
+  /**
+   * True when `forwardNative` is a fee CAP rather than the live LayerZero fee (the
+   * Solana client without a live fee quoter). The amount actually charged is then
+   * lower: `escrowNative` plus the live fee, which is at most `forwardNative`.
+   */
+  forwardIsUpperBound: boolean;
   breakdown: QuoteBreakdown;
+}
+
+/** The file to price: its bytes, or just its size. */
+export type StoreSize = { data: Uint8Array } | { sizeBytes: number };
+
+/** Resolve the byte size from a {@link StoreSize}, rejecting empty or invalid sizes. */
+export function resolveStoreSize(size: StoreSize): number {
+  const n = "data" in size ? size.data.length : size.sizeBytes;
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`size must be a positive integer, got ${n}`);
+  return n;
 }
 
 export interface FetchQuoteOptions {
@@ -107,6 +123,7 @@ export async function fetchQuote(
     escrowNative: BigInt(body.escrowNative),
     forwardNative: BigInt(body.forwardNative),
     totalNative: BigInt(body.totalNative),
+    forwardIsUpperBound: false,
     breakdown: body.breakdown,
   };
 }

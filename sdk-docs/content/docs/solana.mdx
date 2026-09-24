@@ -4,39 +4,92 @@ description: Submit a storage intent from a Solana wallet with the same one-line
 ---
 
 The Solana path has the **same one-line API** as EVM. The only shape difference:
-Solana has no separate `quote` step, so the LayerZero fee is passed as `nativeFee`
-(lamports) on the submit instruction.
+Solana has no separate on-chain `quote` step, so the LayerZero fee is passed as a
+`nativeFee` cap (lamports) on the submit instruction.
 
 ```
-encode -> submit -> upload -> awaitProof
+encode -> priceQuote -> submitPaid -> upload -> awaitProof
 ```
 
 ## One call
 
 ```ts
 import { Connection, Keypair } from '@solana/web3.js';
-import { BosphorSolanaClient, createDefaultSolanaChain } from '@bosphor/sdk/solana';
+import { TESTNET, createBosphorSolanaClientFromKeypair } from '@bosphor/sdk/solana';
 
-const connection = new Connection(RPC_URL, 'confirmed');
+const connection = new Connection(TESTNET.solana.rpcUrl, 'confirmed');
+const client = await createBosphorSolanaClientFromKeypair({ connection, wallet: keypair });
 
-// Anchor-free: no IDL, no Program. `endpointAccounts` are the LayerZero send
-// accounts assembled per the deployed LZ config; `computeUnitLimit` covers the
-// endpoint CPI (the 200k default is not enough).
+const { intentId, blobId, endEpoch, txHash } = await client.storePriced(fileBytes, { epochs: 5 });
+```
+
+The helper fills everything from the `TESTNET` preset: the program id, the
+LayerZero send accounts, the LayerZero options, a `nativeFee` cap of 0.01 SOL
+(the endpoint charges only the live fee), a live LayerZero fee quote for
+`priceQuote()` when the optional peer `@layerzerolabs/lz-solana-sdk-v2` is
+installed (otherwise the quote uses the cap and sets `forwardIsUpperBound`), a 400k compute-unit limit for the
+endpoint call, the Sui endpoint id, and the relayer URL. Override any of them in
+the options. See [Pay for storage](/docs/pay-for-storage) for what `storePriced()`
+charges; the free testnet path is `client.store(bytes, { epochs })`.
+
+## Progress and refunds
+
+`store()` and `storePriced()` accept `onProgress` (steps `encoded`, `quoted`,
+`submitted` with the signature as `txHash`, `uploaded`, `proven`). If no proof
+lands before the deadline, `client.refundEscrow(intentId)` returns the escrow to
+the payer; see [Pay for storage](/docs/pay-for-storage#refund-an-escrow).
+
+## LayerZero send accounts
+
+`submit_intent` calls into the LayerZero endpoint, which needs a fixed list of
+accounts appended to the instruction. The list depends only on the pathway
+(Bosphor on Solana devnet to Sui testnet) and the payer, so the SDK publishes it:
+
+```ts
+import { testnetEndpointAccounts } from '@bosphor/sdk/solana';
+
+const endpointAccounts = testnetEndpointAccounts(keypair.publicKey);
+```
+
+If LayerZero changes the pathway configuration, the snapshot goes stale. Resolve
+the live list on-chain instead (needs the optional peer
+`@layerzerolabs/lz-solana-sdk-v2`) and pass it to the helper:
+
+```ts
+import { resolveEndpointAccounts } from '@bosphor/sdk/solana';
+
+const endpointAccounts = await resolveEndpointAccounts({ connection, payer: keypair.publicKey });
+const client = await createBosphorSolanaClientFromKeypair({ connection, wallet: keypair, endpointAccounts });
+```
+
+## Wire it by hand
+
+The helper is a thin layer over `createDefaultSolanaChain` and `BosphorSolanaClient`:
+
+```ts
+import {
+  BosphorSolanaClient,
+  TESTNET,
+  createDefaultSolanaChain,
+  testnetEndpointAccounts,
+} from '@bosphor/sdk/solana';
+
+// Anchor-free: no IDL, no Program.
 const chain = await createDefaultSolanaChain({
   connection,
-  wallet: payer,
-  endpointAccounts,
-  computeUnitLimit: 400_000,
+  wallet: keypair,
+  programId: TESTNET.solana.programId,
+  endpointAccounts: testnetEndpointAccounts(keypair.publicKey),
+  computeUnitLimit: TESTNET.solana.computeUnitLimit,
 });
 
 const client = new BosphorSolanaClient({
   chain,
-  relayerUrl: 'https://api.bosphor.xyz/testnet',
-  dstEid: 40378, // Sui testnet
-  nativeFee: 20_000_000n, // declared upper bound; only the computed fee is charged
+  relayerUrl: TESTNET.relayerUrl,
+  dstEid: TESTNET.sui.eid,
+  options: TESTNET.solana.lzOptions,
+  nativeFee: TESTNET.solana.nativeFee,
 });
-
-const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
 ```
 
 The canonical intent id is the **same keccak digest** as the EVM and Sui paths. The
@@ -63,4 +116,5 @@ const info = await connection.getAccountInfo(intentPda);
 const { executed, blobId, endEpoch } = readSolanaProof(info!.data);
 ```
 
-A runnable end-to-end script lives at `sdk/examples/store-file.solana.ts`.
+Runnable end-to-end scripts live at `sdk/examples/store-file-priced.solana.ts` and
+`sdk/examples/store-file.solana.ts`.

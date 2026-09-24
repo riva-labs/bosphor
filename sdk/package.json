@@ -1,6 +1,6 @@
 {
   "name": "@bosphor/sdk",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Bosphor SDK: cross-chain storage intents for Walrus",
   "license": "MIT",
   "author": "Riva Labs",
@@ -78,12 +78,16 @@
     "@noble/hashes": "^2.2.0"
   },
   "peerDependencies": {
+    "@layerzerolabs/lz-solana-sdk-v2": "^3.0.168",
     "@mysten/sui": "^2.17.0",
     "@mysten/walrus": "^1.1.7",
     "@solana/web3.js": "^1.98.0",
     "ethers": "^6.17.0"
   },
   "peerDependenciesMeta": {
+    "@layerzerolabs/lz-solana-sdk-v2": {
+      "optional": true
+    },
     "@mysten/sui": {
       "optional": true
     },

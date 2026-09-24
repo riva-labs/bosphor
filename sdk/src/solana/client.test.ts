@@ -401,6 +401,31 @@ test("storePriced() (Solana) surfaces the quote and escrows the bucket at submit
   assert.equal(lastSubmit.escrowAmount, 20000000n);
 });
 
+test("store() and storePriced() (Solana) report each step through onProgress", async () => {
+  const { chain } = makeFakeChain();
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makePricedFetch(),
+  });
+  const plain: string[] = [];
+  await client.store(new Uint8Array([1]), { pollMs: 1, onProgress: (e) => plain.push(e.step) });
+  assert.deepEqual(plain, ["encoded", "submitted", "uploaded", "proven"]);
+
+  const priced: string[] = [];
+  let signature = "";
+  await client.storePriced(new Uint8Array([1]), {
+    pollMs: 1,
+    onProgress: (e) => {
+      priced.push(e.step);
+      if (e.step === "submitted") signature = e.txHash;
+    },
+  });
+  assert.deepEqual(priced, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
+  assert.equal(signature, SIGNATURE);
+});
 
 // --- Integrator app id (X-Bosphor-App) ----------------------------------------
 

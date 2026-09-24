@@ -438,6 +438,124 @@ test("priceQuote() is individually callable and returns the breakdown", async ()
   assert.equal(quote.totalNative, 800000000012345n);
 });
 
+test("storePriced() reports each step through onProgress, in order", async () => {
+  const { adapter, fetch } = makePricedAdapterAndFetch();
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const steps: string[] = [];
+  let submittedTx = "";
+  let quotedAmount = 0n;
+  await client.storePriced(new Uint8Array([1, 2, 3]), {
+    pollMs: 1,
+    onProgress: (e) => {
+      steps.push(e.step);
+      if (e.step === "submitted") submittedTx = e.txHash;
+      if (e.step === "quoted") quotedAmount = e.amount;
+    },
+  });
+  assert.deepEqual(steps, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
+  assert.equal(submittedTx, "0xdeadbeef");
+  assert.equal(quotedAmount, 800000000012345n);
+});
+
+test("store() reports the LZ fee as the quoted amount through onProgress", async () => {
+  const { adapter } = makeFakeAdapter();
+  const { fetch } = makeFetch(200, "{}");
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+  const steps: string[] = [];
+  let amount = 0n;
+  await client.store(new Uint8Array([1]), {
+    pollMs: 1,
+    onProgress: (e) => {
+      steps.push(e.step);
+      if (e.step === "quoted") amount = e.amount;
+    },
+  });
+  assert.deepEqual(steps, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
+  assert.equal(amount, 12345n);
+});
+
+test("getEscrow(), refund(), and withdraw() call the escrow adapter and wait for receipts", async () => {
+  const { adapter } = makeFakeAdapter();
+  const seen: string[] = [];
+  const tx = (hash: string) => ({
+    hash,
+    async wait() {
+      seen.push(`wait:${hash}`);
+      return { logs: [] };
+    },
+  });
+  adapter.getEscrow = async (id) => {
+    seen.push(`getEscrow:${id}`);
+    return { payer: "0xpayer", token: "0x0", amount: 5n, deadline: 9n, status: 3n };
+  };
+  adapter.refund = async (id) => {
+    seen.push(`refund:${id}`);
+    return tx("0xrefund");
+  };
+  adapter.withdraw = async () => {
+    seen.push("withdraw");
+    return tx("0xwithdraw");
+  };
+  const client = new BosphorEvmClient({ adapter, relayerUrl: "https://r", dstEid: 1, computeBlob: stubComputeBlob });
+
+  const escrow = await client.getEscrow(INTENT_ID);
+  assert.deepEqual(escrow, { payer: "0xpayer", token: "0x0", amount: 5n, deadline: 9n, status: 3 });
+  assert.deepEqual(await client.refund(INTENT_ID), { txHash: "0xrefund" });
+  assert.deepEqual(await client.withdraw(), { txHash: "0xwithdraw" });
+  assert.deepEqual(seen, [
+    `getEscrow:${INTENT_ID}`,
+    `refund:${INTENT_ID}`,
+    "wait:0xrefund",
+    "withdraw",
+    "wait:0xwithdraw",
+  ]);
+});
+
+test("refund() fails loudly when the adapter was bound without the escrow ABI", async () => {
+  const { adapter } = makeFakeAdapter();
+  const client = new BosphorEvmClient({ adapter, relayerUrl: "https://r", dstEid: 1, computeBlob: stubComputeBlob });
+  await assert.rejects(client.refund(INTENT_ID), /does not expose refund\(\)/);
+  await assert.rejects(client.withdraw(), /does not expose withdraw\(\)/);
+});
+
+test("fromEthersContract forwards the escrow members when present", async () => {
+  const calls: string[] = [];
+  const contract = {
+    submitIntent: async () => ({ hash: "0x", wait: async () => null }),
+    quote: async () => ({ nativeFee: 0n, lzTokenFee: 0n }),
+    executed: async () => false,
+    committedBlobId: async () => BLOB_ID,
+    getEscrow: async () => ({ payer: "p", token: "t", amount: 1n, deadline: 2n, status: 1n }),
+    refund: async (id: Hex) => {
+      calls.push(`refund:${id}`);
+      return { hash: "0xr", wait: async () => null };
+    },
+    withdraw: async () => {
+      calls.push("withdraw");
+      return { hash: "0xw", wait: async () => null };
+    },
+    interface: { parseLog: () => null },
+    filters: { IntentExecuted: () => ({}) },
+    queryFilter: async () => [],
+  } as unknown as EthersContractLike;
+  const adapter = fromEthersContract(contract);
+  assert.equal((await adapter.getEscrow!(INTENT_ID)).status, 1n);
+  await adapter.refund!(INTENT_ID);
+  await adapter.withdraw!();
+  assert.deepEqual(calls, [`refund:${INTENT_ID}`, "withdraw"]);
+});
 
 // --- Integrator app id (X-Bosphor-App) ----------------------------------------
 

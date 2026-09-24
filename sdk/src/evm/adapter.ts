@@ -10,7 +10,12 @@
  * a minimal structural interface, so `ethers` stays an optional peer dependency.
  */
 
-import type { AdapterContract, EvmContractTransaction, MessagingFee } from "./client.js";
+import type {
+  AdapterContract,
+  EvmContractTransaction,
+  MessagingFee,
+  RawEscrowRecord,
+} from "./client.js";
 import type { Hex } from "../types.js";
 
 /** The minimal structural surface of an `ethers.Contract` bound to BosphorAdapter. */
@@ -46,6 +51,9 @@ export interface EthersContractLike {
     nonce: bigint,
   ): Promise<Hex>;
   nonces?(sender: string): Promise<bigint>;
+  getEscrow?(intentId: Hex): Promise<RawEscrowRecord>;
+  refund?(intentId: Hex): Promise<EvmContractTransaction>;
+  withdraw?(): Promise<EvmContractTransaction>;
   interface: AdapterContract["interface"];
   filters: { IntentExecuted(intentId: Hex): unknown };
   queryFilter(
@@ -71,14 +79,17 @@ export interface FromEthersContractOptions {
  * @example
  * ```ts
  * import { Contract } from "ethers";
- * import { createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
+ * import { ADAPTER_ABI, TESTNET, createBosphorClient, fromEthersContract } from "@bosphor/sdk/evm";
  *
- * const contract = new Contract(adapterAddress, ADAPTER_ABI, signer);
+ * const contract = new Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, signer);
  * const client = createBosphorClient({
  *   adapter: fromEthersContract(contract),
- *   relayerUrl: "https://api.bosphor.xyz/testnet",
- *   dstEid: 40378,
+ *   relayerUrl: TESTNET.relayerUrl,
+ *   dstEid: TESTNET.sui.eid,
+ *   options: TESTNET.evm.lzOptions,
  * });
+ *
+ * // Or, in one call: `await createBosphorClientFromSigner(signer)`.
  * ```
  */
 export function fromEthersContract(
@@ -113,6 +124,15 @@ export function fromEthersContract(
   }
   if (contract.nonces) {
     adapter.nonces = (sender) => contract.nonces!(sender);
+  }
+  if (contract.getEscrow) {
+    adapter.getEscrow = (intentId) => contract.getEscrow!(intentId);
+  }
+  if (contract.refund) {
+    adapter.refund = (intentId) => contract.refund!(intentId);
+  }
+  if (contract.withdraw) {
+    adapter.withdraw = () => contract.withdraw!();
   }
   if (contract.getAddress) {
     adapter.getAddress = () => contract.getAddress!();
