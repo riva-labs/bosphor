@@ -16,6 +16,7 @@ export type {
   SolanaSubmitFields,
   SolanaSubmitResult,
   SolanaIntentState,
+  SolanaEscrowState,
   BosphorSolanaClientOptions,
   SubmitOptions,
 } from "./client.js";

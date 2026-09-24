@@ -187,7 +187,51 @@ export function encodeConfirmExecutionData(
     .finish();
 }
 
+/**
+ * Encodes `refund_escrow` (args: intentId [u8;32]). Permissionless after the
+ * intent deadline; the vault (escrow + rent) is returned to the recorded payer.
+ */
+export function encodeRefundEscrowData(intentId: Hex): Uint8Array {
+  const id = fromHex(intentId.startsWith("0x") ? intentId.slice(2) : intentId);
+  if (id.length !== 32) throw new Error(`intentId must be 32 bytes, got ${id.length}`);
+  return new ByteWriter().bytes(instructionDiscriminator("refund_escrow")).bytes(id).finish();
+}
+
 // --- account decoder ---
+
+/** Decoded `EscrowVault` account (`[b"escrow", intentId]`). */
+export interface EscrowVaultAccount {
+  /** The 32-byte payer pubkey (refunds go here). */
+  payer: Uint8Array;
+  /** The 32-byte relayer beneficiary pubkey. */
+  beneficiary: Uint8Array;
+  /** Escrowed lamports, excluding rent. */
+  amount: bigint;
+  /** Unix seconds after which anyone may refund. */
+  deadline: bigint;
+  /** 0 Pending, 1 Released, 2 Refunded. */
+  status: number;
+  bump: number;
+}
+
+/** Decodes an `EscrowVault` account, verifying its discriminator. */
+export function decodeEscrowVault(data: Uint8Array): EscrowVaultAccount {
+  const expected = accountDiscriminator("EscrowVault");
+  for (let i = 0; i < 8; i++) {
+    if (data[i] !== expected[i]) {
+      throw new Error("account is not an EscrowVault (discriminator mismatch)");
+    }
+  }
+  const r = new ByteReader(data.subarray(8));
+  return {
+    payer: r.take(32).slice(),
+    beneficiary: r.take(32).slice(),
+    amount: r.u64(),
+    deadline: r.u64(),
+    status: r.u8(),
+    bump: r.u8(),
+  };
+}
 
 export interface IntentStateAccount {
   committedBlobId: Hex;

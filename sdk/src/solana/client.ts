@@ -78,6 +78,18 @@ export interface SolanaIntentState {
   endEpoch: bigint;
 }
 
+/** An intent's Solana escrow vault. `status`: 0 Pending, 1 Released, 2 Refunded. */
+export interface SolanaEscrowState {
+  /** The payer's base58 address (refunds go here). */
+  payer: string;
+  /** Escrowed lamports, excluding rent. */
+  amount: bigint;
+  /** Unix seconds after which anyone may refund. */
+  deadline: bigint;
+  /** 0 Pending, 1 Released, 2 Refunded. */
+  status: number;
+}
+
 /**
  * Minimal structural surface of the Solana chain, mirroring the EVM
  * `AdapterContract`. A real backend builds + sends the `submit_intent` instruction
@@ -97,6 +109,13 @@ export interface SolanaChain {
    * exist yet.
    */
   readIntent(intentId: Hex): Promise<SolanaIntentState | null>;
+  /**
+   * Optional: read the per-intent escrow vault (`[b"escrow", intentId]`). Returns
+   * `null` if it does not exist (never opened, or closed by a refund).
+   */
+  readEscrow?(intentId: Hex): Promise<SolanaEscrowState | null>;
+  /** Optional: send `refund_escrow` for the intent and return the tx signature. */
+  refundEscrow?(intentId: Hex): Promise<{ signature: string }>;
 }
 
 export interface BosphorSolanaClientOptions {
@@ -248,6 +267,32 @@ export class BosphorSolanaClient {
       }
       await sleep(pollMs, opts.signal);
     }
+  }
+
+  /**
+   * Read the intent's escrow vault. `status` is 0 Pending, 1 Released,
+   * 2 Refunded. Returns `null` when there is no vault, which includes after a
+   * refund (the refund closes the vault and returns its balance to the payer).
+   */
+  async getEscrow(intentId: Hex): Promise<SolanaEscrowState | null> {
+    if (!this.chain.readEscrow) {
+      throw new Error("the Solana chain backend does not implement readEscrow()");
+    }
+    return this.chain.readEscrow(intentId);
+  }
+
+  /**
+   * Refund an intent's pending escrow to its payer after the deadline, with the
+   * program's `refund_escrow` instruction. Anyone may send it (the sender pays
+   * the tx fee); the escrow and the vault rent always go to the recorded payer.
+   * Fails with the program error before the deadline or if not pending.
+   */
+  async refundEscrow(intentId: Hex): Promise<{ txHash: string }> {
+    if (!this.chain.refundEscrow) {
+      throw new Error("the Solana chain backend does not implement refundEscrow()");
+    }
+    const { signature } = await this.chain.refundEscrow(intentId);
+    return { txHash: signature };
   }
 
   /**

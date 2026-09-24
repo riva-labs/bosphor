@@ -20,8 +20,19 @@ import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import type { Hex } from "../types.js";
 import { deriveIntentId } from "../commitment-codec.js";
 import { decodeIntentState } from "./proof.js";
-import { encodeSubmitIntentData, findIntentSubmittedIntentId } from "./program.js";
-import type { SolanaChain, SolanaIntentState, SolanaSubmitFields, SolanaSubmitResult } from "./client.js";
+import {
+  decodeEscrowVault,
+  encodeRefundEscrowData,
+  encodeSubmitIntentData,
+  findIntentSubmittedIntentId,
+} from "./program.js";
+import type {
+  SolanaChain,
+  SolanaEscrowState,
+  SolanaIntentState,
+  SolanaSubmitFields,
+  SolanaSubmitResult,
+} from "./client.js";
 
 /** The Bosphor Solana adapter program id (see `contracts/solana/programs/bosphor-adapter`). */
 export const BOSPHOR_PROGRAM_ID = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF";
@@ -216,6 +227,37 @@ export async function createDefaultSolanaChain(
       }
 
       return { intentId, signature };
+    },
+
+    async readEscrow(intentId: Hex): Promise<SolanaEscrowState | null> {
+      const info = await connection.getAccountInfo(escrowPda(intentId));
+      if (!info) return null;
+      const v = decodeEscrowVault(new Uint8Array(info.data));
+      return {
+        payer: new PublicKey(v.payer).toBase58(),
+        amount: v.amount,
+        deadline: v.deadline,
+        status: v.status,
+      };
+    },
+
+    async refundEscrow(intentId: Hex): Promise<{ signature: string }> {
+      const info = await connection.getAccountInfo(escrowPda(intentId));
+      if (!info) {
+        throw new Error(`no escrow vault for intent ${intentId} (never opened, or already refunded)`);
+      }
+      const vault = decodeEscrowVault(new Uint8Array(info.data));
+      const ix = new TransactionInstruction({
+        programId,
+        keys: [
+          { pubkey: payerKey, isSigner: true, isWritable: true },
+          { pubkey: new PublicKey(vault.payer), isSigner: false, isWritable: true },
+          { pubkey: escrowPda(intentId), isSigner: false, isWritable: true },
+        ],
+        data: Buffer.from(encodeRefundEscrowData(intentId)),
+      });
+      const signature: string = await sendAndConfirmTransaction(connection, new Transaction().add(ix), [payer]);
+      return { signature };
     },
 
     async readIntent(intentId: Hex): Promise<SolanaIntentState | null> {
