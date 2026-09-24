@@ -52,7 +52,8 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
 | `SOLANA_SRC_EID` | `40168` | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
 | `SOLANA_RELAYER_KEYPAIR` | - | Store-admin keypair (inline JSON secret-key array or a path) that signs the Solana return leg `confirm_execution`. Unset disables the return leg |
-| `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
+| `WALRUS_STORE_EPOCHS` | `5` | Legacy fallback only. Blobs are stored for the intent's committed `storageEpochs`; this default applies only to a commitment recorded without epochs, and the relayer logs each such fallback |
+| `WALRUS_MAX_EPOCHS` | `53` | Largest committed storage duration the relayer stores (Walrus's own max epochs ahead also applies). Larger commitments are dead-lettered before any WAL spend, never shortened, and the escrow refunds on the deadline |
 | `WAL_MIN_BALANCE_MIST` | `500000000` | WAL floor (0.5 WAL); below this the relayer auto-swaps SUI for WAL |
 | `WAL_TOPUP_SUI_MIST` | `1000000000` | SUI to swap per top-up (1 SUI) |
 | `WAL_TOPUP_SUI_RESERVE_MIST` | `1000000000` | SUI kept in reserve for gas, never spent on a swap (1 SUI) |
@@ -236,7 +237,7 @@ The relayer uploads intent payloads to Walrus using the `@mysten/walrus` SDK's `
 
 - All blobs are stored as **deletable**
 - Blob ownership is transferred to the relayer's Sui address
-- Storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs)
+- Storage duration is the intent's committed `storageEpochs`, so the stored end epoch covers what the Sui executor checks (`current_epoch + storageEpochs`). The break-even guard and WAL cost metering use the same duration. `WALRUS_STORE_EPOCHS` (default 5) is used only when a commitment carries no epochs
 - The upload relay is configured via `WALRUS_RELAY_URL` in `SuiService`
 
 ### WAL auto top-up
