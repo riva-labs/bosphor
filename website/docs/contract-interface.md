@@ -214,7 +214,7 @@ import { ethers } from "ethers";
 import { ADAPTER_ABI, TESTNET, defaultComputeBlob, fetchQuote } from "@bosphor/sdk/evm";
 
 const provider = new ethers.JsonRpcProvider(process.env.SEPOLIA_RPC_URL);
-const signer = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
+const signer = new ethers.Wallet(process.env.PRIVATE_KEY!, provider);
 
 const adapter = new ethers.Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, signer);
 
@@ -249,7 +249,8 @@ const receipt = await tx.wait();
 const submitted = receipt.logs
   .map((log) => { try { return adapter.interface.parseLog(log); } catch { return null; } })
   .find((e) => e?.name === "IntentSubmitted");
-const intentId = submitted.args.intentId;
+if (!submitted) throw new Error("IntentSubmitted event not found in the receipt");
+const intentId: string = submitted.args.intentId;
 console.log("Intent submitted:", intentId);
 
 // Upload the bytes out-of-band to the relayer (see Blob ingest).
