@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.6 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): apply the break-even guard to pending Solana escrows
+
 ## 0.13.5 (2026-09-24)
 
 ### Bug Fixes
