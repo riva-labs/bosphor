@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 (2026-09-24)
+
+### Breaking Changes
+
+- fix(sui)!: enforce committed deadline in execute_store
+
 ## 0.5.0 (2026-09-05)
 
 ### Features

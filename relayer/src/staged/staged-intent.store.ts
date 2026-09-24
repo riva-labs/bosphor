@@ -43,7 +43,8 @@ export interface StagedStoreOptions {
  * classification, and the store pipeline live in the processor (later slices).
  *
  *   ingest   -> upsertBytes()   (bytes + blob_id + size)
- *   Sui LZ   -> markReceived()  (received + src_eid + committed_blob_id + deadline)
+ *   Sui LZ   -> markReceived()  (received + src_eid + committed_blob_id + deadline +
+ *                                storage_epochs)
  *   loop     -> drainDue() -> fetchBytes() -> persistUpload()/persistStore()/
  *               markReturned() -> markDone() | reschedule() | markDead()
  *   reaper   -> expireDue() / purgeTerminal()
@@ -110,6 +111,10 @@ export class StagedIntentStore {
     // this table and keeping the injected `now` the single clock source.
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT`);
+    // Additive migration: the committed storage duration from IntentReceived.
+    // Nullable: rows recorded before it existed read as "no epochs" (legacy),
+    // which the store path resolves to WALRUS_STORE_EPOCHS and logs.
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS storage_epochs INTEGER`);
     // Drives the claim/drain query: active rows that are due, oldest first.
     await this.pool.query(
       `CREATE INDEX IF NOT EXISTS ${TABLE}_drain_idx ON ${TABLE} (state, next_attempt_at, created_at)`,
@@ -207,14 +212,15 @@ export class StagedIntentStore {
     await this.pool.query(
       `INSERT INTO ${TABLE}
          (intent_id, received, src_eid, committed_blob_id, deadline, delivery_digest,
-          next_attempt_at, created_at, updated_at)
-       VALUES ($1, true, $2, $3, $4, $6, $5, $5, $5)
+          storage_epochs, next_attempt_at, created_at, updated_at)
+       VALUES ($1, true, $2, $3, $4, $6, $7, $5, $5, $5)
        ON CONFLICT (intent_id) DO UPDATE SET
          received = true,
          src_eid = EXCLUDED.src_eid,
          committed_blob_id = EXCLUDED.committed_blob_id,
          deadline = EXCLUDED.deadline,
          delivery_digest = COALESCE(EXCLUDED.delivery_digest, ${TABLE}.delivery_digest),
+         storage_epochs = COALESCE(EXCLUDED.storage_epochs, ${TABLE}.storage_epochs),
          updated_at = EXCLUDED.updated_at
        WHERE ${TABLE}.state = 'active'`,
       [
@@ -224,6 +230,7 @@ export class StagedIntentStore {
         details.deadline,
         now,
         details.deliveryDigest ?? null,
+        details.storageEpochs ?? null,
       ],
     );
   }
@@ -286,10 +293,11 @@ export class StagedIntentStore {
    *   expired          lease_expires_at < now (the claimant died mid-store;
    *                    takeover, and per-step idempotency makes the resume safe)
    *
-   * Only storable rows (received AND bytes present) are claimed. A row missing
-   * either half cannot be acted on, and an un-received row has no deadline so the
-   * reaper never expires it; claiming those would let a backlog of them fill every
-   * LIMIT batch and starve the storable rows queued behind them.
+   * Only actionable rows are claimed: received AND (bytes present OR already
+   * uploaded). An uploaded row has its bytes freed after execute_store but may
+   * still owe a return-leg retry, so it stays claimable (#434). An un-received
+   * row has no deadline so the reaper never expires it; claiming those would let
+   * a backlog of them fill every LIMIT batch and starve the rows behind them.
    */
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     const { rows } = await this.pool.query(
@@ -299,7 +307,7 @@ export class StagedIntentStore {
           SELECT intent_id
             FROM ${TABLE}
            WHERE state = 'active' AND next_attempt_at <= $1
-             AND received AND bytes IS NOT NULL
+             AND received AND (bytes IS NOT NULL OR walrus_object_id IS NOT NULL)
              AND (claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1)
            ORDER BY created_at
            LIMIT $2
@@ -307,7 +315,7 @@ export class StagedIntentStore {
         )
         RETURNING intent_id, committed_blob_id, size, deadline, src_eid, received,
               delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
-              walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
+              walrus_object_id, walrus_blob_id, end_epoch, storage_epochs, store_digest, returned,
               state, attempts, next_attempt_at, last_error, created_at, updated_at,
               claimed_by, lease_expires_at`,
       [now, limit, this.claimant, this.leaseMs],
@@ -465,7 +473,7 @@ export class StagedIntentStore {
     const { rows } = await this.pool.query(
       `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
               delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
-              walrus_object_id, walrus_blob_id, end_epoch, store_digest, returned,
+              walrus_object_id, walrus_blob_id, end_epoch, storage_epochs, store_digest, returned,
               state, attempts, next_attempt_at, last_error, created_at, updated_at,
               claimed_by, lease_expires_at
          FROM ${TABLE} WHERE intent_id = $1`,
@@ -491,6 +499,7 @@ export class StagedIntentStore {
       walrusObjectId: str(row.walrus_object_id),
       walrusBlobId: str(row.walrus_blob_id),
       endEpoch: num(row.end_epoch),
+      storageEpochs: num(row.storage_epochs),
       storeDigest: str(row.store_digest),
       returned: Boolean(row.returned),
       state: row.state as StagedIntentRow['state'],

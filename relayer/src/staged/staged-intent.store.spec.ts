@@ -164,6 +164,7 @@ class FakePool implements PgQueryable {
       // COALESCE(EXCLUDED.delivery_digest, existing): a later event without a
       // digest never clobbers one already captured.
       existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
+      existing.storage_epochs = (params[6] as number | null) ?? existing.storage_epochs;
       return { rows: [] };
     }
 
@@ -180,6 +181,7 @@ class FakePool implements PgQueryable {
       walrus_object_id: null,
       walrus_blob_id: null,
       end_epoch: null,
+      storage_epochs: null,
       store_digest: null,
       delivery_digest: null,
       bytes_recovery_at: null,
@@ -205,6 +207,7 @@ class FakePool implements PgQueryable {
     base.committed_blob_id = params[2] as string;
     base.deadline = params[3] as number;
     base.delivery_digest = (params[5] as string | null) ?? null;
+    base.storage_epochs = (params[6] as number | null) ?? null;
     this.rows.set(id, base);
     return { rows: [] };
   }
@@ -238,9 +241,9 @@ class FakePool implements PgQueryable {
           (r) =>
             r.state === 'active' &&
             (r.next_attempt_at as number) <= now &&
-            // SQL: received AND bytes IS NOT NULL (only storable rows are claimed)
+            // SQL: received AND (bytes IS NOT NULL OR walrus_object_id IS NOT NULL)
             r.received === true &&
-            r.bytes !== null &&
+            (r.bytes !== null || r.walrus_object_id != null) &&
             // SQL: claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1
             // (a NULL lease_expires_at makes the comparison false, as in SQL).
             (r.claimed_by == null ||
@@ -356,6 +359,21 @@ describe('StagedIntentStore', () => {
     // A backfilled re-observation without a digest must keep the captured one.
     await store.markReceived('0xd', RX);
     expect((await store.get('0xd'))?.deliveryDigest).toBe('0xdeliver');
+  });
+
+  it('persists the committed storage epochs and never clobbers them with a later epochs-less event', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.markReceived('0xe', { ...RX, storageEpochs: 12 });
+    expect((await store.get('0xe'))?.storageEpochs).toBe(12);
+
+    await store.markReceived('0xe', RX);
+    expect((await store.get('0xe'))?.storageEpochs).toBe(12);
+
+    // A legacy row (event recorded without epochs) reads as undefined.
+    await store.markReceived('0xlegacy', RX);
+    expect((await store.get('0xlegacy'))?.storageEpochs).toBeUndefined();
   });
 
   it('claimForByteRecovery selects received-without-bytes past grace, and backs off', async () => {
@@ -492,6 +510,28 @@ describe('StagedIntentStore', () => {
     // Nothing un-actionable was leased either.
     expect((await store.get('0xorphan0'))?.claimedBy ?? null).toBeNull();
     expect((await store.get('0xnobytes'))?.claimedBy ?? null).toBeNull();
+  });
+
+  it('keeps an uploaded row claimable after its bytes are freed (return-leg retry)', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    clock = 1000;
+    await store.upsertBytes('0xstored', { bytes: bytes('s'), blobId: 'b', size: 1 });
+    await store.markReceived('0xstored', RX);
+    await store.persistUpload('0xstored', {
+      walrusObjectId: '0xobj',
+      walrusBlobId: 'wb',
+      endEpoch: 9,
+    });
+    await store.persistStore('0xstored', '0xdigest');
+    await store.freeBytes('0xstored');
+    await store.reschedule('0xstored', 1, 2000, 'return leg failed');
+
+    const due = await store.drainDue(5000, 10);
+    expect(due.map((r) => r.intentId)).toEqual(['0xstored']);
+    expect(due[0].hasBytes).toBe(false);
+    expect(due[0].walrusObjectId).toBe('0xobj');
   });
 
   describe('claim lease (single-writer enforcement)', () => {
