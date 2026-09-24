@@ -1,0 +1,11 @@
+{
+  "//": "Typecheck for the e2e scripts. Run: npx tsc -p scripts/test",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2022"]
+  },
+  "include": ["e2e-priced-solana.ts"]
+}
