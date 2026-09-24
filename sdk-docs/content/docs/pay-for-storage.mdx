@@ -55,10 +55,18 @@ confirming.
 | `escrowNative` | Storage cost: Walrus storage, Sui gas, and the LayerZero return leg, with a buffer and margin. Held in escrow. |
 | `forwardNative` | The LayerZero fee for sending your intent to Sui. Paid directly, not escrowed. |
 | `totalNative` | `escrowNative + forwardNative`: what you pay at submit. |
+| `forwardIsUpperBound` | `true` when `forwardNative` is a fee cap, not the live fee (see below). |
 | `breakdown` | Every component in USD, plus `totalUsd`. |
 
 Amounts are `bigint`s in the chain's smallest unit (wei or lamports). As a guide,
-a 1 KB file for 5 epochs on testnet costs about 0.0013 ETH or 0.03 SOL today.
+a 1 KB file for 5 epochs on testnet costs about 0.0013 ETH or 0.028 SOL today
+(plus about 0.003 SOL of account rent on Solana).
+
+On Solana the LayerZero fee is read with a read-only simulation of the LayerZero
+endpoint, which needs the optional peer `@layerzerolabs/lz-solana-sdk-v2`. Without
+it, `forwardNative` is the preset's fee cap (0.01 SOL) and `forwardIsUpperBound`
+is `true`: the endpoint charges only the live fee, so the actual cost is lower
+than `totalNative`. Install the peer to show users an exact price.
 Most of the cost is the LayerZero return leg, so the price grows slowly with size.
 
 ## Where the money goes
@@ -67,26 +75,81 @@ Most of the cost is the LayerZero return leg, so the price grows slowly with siz
   commitment, the escrow is released to the relayer. The relayer cannot collect
   without a valid proof.
 - **On timeout**: if no proof lands by the intent deadline, anyone can trigger a
-  refund and the escrow goes back to the payer. On EVM, call
-  `refund(intentId)` on the adapter, then `withdraw()` from the payer's wallet.
-  On Solana, the program's `refund_escrow` instruction returns the vault to the payer.
-  The SDK sets the deadline one hour after submit by default; change it with the
-  `deadline` option on `encode`/`storePriced` or `deadlineSeconds` on the client.
-- **Checking an escrow (EVM)**:
+  refund and the escrow goes back to the payer. The SDK sets the deadline one
+  hour after submit by default; change it with the `deadline` option on
+  `encode`/`storePriced` or `deadlineSeconds` on the client.
 
+## Refund an escrow
+
+<Tabs groupId="chain" persist items={['EVM', 'Solana']}>
+
+<Tab value="EVM">
 ```ts
-import { ethers } from 'ethers';
-import { ADAPTER_ABI, EscrowStatus, TESTNET } from '@bosphor/sdk/evm';
+import { EscrowStatus } from '@bosphor/sdk/evm';
 
-const adapter = new ethers.Contract(TESTNET.evm.adapterAddress, ADAPTER_ABI, provider);
-const escrow = await adapter.getEscrow(intentId);
-if (Number(escrow.status) === EscrowStatus.Released) console.log('paid out on proof');
+const escrow = await client.getEscrow(intentId);
+if (escrow.status === EscrowStatus.Pending && BigInt(Math.floor(Date.now() / 1000)) > escrow.deadline) {
+  await client.refund(intentId); // credits the payer
+  await client.withdraw();       // pays it out; call from the payer's wallet
+}
 ```
 
-## Quoting without a client
+The adapter uses pull payments: `refund` credits the payer's balance and
+`withdraw` sends it.
+</Tab>
 
-`fetchQuote` calls the relayer quote endpoint directly, for example on a server
-that shows prices before any wallet is connected:
+<Tab value="Solana">
+```ts
+const escrow = await client.getEscrow(intentId); // status: 0 Pending, 1 Released, 2 Refunded
+if (escrow && escrow.status === 0 && BigInt(Math.floor(Date.now() / 1000)) > escrow.deadline) {
+  await client.refundEscrow(intentId); // closes the vault back to the payer
+}
+```
+
+`refundEscrow` sends the program's `refund_escrow` instruction. It returns the
+escrow and the vault's rent to the recorded payer in one step, after which
+`getEscrow` returns `null`.
+</Tab>
+
+</Tabs>
+
+## Quote without a wallet
+
+Show a price before any wallet is connected. These return the same
+`PricedQuote` as `priceQuote()`, and need only a read-only provider or connection:
+
+<Tabs groupId="chain" persist items={['EVM', 'Solana']}>
+
+<Tab value="EVM">
+```ts
+import { JsonRpcProvider } from 'ethers';
+import { TESTNET, quoteEvmStore } from '@bosphor/sdk/evm';
+
+const quote = await quoteEvmStore({
+  provider: new JsonRpcProvider(TESTNET.evm.rpcUrl),
+  sizeBytes: file.size, // or: data: bytes
+  epochs: 5,
+});
+```
+</Tab>
+
+<Tab value="Solana">
+```ts
+import { Connection } from '@solana/web3.js';
+import { TESTNET, quoteSolanaStore } from '@bosphor/sdk/solana';
+
+const quote = await quoteSolanaStore({
+  connection: new Connection(TESTNET.solana.rpcUrl, 'confirmed'),
+  sizeBytes: file.size, // or: data: bytes
+  epochs: 5,
+});
+```
+</Tab>
+
+</Tabs>
+
+For the storage part alone, `fetchQuote` calls the relayer quote endpoint
+directly:
 
 ```ts
 import { TESTNET, fetchQuote } from '@bosphor/sdk';
@@ -98,8 +161,7 @@ const quote = await fetchQuote(TESTNET.relayerUrl, {
 });
 ```
 
-Without `forwardLzFeeNative` the result covers only the storage (escrow) part;
-the client's `priceQuote()` adds the live LayerZero fee for you.
+Without `forwardLzFeeNative` the result covers only the storage (escrow) part.
 
 ## Free stores on testnet
 
