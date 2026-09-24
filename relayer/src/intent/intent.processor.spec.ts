@@ -390,6 +390,55 @@ describe('IntentProcessor durable queue', () => {
     expect(staged.markDone).toHaveBeenCalledWith('0xintent');
   });
 
+  // #434: bytes are freed after execute_store, so a failed return leg leaves a
+  // byte-less but uploaded row. It must still be claimed and its return retried.
+  it('retries the return leg of a stored row whose bytes were already freed', async () => {
+    const { proc, staged, walrus, sui, suiLz } = build([
+      makeRow({
+        hasBytes: false,
+        walrusObjectId: '0xobj',
+        walrusBlobId: 'wblob',
+        endEpoch: 42,
+        storeDigest: '0xprev',
+        attempts: 1,
+      }),
+    ]);
+    await proc.tick();
+
+    expect(walrus.upload).not.toHaveBeenCalled();
+    expect(sui.executeStore).not.toHaveBeenCalled();
+    expect(suiLz.lzSendProof).toHaveBeenCalled();
+    expect(staged.markReturned).toHaveBeenCalledWith('0xintent');
+    expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
+  it('does not re-run the break-even guard once the WAL is spent', async () => {
+    const breakEven = { check: jest.fn() };
+    const escrowReader = { getEscrow: jest.fn() };
+    const { proc, staged } = build(
+      [
+        makeRow({
+          hasBytes: false,
+          walrusObjectId: '0xobj',
+          walrusBlobId: 'wblob',
+          endEpoch: 42,
+          storeDigest: '0xprev',
+        }),
+      ],
+      { BREAK_EVEN_GUARD_ENABLED: 'true' },
+      {
+        breakEven,
+        reconciler: { recordSkip: jest.fn(), recordCompletion: jest.fn() },
+        escrowReader,
+      },
+    );
+    await proc.tick();
+
+    expect(breakEven.check).not.toHaveBeenCalled();
+    expect(staged.markDead).not.toHaveBeenCalled();
+    expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
   it('dead-letters a blob-id mismatch without spending WAL', async () => {
     const { proc, staged, walrus } = build([makeRow({ blobId: OTHER_B64URL })]);
     await proc.tick();

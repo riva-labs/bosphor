@@ -1,14 +1,22 @@
 # Changelog
 
-## 0.14.0 (2026-09-24)
-
-### Features
-
-- feat(relayer): add NETWORK testnet|mainnet config presets
+## 0.13.4 (2026-09-24)
 
 ### Bug Fixes
 
-- fix(relayer): skip the testnet-only SUI->WAL swap on mainnet
+- fix(relayer): send execute_store without deadline on committed-deadline executor
+
+## 0.13.3 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): keep a stored row claimable so a failed return leg retries
+
+## 0.13.2 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): claim only storable rows so orphans can't starve the queue
 
 ## 0.13.1 (2026-09-24)
 

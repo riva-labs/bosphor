@@ -238,6 +238,9 @@ class FakePool implements PgQueryable {
           (r) =>
             r.state === 'active' &&
             (r.next_attempt_at as number) <= now &&
+            // SQL: received AND (bytes IS NOT NULL OR walrus_object_id IS NOT NULL)
+            r.received === true &&
+            (r.bytes !== null || r.walrus_object_id != null) &&
             // SQL: claimed_by IS NULL OR claimed_by = $3 OR lease_expires_at < $1
             // (a NULL lease_expires_at makes the comparison false, as in SQL).
             (r.claimed_by == null ||
@@ -444,13 +447,17 @@ describe('StagedIntentStore', () => {
 
     clock = 1000;
     await store.upsertBytes('0xold', { bytes: bytes('a'), blobId: 'b1', size: 1 });
+    await store.markReceived('0xold', RX);
     clock = 2000;
     await store.upsertBytes('0xnew', { bytes: bytes('b'), blobId: 'b2', size: 1 });
+    await store.markReceived('0xnew', RX);
     clock = 3000;
     await store.upsertBytes('0xdone', { bytes: bytes('c'), blobId: 'b3', size: 1 });
+    await store.markReceived('0xdone', RX);
     await store.markDone('0xdone'); // terminal -> excluded
     clock = 4000;
     await store.upsertBytes('0xfuture', { bytes: bytes('d'), blobId: 'b4', size: 1 });
+    await store.markReceived('0xfuture', RX);
     await store.reschedule('0xfuture', 1, 9_999_999, 'backoff'); // not due yet
 
     const due = await store.drainDue(5000, 10);
@@ -460,6 +467,53 @@ describe('StagedIntentStore', () => {
 
     const limited = await store.drainDue(5000, 1);
     expect(limited.map((r) => r.intentId)).toEqual(['0xold']);
+  });
+
+  it('never lets a backlog of un-received rows starve a storable one', async () => {
+    // Production 2026-09-24: 413 rows had bytes but never got IntentReceived (their
+    // forward leg was lost), so they have no deadline and never expire. They were
+    // the oldest active rows, filled every LIMIT batch, were skipped by the tick,
+    // and fresh received rows behind them were never claimed.
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    for (let i = 0; i < 3; i++) {
+      clock = 1000 + i;
+      await store.upsertBytes(`0xorphan${i}`, { bytes: bytes('o'), blobId: `o${i}`, size: 1 });
+    }
+    clock = 2000;
+    await store.upsertBytes('0xfresh', { bytes: bytes('f'), blobId: 'f', size: 1 });
+    await store.markReceived('0xfresh', RX);
+    clock = 2500;
+    await store.markReceived('0xnobytes', RX); // received, bytes not delivered yet
+
+    const due = await store.drainDue(5000, 2);
+    expect(due.map((r) => r.intentId)).toEqual(['0xfresh']);
+    // Nothing un-actionable was leased either.
+    expect((await store.get('0xorphan0'))?.claimedBy ?? null).toBeNull();
+    expect((await store.get('0xnobytes'))?.claimedBy ?? null).toBeNull();
+  });
+
+  it('keeps an uploaded row claimable after its bytes are freed (return-leg retry)', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    clock = 1000;
+    await store.upsertBytes('0xstored', { bytes: bytes('s'), blobId: 'b', size: 1 });
+    await store.markReceived('0xstored', RX);
+    await store.persistUpload('0xstored', {
+      walrusObjectId: '0xobj',
+      walrusBlobId: 'wb',
+      endEpoch: 9,
+    });
+    await store.persistStore('0xstored', '0xdigest');
+    await store.freeBytes('0xstored');
+    await store.reschedule('0xstored', 1, 2000, 'return leg failed');
+
+    const due = await store.drainDue(5000, 10);
+    expect(due.map((r) => r.intentId)).toEqual(['0xstored']);
+    expect(due[0].hasBytes).toBe(false);
+    expect(due[0].walrusObjectId).toBe('0xobj');
   });
 
   describe('claim lease (single-writer enforcement)', () => {
@@ -472,8 +526,10 @@ describe('StagedIntentStore', () => {
       const b = new StagedIntentStore(pool, { claimant: 'proc-b', leaseMs: LEASE });
       clock = 1000;
       await a.upsertBytes('0x1', { bytes: bytes('a'), blobId: 'b1', size: 1 });
+      await a.markReceived('0x1', RX);
       clock = 2000;
       await a.upsertBytes('0x2', { bytes: bytes('b'), blobId: 'b2', size: 1 });
+      await a.markReceived('0x2', RX);
       return { pool, a, b };
     };
 

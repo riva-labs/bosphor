@@ -32,6 +32,34 @@ export interface LzInfra {
   treasuryObj: string;
 }
 
+/**
+ * Which `walrus_executor::execute_store` signature the configured package has.
+ *
+ * - `committed-deadline` (#374): the executor reads the committed deadline from
+ *   `LzReceiverConfig`, there is no deadline argument:
+ *   `execute_store(config, lz_config, system, intent_id, blob, clock, original_sender, ctx)`.
+ * - `legacy-deadline-arg` (pre-#374 packages still live until the redeploy): a
+ *   relayer-supplied `deadline_ms: u64` sits between `blob` and `clock`.
+ */
+export type ExecuteStoreAbi = 'committed-deadline' | 'legacy-deadline-arg';
+
+/** Minimal shape of a normalized Move parameter, as returned by getMoveFunction. */
+interface MoveParam {
+  body: { $kind: string };
+}
+
+/**
+ * Classifies an on-chain `execute_store` from its normalized parameter list
+ * (which includes the trailing `&mut TxContext`). Throws on any other shape so
+ * a package mismatch fails loudly instead of sending a malformed PTB.
+ */
+export function executeStoreAbiFromParams(params: MoveParam[]): ExecuteStoreAbi {
+  const kinds = params.map((p) => p.body.$kind);
+  if (kinds.length === 9 && kinds[5] === 'u64') return 'legacy-deadline-arg';
+  if (kinds.length === 8 && !kinds.includes('u64')) return 'committed-deadline';
+  throw new Error(`Unrecognized walrus_executor::execute_store signature: [${kinds.join(', ')}]`);
+}
+
 export interface SuiLzEvent {
   intentId: string;
   /** Sui digest of the delivery tx that emitted IntentReceived (the "Delivered to Sui" proof). */
@@ -64,6 +92,7 @@ export class SuiService implements OnModuleInit {
   private lzOappId!: string;
   private lzMessagingChannel!: string;
   private lzInfra!: LzInfra;
+  private executeStoreAbi?: Promise<ExecuteStoreAbi>;
 
   constructor(private readonly config: ConfigService) {}
 
@@ -183,6 +212,40 @@ export class SuiService implements OnModuleInit {
     return result.Transaction;
   }
 
+  /**
+   * Resolves (once per process) which `execute_store` signature the configured
+   * executor package exposes, so the relayer works against both the live
+   * pre-#374 package and the redeployed one without a config flag. A failed
+   * lookup is not cached, so the next store retries it.
+   */
+  getExecuteStoreAbi(): Promise<ExecuteStoreAbi> {
+    if (!this.executeStoreAbi) {
+      this.executeStoreAbi = this.client.core
+        .getMoveFunction({
+          packageId: this.packageId,
+          moduleName: 'walrus_executor',
+          name: 'execute_store',
+        })
+        .then(({ function: fn }) => {
+          const abi = executeStoreAbiFromParams(fn.parameters);
+          this.logger.log(`execute_store ABI: ${abi}`);
+          return abi;
+        })
+        .catch((err: unknown) => {
+          this.executeStoreAbi = undefined;
+          throw err;
+        });
+    }
+    return this.executeStoreAbi;
+  }
+
+  /**
+   * Records a certified Walrus blob for an intent on Sui.
+   *
+   * `deadlineMs` is only sent to legacy (pre-#374) packages. The redeployed
+   * executor enforces the deadline the user committed on-chain and takes no
+   * deadline argument, so the relayer cannot influence it.
+   */
   async executeStore(
     intentId: string,
     sender: string,
@@ -194,10 +257,10 @@ export class SuiService implements OnModuleInit {
     if (!lzConfigId) {
       throw new Error('execute_store requires SUI_LZ_CONFIG_ID');
     }
+    const abi = await this.getExecuteStoreAbi();
 
-    // M3 (#238) execute_store signature:
-    //   execute_store(config, lz_config, system, intent_id, blob, deadline_ms,
-    //                 clock, original_sender, ctx)
+    // execute_store(config, lz_config, system, intent_id, blob,
+    //               [deadline_ms: legacy only], clock, original_sender, ctx)
     const tx = new Transaction();
     tx.moveCall({
       target: `${this.packageId}::walrus_executor::execute_store`,
@@ -207,7 +270,7 @@ export class SuiService implements OnModuleInit {
         tx.object(walrusSystemId),
         tx.pure.vector('u8', Array.from(ethers.getBytes(intentId))),
         tx.object(blobObjectId),
-        tx.pure.u64(deadlineMs),
+        ...(abi === 'legacy-deadline-arg' ? [tx.pure.u64(deadlineMs)] : []),
         tx.object(SUI_CLOCK_OBJECT),
         tx.pure.address(sender),
       ],
