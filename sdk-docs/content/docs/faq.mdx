@@ -11,6 +11,8 @@ description: The failures you will actually hit with the Bosphor SDK, and how to
     { q: 'Why do I get a blob-id mismatch?', a: 'The blob id the SDK commits to on-chain must equal the id the relayer recomputes from the uploaded bytes. This happens if the bytes uploaded differ from the bytes encoded, or if a custom computeBlob returns a different id. Use the same bytes and the same computeBlob.' },
     { q: 'Can I use the SDK on mainnet?', a: 'There is no mainnet deployment yet. The default computeBlob is fixed to testnet Walrus parameters; for mainnet, inject your own computeBlob and point the client at your own adapter.' },
     { q: 'Which Node version do I need?', a: 'Node.js 22 or newer. The SDK is ESM-only.' },
+    { q: 'How much does a store cost on testnet?', a: 'About 0.0015 ETH on Sepolia or 0.035 SOL on Solana devnet for a 1 KB file stored for 5 epochs, at current prices. Call priceQuote() for a live number.' },
+    { q: 'Why does quote or submitIntent revert on EVM?', a: 'Usually because the LayerZero options are empty (0x) or msg.value is below the LayerZero fee. Build the client with createBosphorClientFromSigner, which passes TESTNET.evm.lzOptions, and pay with storePriced or submitPaid.' },
   ]}
 />
 
@@ -35,8 +37,8 @@ const { blobId, endEpoch } = await client.awaitProof(intentId, { timeoutMs: 300_
 
 ## Does the SDK ever see my private key?
 
-No. The EVM client takes an `ethers` contract bound to a **signer**; the Solana
-client takes a wallet. Signing stays in your wallet, so browser wallet
+No. The EVM client works through an `ethers` **signer**; the Solana client takes
+a wallet. Signing stays in your wallet, so browser wallet
 integrations and sponsored (gasless) transactions work unchanged.
 
 ## Blob-id mismatch
@@ -51,6 +53,26 @@ bytes and the same `computeBlob` end to end.
 Not yet. There is no mainnet deployment. The default `computeBlob` is fixed to
 testnet Walrus parameters; for mainnet, inject your own `computeBlob` and point
 the client at your own adapter. See [Store from EVM](/docs/evm#blob-id-computation).
+
+## How much does a store cost on testnet?
+
+At current prices, a paid store of a 1 KB file for 5 epochs costs about 0.0015 ETH
+on Sepolia, or about 0.035 SOL on Solana devnet including account rent. Prices
+follow live token prices, so ask for a live number with `client.priceQuote(encoded)`.
+See [Pay for storage](/docs/pay-for-storage).
+
+## `quote` or `submitIntent` reverts on EVM
+
+Two common causes:
+
+- **Empty LayerZero options.** The adapter needs executor options; `0x` makes the
+  quote revert. `createBosphorClientFromSigner` passes `TESTNET.evm.lzOptions` for
+  you; if you wire the client by hand, pass `options: TESTNET.evm.lzOptions`.
+- **`InsufficientPayment`.** `msg.value` was below the LayerZero fee. Use
+  `storePriced()` / `submitPaid()`, or `quote()` before `submit()`.
+
+With `ADAPTER_ABI` bound to your contract, `ethers` decodes the adapter's custom
+errors by name.
 
 ## Which Node version do I need?
 
