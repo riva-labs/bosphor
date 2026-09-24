@@ -115,7 +115,7 @@ describe('prom-histogram', () => {
 });
 
 describe('InMemoryStagedStore', () => {
-  it('drains due active rows in FIFO order as snapshots', async () => {
+  it('drains due active rows in seed (FIFO) order as snapshots', async () => {
     const s = new InMemoryStagedStore();
     const base = {
       received: true,
@@ -125,15 +125,17 @@ describe('InMemoryStagedStore', () => {
       attempts: 0,
       updatedAt: 0,
     };
-    s.seed({ ...base, intentId: 'b', nextAttemptAt: 0, createdAt: 2 }, Buffer.from('b'));
-    s.seed({ ...base, intentId: 'a', nextAttemptAt: 0, createdAt: 1 }, Buffer.from('a'));
     s.seed({ ...base, intentId: 'later', nextAttemptAt: 10_000, createdAt: 0 }, Buffer.from('c'));
+    s.seed({ ...base, intentId: 'a', nextAttemptAt: 0, createdAt: 1 }, Buffer.from('a'));
+    s.seed({ ...base, intentId: 'b', nextAttemptAt: 0, createdAt: 2 }, Buffer.from('b'));
     const rows = await s.drainDue(5_000, 10);
     expect(rows.map((r) => r.intentId)).toEqual(['a', 'b']);
     rows[0].state = 'dead';
     expect(s.rows.get('a')!.state).toBe('active');
     await s.markDone('a');
     expect(s.count('done')).toBe(1);
+    expect(s.count('active')).toBe(2);
+    expect((await s.drainDue(5_000, 10)).map((r) => r.intentId)).toEqual(['b']);
     await s.freeBytes('a');
     expect(await s.fetchBytes('a')).toBeUndefined();
   });

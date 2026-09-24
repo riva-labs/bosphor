@@ -29,13 +29,17 @@ export interface IoLatency {
 export class InMemoryStagedStore {
   readonly rows = new Map<string, StagedIntentRow>();
   private readonly bytes = new Map<string, Buffer>();
+  // Active ids in claim order (seed order), so a drain is O(limit) rather than a
+  // full scan + sort: the fake queue must not become the bottleneck it measures.
+  private readonly active = new Set<string>();
 
   constructor(private readonly dbLatencyMs: () => number = () => 0) {}
 
-  /** Seed a row that is received + has bytes (i.e. ready to store). */
+  /** Seed a row that is received + has bytes (ready to store). Claim order = seed order. */
   seed(row: StagedIntentRow, bytes: Buffer): void {
     this.rows.set(row.intentId, { ...row });
     this.bytes.set(row.intentId, bytes);
+    if (row.state === 'active') this.active.add(row.intentId);
   }
 
   private async db(): Promise<void> {
@@ -45,16 +49,20 @@ export class InMemoryStagedStore {
   private patch(intentId: string, p: Partial<StagedIntentRow>): void {
     const row = this.rows.get(intentId);
     if (!row) throw new Error(`unknown staged row ${intentId}`);
-    this.rows.set(intentId, { ...row, ...p, updatedAt: Date.now() });
+    const next = { ...row, ...p, updatedAt: Date.now() };
+    this.rows.set(intentId, next);
+    if (next.state !== 'active') this.active.delete(intentId);
   }
 
   async drainDue(now: number, limit: number): Promise<StagedIntentRow[]> {
     await this.db();
-    return [...this.rows.values()]
-      .filter((r) => r.state === 'active' && r.nextAttemptAt <= now)
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .slice(0, limit)
-      .map((r) => ({ ...r })); // snapshots, like a SELECT
+    const out: StagedIntentRow[] = [];
+    for (const id of this.active) {
+      if (out.length >= limit) break;
+      const r = this.rows.get(id)!;
+      if (r.nextAttemptAt <= now) out.push({ ...r }); // snapshots, like a SELECT
+    }
+    return out;
   }
 
   async fetchBytes(intentId: string): Promise<Buffer | undefined> {
@@ -112,6 +120,7 @@ export class InMemoryStagedStore {
   async rescheduleByteRecovery(): Promise<void> {}
 
   count(state: StagedIntentRow['state']): number {
+    if (state === 'active') return this.active.size;
     let n = 0;
     for (const r of this.rows.values()) if (r.state === state) n++;
     return n;
