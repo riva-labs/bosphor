@@ -22,11 +22,7 @@ function presetNumber(testnet: number, mainnet?: number): Joi.NumberSchema {
     });
 }
 
-function presetString(
-  base: Joi.StringSchema,
-  testnet: string,
-  mainnet?: string,
-): Joi.StringSchema {
+function presetString(base: Joi.StringSchema, testnet: string, mainnet?: string): Joi.StringSchema {
   return base.when('NETWORK', {
     ...isMainnet,
     then: mainnet === undefined ? Joi.required() : Joi.string().default(mainnet),
