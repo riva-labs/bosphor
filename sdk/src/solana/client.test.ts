@@ -190,6 +190,30 @@ test("awaitProof polls until the intent reports executed", async () => {
   assert.ok(calls.read >= 3, `expected at least 3 read polls, got ${calls.read}`);
 });
 
+test("awaitProof (Solana) rides out a transient RPC error from readIntent", async () => {
+  const { chain } = makeFakeChain();
+  const real = chain.readIntent.bind(chain);
+  let failures = 0;
+  chain.readIntent = async (id: Hex) => {
+    if (failures < 2) {
+      failures += 1;
+      throw new Error("429 Too Many Requests");
+    }
+    return real(id);
+  };
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+
+  const { blobId } = await client.awaitProof(INTENT_ID, { timeoutMs: 1000, pollMs: 1 });
+  assert.equal(failures, 2);
+  assert.ok(blobId);
+});
+
 test("awaitProof tolerates a null IntentState PDA until it is created and executed", async () => {
   const { chain, calls } = makeFakeChain({ falsePollsBeforeExecuted: 2, nullUntilExecuted: true });
 

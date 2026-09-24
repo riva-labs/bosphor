@@ -231,6 +231,72 @@ test("awaitProof polls until executed becomes true", async () => {
   assert.ok(calls.executed >= 3, `expected at least 3 executed polls, got ${calls.executed}`);
 });
 
+test("awaitProof rides out a transient RPC reset instead of failing the wait", async () => {
+  const { adapter, calls } = makeFakeAdapter({ falsePollsBeforeExecuted: 1 });
+  const real = adapter.executed.bind(adapter);
+  let failures = 0;
+  adapter.executed = async (id: Hex) => {
+    if (failures < 2) {
+      failures += 1;
+      throw Object.assign(new Error("Client network socket disconnected"), {
+        code: "ECONNRESET",
+      });
+    }
+    return real(id);
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+
+  const { blobId } = await client.awaitProof(INTENT_ID, {
+    timeoutMs: 1000,
+    pollMs: 1,
+  });
+  assert.equal(blobId, BLOB_ID);
+  assert.equal(failures, 2);
+  assert.ok(calls.executed >= 1);
+});
+
+test("awaitProof still fails fast on a non-transient error", async () => {
+  const { adapter } = makeFakeAdapter();
+  adapter.executed = async () => {
+    throw new Error("execution reverted");
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+  await assert.rejects(
+    () => client.awaitProof(INTENT_ID, { timeoutMs: 1000, pollMs: 1 }),
+    /execution reverted/,
+  );
+});
+
+test("awaitProof times out (typed) when transient errors never clear", async () => {
+  const { adapter } = makeFakeAdapter();
+  adapter.executed = async () => {
+    throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+  await assert.rejects(
+    () => client.awaitProof(INTENT_ID, { timeoutMs: 20, pollMs: 5 }),
+    ProofTimeoutError,
+  );
+});
+
 test("encode rejects empty data and derives a deadline", async () => {
   const { adapter } = makeFakeAdapter();
   const { fetch } = makeFetch(200);

@@ -30,6 +30,7 @@ import {
   type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
+  isTransientRpcError,
 } from "../store-flow.js";
 
 /** Minimal structural view of the fields we read off an ethers `TransactionReceipt`. */
@@ -351,7 +352,14 @@ export class BosphorEvmClient {
 
     for (;;) {
       opts.signal?.throwIfAborted();
-      const done = await this.adapter.executed(intentId);
+      let done = false;
+      try {
+        done = await this.adapter.executed(intentId);
+      } catch (err) {
+        // A public RPC dropping one poll must not fail a minutes-long wait; keep
+        // polling until the deadline. Anything else is a real failure.
+        if (!isTransientRpcError(err)) throw err;
+      }
       if (done) {
         const blobId = await this.adapter.committedBlobId(intentId);
         const endEpoch = await this.readEndEpoch(intentId);

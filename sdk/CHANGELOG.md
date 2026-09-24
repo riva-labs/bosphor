@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.1 (2026-09-24)
+
+### Bug Fixes
+
+- fix(sdk): keep polling awaitProof through transient RPC errors
+
 ## 0.13.0 (2026-09-24)
 
 ### Features

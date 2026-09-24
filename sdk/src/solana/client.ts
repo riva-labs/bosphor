@@ -37,6 +37,7 @@ import {
   type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
+  isTransientRpcError,
 } from "../store-flow.js";
 
 /** Commitment fields plus the chosen storage terms, ready to submit on Solana. */
@@ -279,7 +280,14 @@ export class BosphorSolanaClient {
 
     for (;;) {
       opts.signal?.throwIfAborted();
-      const state = await this.chain.readIntent(intentId);
+      let state: SolanaIntentState | null = null;
+      try {
+        state = await this.chain.readIntent(intentId);
+      } catch (err) {
+        // A public RPC dropping one poll must not fail a minutes-long wait; keep
+        // polling until the deadline. Anything else is a real failure.
+        if (!isTransientRpcError(err)) throw err;
+      }
       if (state && state.executed) {
         return { blobId: state.committedBlobId, endEpoch: state.endEpoch };
       }
