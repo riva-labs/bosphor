@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.2 (2026-09-24)
+
+### Bug Fixes
+
+- fix(relayer): send execute_store without deadline on committed-deadline executor
+
 ## 0.13.1 (2026-09-24)
 
 ### Bug Fixes
