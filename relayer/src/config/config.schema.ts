@@ -67,7 +67,13 @@ export const configValidationSchema = Joi.object({
 
   // Walrus
   WALRUS_RELAY_URL: Joi.string().uri().required(),
-  WALRUS_STORE_EPOCHS: Joi.number().default(5),
+  // Legacy fallback ONLY: blobs are stored for the user's committed storageEpochs.
+  // This default applies solely to a commitment with no epochs (pre-upgrade rows).
+  WALRUS_STORE_EPOCHS: Joi.number().integer().min(1).default(5),
+  // Largest committed storage duration the relayer will store. A commitment above
+  // it (or above Walrus's own max_epochs_ahead) is dead-lettered before any WAL
+  // spend so the origin escrow refunds; it is never silently shortened.
+  WALRUS_MAX_EPOCHS: Joi.number().integer().min(1).default(53),
 
   // WAL auto top-up: the relayer refills its own WAL (Walrus storage token) by
   // swapping SUI on the Walrus testnet exchange when the balance runs low.
