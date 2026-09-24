@@ -5,6 +5,9 @@ type Result = 'success' | 'failure';
 type IntentPath = 'evm' | 'sui_lz';
 type ReturnMode = 'proof' | 'fallback';
 
+/** Cap on distinct app_id label values for the ledger counter (cardinality guard). */
+export const MAX_APP_LABELS = 100;
+
 @Injectable()
 export class MetricsService {
   private readonly registry = new Registry();
@@ -170,6 +173,45 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Integrator API requests rejected with 429, by the budget that tripped
+  // (`ip`, `app` = per X-Bosphor-App id, `encode` = POST /blob/encode per IP).
+  private readonly rateLimited = new Counter({
+    name: 'bosphor_relayer_rate_limited_total',
+    help: 'Integrator API requests rejected with 429, by budget scope',
+    labelNames: ['scope'] as const,
+    registers: [this.registry],
+  });
+
+  // Durable ops ledger (storage_op_ledger): one increment per op the ledger
+  // records for the first time (exactly-once per intent, per process). Labelled
+  // by origin chain (LayerZero src EID) and integrator app. The app label is
+  // bounded: 'none' when no X-Bosphor-App was sent, the app id otherwise, and
+  // 'other' once MAX_APP_LABELS distinct ids have been seen, so a flood of ids
+  // can never blow up series cardinality.
+  private readonly ledgerOps = new Counter({
+    name: 'bosphor_relayer_ledger_ops_total',
+    help: 'Completed storage ops recorded in the durable ledger, by origin chain and app',
+    labelNames: ['src_eid', 'app_id'] as const,
+    registers: [this.registry],
+  });
+
+  private readonly ledgerBytes = new Counter({
+    name: 'bosphor_relayer_ledger_bytes_total',
+    help: 'Bytes stored across ops recorded in the durable ledger, by origin chain',
+    labelNames: ['src_eid'] as const,
+    registers: [this.registry],
+  });
+
+  // Ledger writes that failed inline. The op is not lost: the backfill sweep
+  // retries it from staged_intent (which is retained until it is ledgered).
+  private readonly ledgerWriteFailures = new Counter({
+    name: 'bosphor_relayer_ledger_write_failures_total',
+    help: 'Durable ops-ledger writes that failed (retried by the backfill sweep)',
+    registers: [this.registry],
+  });
+
+  private readonly appLabels = new Set<string>();
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
     // Initialize the top-up counter series to 0 for every result so the WAL
@@ -196,6 +238,43 @@ export class MetricsService {
     for (const phase of ['pre_store', 'return'] as const) {
       this.storeDeadLetter.inc({ phase }, 0);
     }
+    for (const scope of ['ip', 'app', 'encode'] as const) {
+      this.rateLimited.inc({ scope }, 0);
+    }
+    this.ledgerWriteFailures.inc(0);
+  }
+
+  /**
+   * Record one op newly written to the durable ledger. Called only when the
+   * ledger insert actually created the row, so a retry never double counts.
+   */
+  recordLedgerOp(
+    srcEid: number | null | undefined,
+    appId: string | null | undefined,
+    bytes: number,
+  ): void {
+    const eid = srcEid == null ? 'unknown' : String(srcEid);
+    this.ledgerOps.inc({ src_eid: eid, app_id: this.appLabel(appId) });
+    if (Number.isFinite(bytes) && bytes > 0) this.ledgerBytes.inc({ src_eid: eid }, bytes);
+  }
+
+  /** Record a failed inline ledger write (the backfill sweep retries it). */
+  recordLedgerWriteFailure(): void {
+    this.ledgerWriteFailures.inc();
+  }
+
+  /** Bounded app label: 'none', the id, or 'other' past MAX_APP_LABELS ids. */
+  private appLabel(appId: string | null | undefined): string {
+    if (!appId) return 'none';
+    if (this.appLabels.has(appId)) return appId;
+    if (this.appLabels.size >= MAX_APP_LABELS) return 'other';
+    this.appLabels.add(appId);
+    return appId;
+  }
+
+  /** Record an integrator API request rejected with 429 by the given budget. */
+  recordRateLimited(scope: 'ip' | 'app' | 'encode'): void {
+    this.rateLimited.inc({ scope });
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {

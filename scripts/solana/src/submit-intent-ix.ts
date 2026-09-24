@@ -24,7 +24,9 @@ import { deriveIntentId, type Commitment } from "../../../sdk/src/commitment-cod
 import {
   BOSPHOR_PROGRAM_ID,
   ENDPOINT_ID,
-  SUI_TESTNET_EID,
+  SUI_EID,
+  PRESET,
+  setting,
   ULN_ID,
   escrowPda,
   intentPda,
@@ -34,9 +36,8 @@ import {
 } from "./config.ts";
 import { withBackoff } from "./rpc.ts";
 
-/** Default Sui receiver peer (the `bosphor_lz` package on Sui testnet). */
-export const DEFAULT_SUI_RECEIVER =
-  "0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5";
+/** Sui OApp package the Solana adapter is peered with (network preset, SUI_RECEIVER overrides). */
+export const DEFAULT_SUI_RECEIVER = setting("SUI_RECEIVER", PRESET.suiOappPackageId);
 
 /** submit_intent CPIs the LZ endpoint `send`, which needs well over the 200k default. */
 export const SUBMIT_INTENT_CU_LIMIT = 400_000;
@@ -85,7 +86,7 @@ export function toBytes32(hex: string): Uint8Array {
  */
 export function buildInitNonceIx(
   sender: PublicKey,
-  dstEid: number = SUI_TESTNET_EID,
+  dstEid: number = SUI_EID,
   suiReceiver: string = DEFAULT_SUI_RECEIVER,
 ): TransactionInstruction {
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
@@ -103,7 +104,7 @@ export async function buildSubmitIntentTx(
   conn: Connection,
   p: SubmitIntentParams,
 ): Promise<BuiltSubmitIntent> {
-  const dstEid = p.dstEid ?? SUI_TESTNET_EID;
+  const dstEid = p.dstEid ?? SUI_EID;
   const suiReceiver = p.suiReceiver ?? DEFAULT_SUI_RECEIVER;
   const store = storePda();
   const peer = peerPda(store, dstEid);

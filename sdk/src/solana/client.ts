@@ -31,6 +31,7 @@ import {
   resolveFetch,
   sleep,
   uploadBlob,
+  validateAppId,
   type AwaitProofOptions,
   type EncodeOptions,
   type ProgressOptions,
@@ -152,6 +153,13 @@ export interface BosphorSolanaClientOptions {
   computeBlob?: ComputeBlob;
   /** `fetch` implementation; defaults to the global `fetch`. */
   fetch?: FetchLike;
+  /**
+   * Optional integrator application id (a short slug such as `"my-dapp"`). Sent
+   * as the `X-Bosphor-App` header on quote and upload requests so the relayer
+   * can attribute usage to your app. Attribution only, not authentication.
+   * Validated at construction: letters, digits, `-`, `_`, `.`, max 64 chars.
+   */
+  appId?: string;
 }
 
 export interface SubmitOptions {
@@ -181,6 +189,7 @@ export class BosphorSolanaClient {
   private readonly deadlineSeconds: number;
   private readonly computeBlobFn: ComputeBlob;
   private readonly fetchFn: FetchLike;
+  private readonly appId: string | undefined;
 
   constructor(opts: BosphorSolanaClientOptions) {
     if (!opts.chain) throw new Error("BosphorSolanaClient requires a chain backend");
@@ -197,6 +206,7 @@ export class BosphorSolanaClient {
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
     this.computeBlobFn = opts.computeBlob ?? createDefaultComputeBlob(opts.network ?? "testnet");
     this.fetchFn = resolveFetch(opts.fetch);
+    this.appId = validateAppId(opts.appId);
   }
 
   /**
@@ -250,7 +260,7 @@ export class BosphorSolanaClient {
     data: Uint8Array,
     opts: { signal?: AbortSignal | undefined } = {},
   ): Promise<void> {
-    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal);
+    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal, this.appId);
   }
 
   /**
@@ -364,7 +374,11 @@ export class BosphorSolanaClient {
         originToken: "SOL",
         forwardLzFeeNative: live ?? this.nativeFee,
       },
-      { fetch: this.fetchFn, ...(opts.signal ? { signal: opts.signal } : {}) },
+      {
+        fetch: this.fetchFn,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+        ...(this.appId ? { appId: this.appId } : {}),
+      },
     );
     return { ...quote, forwardIsUpperBound: live === null };
   }

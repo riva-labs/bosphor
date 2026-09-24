@@ -3,6 +3,7 @@ import {
   ConflictException,
   Controller,
   GoneException,
+  Headers,
   HttpException,
   HttpStatus,
   Logger,
@@ -16,6 +17,17 @@ import {
 } from '@nestjs/common';
 import { IntentIngest } from './intent-ingest.service';
 import { IngestRejectReason } from './intent-ingest.types';
+import { APP_ID_HEADER, parseAppId } from '../api/app-id';
+
+/** Nest reads headers lower-cased. */
+const APP_ID_HEADER_KEY = APP_ID_HEADER.toLowerCase();
+
+/** Validate the optional X-Bosphor-App header or throw a 400. */
+function appIdOrThrow(raw: string | undefined): string | null {
+  const parsed = parseAppId(raw);
+  if (!parsed.ok) throw new BadRequestException(parsed.message);
+  return parsed.appId;
+}
 
 /** Seconds a backpressured client should wait before retrying the upload. */
 const BACKPRESSURE_RETRY_AFTER_SECONDS = 5;
@@ -62,7 +74,11 @@ export class IngestController {
    * `:intentId` route so `/blob/encode` is not captured as an intent id.
    */
   @Post('encode')
-  async encodeBlob(@Req() req: RawBodyRequest): Promise<{ blobId: string; size: number }> {
+  async encodeBlob(
+    @Req() req: RawBodyRequest,
+    @Headers(APP_ID_HEADER_KEY) rawAppId?: string,
+  ): Promise<{ blobId: string; size: number }> {
+    appIdOrThrow(rawAppId);
     const bytes = req.body;
     if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
       throw new BadRequestException('request body must be the raw blob bytes');
@@ -75,13 +91,16 @@ export class IngestController {
     @Param('intentId') intentId: string,
     @Req() req: RawBodyRequest,
     @Res({ passthrough: true }) res: ResponseLike,
+    @Headers(APP_ID_HEADER_KEY) rawAppId?: string,
   ): Promise<IngestAck> {
+    // Integrator provenance: optional, recorded with the intent (null if absent).
+    const appId = appIdOrThrow(rawAppId);
     const bytes = req.body;
     if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
       throw new BadRequestException('request body must be the raw blob bytes');
     }
 
-    const result = await this.ingest.ingest(intentId, bytes);
+    const result = await this.ingest.ingest(intentId, bytes, appId);
     if (result.ok) {
       return { intentId: result.intentId, blobId: result.blobId, size: result.size };
     }

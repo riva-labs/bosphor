@@ -21,6 +21,8 @@ export type QuoteSolanaStoreOptions = StoreSize & {
   fetch?: FetchLike;
   /** Cancel the relayer call. */
   signal?: AbortSignal;
+  /** Integrator attribution, sent as X-Bosphor-App (see the client `appId` option). */
+  appId?: string;
   /** Inject `@layerzerolabs/lz-solana-sdk-v2`. */
   lzSdk?: object;
   /** Inject the `@solana/web3.js` module. */
@@ -60,9 +62,10 @@ export async function quoteSolanaStore(opts: QuoteSolanaStoreOptions): Promise<P
     live = null;
   }
 
-  const fetchOpts: { fetch?: FetchLike; signal?: AbortSignal } = {};
+  const fetchOpts: { fetch?: FetchLike; signal?: AbortSignal; appId?: string } = {};
   if (opts.fetch) fetchOpts.fetch = opts.fetch;
   if (opts.signal) fetchOpts.signal = opts.signal;
+  if (opts.appId) fetchOpts.appId = opts.appId;
   const quote = await fetchQuote(
     network.relayerUrl,
     {

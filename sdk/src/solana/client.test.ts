@@ -426,3 +426,48 @@ test("store() and storePriced() (Solana) report each step through onProgress", a
   assert.deepEqual(priced, ["encoded", "quoted", "submitted", "uploaded", "proven"]);
   assert.equal(signature, SIGNATURE);
 });
+
+// --- Integrator app id (X-Bosphor-App) ----------------------------------------
+
+test("appId is sent as X-Bosphor-App on the Solana quote and upload", async () => {
+  const { chain } = makeFakeChain();
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return url.endsWith("/quote") ? SOL_QUOTE_BODY : "";
+      },
+    };
+  };
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    appId: "Drive.App_1",
+  });
+
+  await client.storePriced(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+
+  assert.equal(seen.length, 2);
+  for (const r of seen) assert.equal(r.headers["X-Bosphor-App"], "Drive.App_1");
+});
+
+test("a malformed appId fails fast at Solana client construction", () => {
+  const { chain } = makeFakeChain();
+  assert.throws(
+    () =>
+      new BosphorSolanaClient({
+        chain,
+        relayerUrl: "https://relayer.test",
+        dstEid: 40378,
+        computeBlob: stubComputeBlob,
+        appId: "-leading-dash",
+      }),
+    /invalid appId/,
+  );
+});

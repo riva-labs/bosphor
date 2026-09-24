@@ -556,3 +556,75 @@ test("fromEthersContract forwards the escrow members when present", async () => 
   await adapter.withdraw!();
   assert.deepEqual(calls, [`refund:${INTENT_ID}`, "withdraw"]);
 });
+
+// --- Integrator app id (X-Bosphor-App) ----------------------------------------
+
+/** Records the headers of every relayer request, answering /quote with a quote. */
+function makeHeaderRecordingFetch(quoteBody: string): {
+  fetch: FetchLike;
+  seen: { url: string; headers: Record<string, string> }[];
+} {
+  const seen: { url: string; headers: Record<string, string> }[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    seen.push({ url, headers: init.headers });
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return url.endsWith("/quote") ? quoteBody : "";
+      },
+    };
+  };
+  return { fetch, seen };
+}
+
+test("appId is sent as X-Bosphor-App on the quote and the upload", async () => {
+  const { adapter } = makeFakeAdapter();
+  const { fetch, seen } = makeHeaderRecordingFetch(QUOTE_BODY);
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    appId: "my-dapp",
+  });
+
+  await client.storePriced(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+
+  assert.ok(seen.some((r) => r.url.endsWith("/quote")));
+  assert.ok(seen.some((r) => r.url.includes("/blob/")));
+  for (const r of seen) assert.equal(r.headers["X-Bosphor-App"], "my-dapp");
+});
+
+test("without an appId no X-Bosphor-App header is sent", async () => {
+  const { adapter } = makeFakeAdapter();
+  const { fetch, seen } = makeHeaderRecordingFetch(QUOTE_BODY);
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+  });
+
+  await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]!.headers["X-Bosphor-App"], undefined);
+});
+
+test("a malformed appId fails fast at construction", () => {
+  const { adapter } = makeFakeAdapter();
+  assert.throws(
+    () =>
+      new BosphorEvmClient({
+        adapter,
+        relayerUrl: "https://relayer.test",
+        dstEid: 40378,
+        computeBlob: stubComputeBlob,
+        appId: "not a slug!",
+      }),
+    /invalid appId/,
+  );
+});

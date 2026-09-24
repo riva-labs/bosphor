@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   GoneException,
   HttpException,
@@ -39,6 +40,36 @@ describe('IngestController', () => {
     const { ctrl, res } = controllerFor({ ok: true, intentId: INTENT_ID, blobId: 'blob', size: 5 });
     const ack = await ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), res);
     expect(ack).toEqual({ intentId: INTENT_ID, blobId: 'blob', size: 5 });
+  });
+
+  it('forwards a valid X-Bosphor-App id (lower-cased) to ingest', async () => {
+    const ingest = {
+      ingest: jest.fn().mockResolvedValue({ ok: true, intentId: INTENT_ID, blobId: 'b', size: 5 }),
+    };
+    const ctrl = new IngestController(ingest as unknown as IntentIngest);
+    await ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), fakeRes(), 'My-Dapp');
+    expect(ingest.ingest).toHaveBeenCalledWith(INTENT_ID, expect.any(Buffer), 'my-dapp');
+  });
+
+  it('records a missing app id as null', async () => {
+    const ingest = {
+      ingest: jest.fn().mockResolvedValue({ ok: true, intentId: INTENT_ID, blobId: 'b', size: 5 }),
+    };
+    const ctrl = new IngestController(ingest as unknown as IntentIngest);
+    await ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), fakeRes());
+    expect(ingest.ingest).toHaveBeenCalledWith(INTENT_ID, expect.any(Buffer), null);
+  });
+
+  it('rejects a malformed app id with 400 before touching ingest', async () => {
+    const ingest = { ingest: jest.fn() };
+    const ctrl = new IngestController(ingest as unknown as IntentIngest);
+    await expect(
+      ctrl.ingestBlob(INTENT_ID, req(Buffer.from('hello')), fakeRes(), 'bad id!'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(ctrl.encodeBlob(req(Buffer.from('hello')), '<x>')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(ingest.ingest).not.toHaveBeenCalled();
   });
 
   it('maps backpressure to 503 and sets Retry-After', async () => {

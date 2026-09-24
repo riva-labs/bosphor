@@ -35,6 +35,8 @@ export type {
   StoreProgress,
   ProgressOptions,
 } from "./store-flow.js";
+// Integrator attribution header (set via the client `appId` option).
+export { APP_ID_HEADER } from "./store-flow.js";
 
 // Off-chain priced quoting via the relayer (the single pricing source of truth).
 export { fetchQuote } from "./quote.js";

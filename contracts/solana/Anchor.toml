@@ -2,6 +2,9 @@ skip_local_validator = true
 
 [toolchain]
 anchor_version = "0.32.1"
+# Pin the Solana toolchain anchor switches to; unset, anchor 0.32.1 installs its
+# default 2.3.0 whose cargo (1.84) cannot parse edition-2024 deps (zeroize 1.9).
+solana_version = "3.1.10"
 
 [features]
 resolution = true
@@ -11,6 +14,13 @@ skip-lint = false
 bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
 
 [programs.devnet]
+bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
+
+# Mainnet placeholder: assumes the same program keypair (and so the same
+# declare_id!) as devnet. If mainnet uses a fresh program keypair, update this,
+# declare_id! in programs/bosphor-adapter/src/lib.rs and SOLANA_PROGRAM_ID
+# together. Build mainnet with `--features mainnet` (Sui mainnet eid 30378).
+[programs.mainnet]
 bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
 
 [provider]

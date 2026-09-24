@@ -21,6 +21,41 @@ export const DEFAULT_TIMEOUT_MS: number = 5 * 60_000;
 /** Default `awaitProof` poll interval, in milliseconds. */
 export const DEFAULT_POLL_MS = 3_000;
 
+/**
+ * Request header carrying the integrator application id to the relayer. The
+ * relayer records it with every intent so usage by live dApps can be told apart
+ * from scripts and tests. It is attribution only, never authentication.
+ */
+export const APP_ID_HEADER = "X-Bosphor-App";
+
+/**
+ * Accepted app id format: a short slug that starts with a letter or digit, then
+ * letters, digits, `-`, `_` or `.`, at most 64 characters. Mirrors the relayer.
+ */
+export const APP_ID_PATTERN: RegExp = /^[a-z0-9][a-z0-9\-_.]{0,63}$/i;
+
+/**
+ * Validate an optional app id at client construction, so a typo fails fast and
+ * locally instead of as a 400 from the relayer mid-flow. Returns the id
+ * unchanged, or undefined when none was given.
+ */
+export function validateAppId(appId: string | undefined): string | undefined {
+  if (appId === undefined) return undefined;
+  if (!APP_ID_PATTERN.test(appId)) {
+    throw new Error(
+      `invalid appId "${appId}": use a short slug (letters, digits, "-", "_", "."; max 64 chars)`,
+    );
+  }
+  return appId;
+}
+
+/** Relayer request headers: the content type plus the app id when configured. */
+export function relayerHeaders(contentType: string, appId?: string): Record<string, string> {
+  const headers: Record<string, string> = { "content-type": contentType };
+  if (appId) headers[APP_ID_HEADER] = appId;
+  return headers;
+}
+
 export interface EncodeOptions {
   /** Storage duration in Walrus epochs. Defaults to the client default (5). */
   epochs?: number;
@@ -170,7 +205,8 @@ export async function encodeIntent(
 
 /**
  * Upload the raw blob bytes out-of-band to the relayer:
- * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body. Throws a
+ * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body, plus the
+ * `X-Bosphor-App` header when an app id is configured. Throws a
  * {@link RelayerUploadError} carrying the relayer's reason on any non-2xx. Shared
  * by every chain client.
  */
@@ -180,11 +216,12 @@ export async function uploadBlob(
   intentId: Hex,
   data: Uint8Array,
   signal?: AbortSignal,
+  appId?: string,
 ): Promise<void> {
   const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
     method: "POST",
     body: data,
-    headers: { "content-type": "application/octet-stream" },
+    headers: relayerHeaders("application/octet-stream", appId),
     signal,
   });
 

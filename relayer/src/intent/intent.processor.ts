@@ -33,14 +33,12 @@ import { BreakEvenGuardService } from '../settlement/break-even-guard.service';
 import { SettlementReconciler } from '../settlement/settlement-reconciler.service';
 import { EscrowReader, ESCROW_READER } from '../settlement/escrow-reader';
 import { BreakEvenDecision } from '../pricing/break-even-guard';
-
-/**
- * Marker stored in store_digest when execute_store aborts with
- * EIntentAlreadyExecuted (a prior attempt recorded this intent on Sui). It lets
- * a retry skip the re-record without a real digest, and keeps the column
- * non-null so the idempotency guard fires.
- */
-const ALREADY_RECORDED = 'already-recorded';
+// ALREADY_RECORDED: marker stored in store_digest when execute_store aborts with
+// EIntentAlreadyExecuted (a prior attempt recorded this intent on Sui). It lets a
+// retry skip the re-record without a real digest, and keeps the column non-null
+// so the idempotency guard fires. Shared with the ops ledger, which maps it to a
+// null digest.
+import { ALREADY_RECORDED, StorageOpLedger } from '../ledger/storage-op-ledger.service';
 
 /**
  * Drives the durable store queue.
@@ -129,9 +127,14 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     @Inject(SettlementReconciler)
     private readonly reconciler: SettlementReconciler | null = null,
     @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
+    // Durable ops ledger writer. Optional: without it (no DATABASE_URL, tests)
+    // the store pipeline runs unchanged, it just records no KPI evidence.
+    @Optional() @Inject(StorageOpLedger) private readonly ledger: StorageOpLedger | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
-    this.solanaSrcEid = this.config.get<number>('SOLANA_SRC_EID') ?? 40168;
+    // Network-preset values: always set by the config schema (see
+    // config/network-presets.ts), so there is no code-level testnet fallback.
+    this.solanaSrcEid = this.config.getOrThrow<number>('SOLANA_SRC_EID');
     this.storeConcurrency = this.config.get<number>('STORE_CONCURRENCY') ?? 4;
     this.batchSize = this.config.get<number>('STORE_BATCH_SIZE') ?? 20;
     this.backoffBaseMs = this.config.get<number>('STORE_BACKOFF_BASE_MS') ?? 2000;
@@ -147,13 +150,11 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     // Give the client's normal blob delivery a head start before self-healing.
     this.bytesRecoveryGraceMs = this.config.get<number>('BYTES_RECOVERY_GRACE_MS') ?? 45000;
     this.bytesRecoveryBackoffMs = this.config.get<number>('BYTES_RECOVERY_BACKOFF_MS') ?? 60000;
-    // Never-lose-money gate. Off by default; enabled once the escrow contracts are
-    // live and the escrow reader is wired (#395). The return-leg + Sui-gas cost
-    // used for the live break-even recompute mirror the QuoteService estimates.
-    this.breakEvenEnabled = this.config.get<string>('BREAK_EVEN_GUARD_ENABLED', 'false') === 'true';
-    this.guardReturnLzFeeMist = BigInt(
-      this.config.get<string>('QUOTE_RETURN_LZ_FEE_MIST', '1760000000'),
-    );
+    // Never-lose-money gate. Off by default on testnet, on by default on mainnet
+    // (NETWORK preset). The return-leg + Sui-gas cost used for the live
+    // break-even recompute mirror the QuoteService estimates.
+    this.breakEvenEnabled = this.config.getOrThrow<string>('BREAK_EVEN_GUARD_ENABLED') === 'true';
+    this.guardReturnLzFeeMist = BigInt(this.config.getOrThrow<string>('QUOTE_RETURN_LZ_FEE_MIST'));
     this.guardSuiGasMist = BigInt(this.config.get<string>('QUOTE_SUI_GAS_MIST', '30000000'));
   }
 
@@ -617,6 +618,23 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       txHash: storeDigest === ALREADY_RECORDED ? undefined : storeDigest,
     });
 
+    // 3b. The store is complete: record it in the durable ops ledger, exactly
+    // once per intent (idempotent insert + the row's `ledgered` flag, so a
+    // return-leg retry re-running this step is a no-op). Never throws: a ledger
+    // failure is logged + counted and the backfill sweep retries it, so KPI
+    // bookkeeping can never fail or block the store.
+    if (!row.ledgered && this.ledger) {
+      await this.ledger.recordCompletedStore({
+        row,
+        sender,
+        committedBlobId: commitment?.committedBlobId ?? row.committedBlobId,
+        walrusBlobId,
+        walrusObjectId,
+        endEpoch,
+        storeDigest,
+      });
+    }
+
     // 4. Blob is safe on Walrus + recorded on Sui: free the bytes.
     await staged.freeBytes(intentId);
 
@@ -699,7 +717,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Solana-origin return leg. Mirror the EVM path: deliver the execution proof
-   * over a genuine LayerZero send (Sui -> Solana, dstEid = solanaSrcEid = 40168).
+   * over a genuine LayerZero send (Sui -> Solana, dstEid = solanaSrcEid).
    * Our self-operated solana-return worker (scripts/solana) then verifies +
    * commitVerification + runs lz_receive on Solana, which RELEASES the escrow.
    * If the LZ send path is unavailable, fall back to the owner-gated

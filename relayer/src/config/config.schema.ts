@@ -1,23 +1,67 @@
 import * as Joi from 'joi';
+import {
+  MAINNET_PRESET,
+  NETWORKS,
+  TESTNET_PRESET,
+  mainnetConsistencyErrors,
+} from './network-presets';
+
+const isMainnet = { is: 'mainnet' } as const;
+
+/**
+ * A key with a per-network default: testnet falls back to its historical value,
+ * mainnet uses its canonical preset or, when there is none, must be set.
+ */
+function presetNumber(testnet: number, mainnet?: number): Joi.NumberSchema {
+  return Joi.number()
+    .integer()
+    .when('NETWORK', {
+      ...isMainnet,
+      then: mainnet === undefined ? Joi.required() : Joi.number().default(mainnet),
+      otherwise: Joi.number().default(testnet),
+    });
+}
+
+function presetString(base: Joi.StringSchema, testnet: string, mainnet?: string): Joi.StringSchema {
+  return base.when('NETWORK', {
+    ...isMainnet,
+    then: mainnet === undefined ? Joi.required() : Joi.string().default(mainnet),
+    otherwise: Joi.string().default(testnet),
+  });
+}
 
 export const configValidationSchema = Joi.object({
+  // Network preset. testnet keeps every historical default (no behavior change
+  // for a deployment that never sets NETWORK); mainnet has no testnet fallbacks,
+  // so chain-specific values must be set explicitly or startup fails.
+  NETWORK: Joi.string()
+    .valid(...NETWORKS)
+    .default('testnet'),
+
   // EVM
   EVM_RPC_URL: Joi.string().uri().required(),
   // Private key for the EVM relayer wallet (EVM_PRIVATE_KEY)
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
-  EVM_DST_EID: Joi.number().integer().default(40161),
+  // LayerZero EID of the EVM origin chain. Sepolia on testnet; required on
+  // mainnet (the mainnet EVM chain is a deployment choice, not a default).
+  EVM_DST_EID: presetNumber(TESTNET_PRESET.EVM_DST_EID),
   // Chain id of the network behind EVM_RPC_URL. Pinning it lets the provider
   // start with a static network instead of discovering the chain id over the
   // RPC at boot, so a flaky endpoint can never fail startup with an
-  // "initial-network-discovery" timeout. Defaults to Sepolia.
-  EVM_CHAIN_ID: Joi.number().integer().default(11155111),
+  // "initial-network-discovery" timeout. Sepolia on testnet; required on mainnet.
+  EVM_CHAIN_ID: presetNumber(TESTNET_PRESET.EVM_CHAIN_ID),
 
   // Sui
-  // Selects network-specific constants (e.g. the WAL coin type). Defaults to
-  // testnet; set SUI_NETWORK=mainnet on the mainnet deployment.
-  SUI_NETWORK: Joi.string().valid('mainnet', 'testnet').default('testnet'),
-  SUI_GRPC_URL: Joi.string().uri().default('https://sui-testnet.mystenlabs.com'),
+  // Selects network-specific constants (e.g. the WAL coin type). Follows NETWORK
+  // by default; a mainnet config must not point it at testnet.
+  SUI_NETWORK: presetString(
+    Joi.string().valid('mainnet', 'testnet'),
+    TESTNET_PRESET.SUI_NETWORK,
+    MAINNET_PRESET.SUI_NETWORK,
+  ),
+  // Sui fullnode gRPC endpoint. Public testnet node on testnet; required on mainnet.
+  SUI_GRPC_URL: presetString(Joi.string().uri(), TESTNET_PRESET.SUI_GRPC_URL),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
@@ -59,8 +103,9 @@ export const configValidationSchema = Joi.object({
   // the blob to this address, defaulting to the relayer's own Sui address.
   SOLANA_SUI_RECIPIENT: Joi.string().optional().allow(''),
   // Origin endpoint id that identifies a Solana-origin intent, so its return
-  // proof is confirmed on Solana rather than EVM. Solana devnet EID by default.
-  SOLANA_SRC_EID: Joi.number().integer().default(40168),
+  // proof is confirmed on Solana rather than EVM. Solana devnet EID on testnet,
+  // the canonical Solana mainnet EID (30168) on mainnet.
+  SOLANA_SRC_EID: presetNumber(TESTNET_PRESET.SOLANA_SRC_EID, MAINNET_PRESET.SOLANA_SRC_EID),
   // Store-admin keypair (inline JSON secret-key array or a path to one) used to
   // sign the Solana return leg confirm_execution. Unset disables the return leg.
   SOLANA_RELAYER_KEYPAIR: Joi.string().optional().allow(''),
@@ -88,8 +133,32 @@ export const configValidationSchema = Joi.object({
     .uri({ scheme: ['postgres', 'postgresql'] })
     .optional()
     .allow(''),
-  // Origin allowed to read the public API (CORS). The deployed dashboard.
+  // Origin allowed to read the public API (CORS). The deployed dashboard. Always
+  // kept in the allowlist when CORS_ORIGINS is an explicit list.
   DASHBOARD_ORIGIN: Joi.string().uri().default('https://status.bosphor.xyz'),
+  // Integrator API CORS allowlist (comma-separated origins). `*` opens POST /blob,
+  // POST /blob/encode and POST /quote to browser dApps on any origin (default).
+  CORS_ORIGINS: Joi.string().default('*'),
+  // Integrator API rate limits (in-memory fixed window). Apply to POST /blob/:id,
+  // POST /blob/encode and POST /quote; over the budget the relayer answers 429.
+  RATE_LIMIT_ENABLED: Joi.boolean().default(true),
+  RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000), // 1 min
+  RATE_LIMIT_PER_IP: Joi.number().integer().min(1).default(120),
+  // Per X-Bosphor-App id, across all IPs. 0 = off (default): app ids are
+  // self-declared, so anyone could exhaust another app's budget. Enable only
+  // once app ids are authenticated.
+  RATE_LIMIT_PER_APP: Joi.number().integer().min(0).default(0),
+  // Comma-separated secrets for trusted server-side callers (e.g. a dApp backend
+  // whose users all share its egress IP). A request carrying one in
+  // X-Bosphor-Key skips the rate limits. Empty = no bypass.
+  RATE_LIMIT_BYPASS_KEYS: Joi.string().allow('').default(''),
+  // Tighter per-IP budget for the CPU-heavy POST /blob/encode.
+  RATE_LIMIT_ENCODE_PER_IP: Joi.number().integer().min(1).default(30),
+  // Derive the client IP from CF-Connecting-IP / X-Forwarded-For. Enable ONLY when
+  // the relayer is reachable solely through a proxy that sets them (Cloudflare
+  // tunnel + nginx); otherwise every client shares the proxy's IP (off) or could
+  // spoof its IP (on while directly reachable).
+  TRUST_PROXY: Joi.boolean().default(false),
 
   // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
   // error reporting is disabled (the relayer runs unchanged).
@@ -139,8 +208,40 @@ export const configValidationSchema = Joi.object({
   // resumes idempotently on next boot (no re-upload / re-record).
   SHUTDOWN_DRAIN_MS: Joi.number().integer().default(30000), // 30 s
 
+  // Pricing + never-lose-money gate.
+  // Sui -> origin return-leg LayerZero fee estimate (MIST) used by the quote and
+  // the break-even recompute. The testnet default is testnet-calibrated; on
+  // mainnet it must be measured and set explicitly.
+  QUOTE_RETURN_LZ_FEE_MIST: presetString(
+    Joi.string().pattern(/^\d+$/),
+    TESTNET_PRESET.QUOTE_RETURN_LZ_FEE_MIST,
+  ),
+  // Break-even guard ('true' enables). Off on testnet, on by default on mainnet.
+  BREAK_EVEN_GUARD_ENABLED: presetString(
+    Joi.string(),
+    TESTNET_PRESET.BREAK_EVEN_GUARD_ENABLED,
+    MAINNET_PRESET.BREAK_EVEN_GUARD_ENABLED,
+  ),
+
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
+  // Internal Prometheus scrape port. /metrics is NOT served on PORT (it exposes
+  // wallet balances); keep this port off the public tunnel / reverse proxy.
+  METRICS_PORT: Joi.number().integer().min(1).max(65535).default(9464),
+  METRICS_HOST: Joi.string().default('0.0.0.0'),
+  // Optional bearer token required on scrapes (defence in depth).
+  METRICS_TOKEN: Joi.string().optional().allow(''),
   LOG_LEVEL: Joi.string().default('info'),
+}).custom((value: Record<string, unknown>, helpers) => {
+  // Cross-field sanity for mainnet: catch a testnet value copied into a mainnet
+  // config (a 40xxx EID, the Sepolia chain id, a testnet RPC URL) at startup.
+  if (value.NETWORK !== 'mainnet') return value;
+  const errors = mainnetConsistencyErrors(value);
+  if (errors.length > 0) {
+    return helpers.message({
+      custom: `NETWORK=mainnet config is inconsistent: ${errors.join('; ')}`,
+    });
+  }
+  return value;
 });

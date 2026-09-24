@@ -78,6 +78,10 @@ export async function runLocalProfile(
     STORE_CONCURRENCY: concurrency,
     // The claim query must be allowed to return at least `concurrency` rows.
     STORE_BATCH_SIZE: Math.max(20, concurrency),
+    // Values the config schema always supplies (the processor reads them with
+    // getOrThrow). The guard is off: loadgen measures the store path itself.
+    BREAK_EVEN_GUARD_ENABLED: 'false',
+    QUOTE_RETURN_LZ_FEE_MIST: '1760000000',
   });
 
   const now = Date.now();
@@ -103,6 +107,7 @@ export async function runLocalProfile(
       storageEpochs: 5,
       blobId: COMMITTED_B64URL,
       returned: false,
+      ledgered: false,
       state: 'active',
       attempts: 0,
       nextAttemptAt: 0,

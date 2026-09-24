@@ -21,6 +21,8 @@ interface QuoteStoreCommon {
   fetch?: FetchLike;
   /** Cancel the relayer call. */
   signal?: AbortSignal;
+  /** Integrator attribution, sent as X-Bosphor-App (see the client `appId` option). */
+  appId?: string;
 }
 
 export type QuoteEvmStoreOptions = StoreSize &
@@ -83,9 +85,10 @@ export async function quoteEvmStore(opts: QuoteEvmStoreOptions): Promise<PricedQ
     network.evm.lzOptions,
   );
 
-  const fetchOpts: { fetch?: FetchLike; signal?: AbortSignal } = {};
+  const fetchOpts: { fetch?: FetchLike; signal?: AbortSignal; appId?: string } = {};
   if (opts.fetch) fetchOpts.fetch = opts.fetch;
   if (opts.signal) fetchOpts.signal = opts.signal;
+  if (opts.appId) fetchOpts.appId = opts.appId;
   return fetchQuote(
     network.relayerUrl,
     { sizeBytes: size, epochs, originToken: "ETH", forwardLzFeeNative: fee.nativeFee },

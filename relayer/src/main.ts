@@ -1,35 +1,43 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-
-// express ships with @nestjs/platform-express but has no bundled types here.
-// Only express.raw() is needed (the raw-body parser for the ingest route), so
-// require it with a minimal local signature instead of pulling in @types/express.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const express: { raw(opts: unknown): unknown } = require('express');
+import { configureHttp } from './api/http-setup';
+import { MetricsService } from './metrics/metrics.service';
+import { startMetricsServer } from './metrics/metrics-server';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const config = app.get(ConfigService);
+  const metrics = app.get(MetricsService);
 
-  // The public API is read-only; allow the dashboard origin to read it.
-  const dashboardOrigin = process.env.DASHBOARD_ORIGIN ?? 'https://status.bosphor.xyz';
-  app.enableCors({ origin: dashboardOrigin, methods: ['GET'] });
+  // CORS, integrator rate limits and the /blob raw-body parser (see http-setup).
+  const { cors, trustProxy } = configureHttp(app, config, metrics);
 
-  // The out-of-band ingest endpoint (POST /blob/:intentId) accepts the raw blob
-  // bytes as the request body, shaped like the Walrus publisher's PUT /v1/blobs.
-  // Scope express.raw() to /blob so Nest's default JSON parser is bypassed there
-  // and the controller receives req.body as a Buffer. The cap is generous; the
-  // exact MAX_INGEST_BLOB_BYTES enforcement lives in IntentIngest so the reason
-  // ("oversized") is a typed 413 rather than a parser-level error.
-  const rawBodyLimit = Number(process.env.MAX_INGEST_BLOB_BYTES ?? 10_485_760) + 1024;
-  app.use('/blob', express.raw({ type: () => true, limit: rawBodyLimit }));
+  const port = Number(config.get<number>('PORT') ?? process.env.PORT ?? 3000);
+  const metricsPort = config.get<number>('METRICS_PORT') ?? 9464;
+  if (metricsPort === port) {
+    // Serving metrics on the public port would leak wallet balances; refuse.
+    throw new Error(`METRICS_PORT (${metricsPort}) must differ from the public PORT (${port})`);
+  }
 
-  const port = process.env.PORT ?? 3000;
   await app.listen(port);
   const logger = new Logger('Bootstrap');
   logger.log(`Bosphor Relayer listening on port ${port}`);
-  logger.log(`Public API CORS origin: ${dashboardOrigin}`);
+  logger.log(`API CORS origins: ${cors.origin === '*' ? '*' : cors.origin.join(', ')}`);
+  logger.log(
+    `Rate limits: ${trustProxy ? 'client IP from proxy headers' : 'client IP from socket'}`,
+  );
+
+  // /metrics lives on its own internal port, never on the public API.
+  const metricsHost = config.get<string>('METRICS_HOST') ?? '0.0.0.0';
+  await startMetricsServer(metrics, {
+    port: metricsPort,
+    host: metricsHost,
+    token: config.get<string>('METRICS_TOKEN') || undefined,
+  });
+  logger.log(`Prometheus metrics on ${metricsHost}:${metricsPort}/metrics (internal)`);
 }
 
 bootstrap();

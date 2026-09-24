@@ -79,7 +79,7 @@ contract change to remove.
 - Bosphor operates its own LayerZero DVN for the cross-chain path, so verification no longer depends on a single third-party DVN. Mainnet deployments may use different DVN configurations.
 - Walrus testnet blob availability and durability guarantees differ from mainnet.
 - Sui testnet may have different epoch durations and gas pricing than mainnet.
-- The `EVM_DST_EID` config default targets Sepolia testnet (EID 40161). Mainnet requires changing this to the appropriate chain EID.
+- The relayer's testnet preset targets Sepolia (EID 40161). With `NETWORK=mainnet` there is no default EVM chain: `EVM_DST_EID` and `EVM_CHAIN_ID` must be set for the chosen chain, or the relayer does not start. See [Relayer](relayer.md#network-presets).
 
 ## Related
 

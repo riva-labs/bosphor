@@ -1,4 +1,5 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Headers, Post } from '@nestjs/common';
+import { APP_ID_HEADER, parseAppId } from '../api/app-id';
 import { OriginToken } from './quote-engine';
 import { QuoteService } from './quote.service';
 
@@ -20,7 +21,15 @@ export class QuoteController {
   constructor(private readonly quote: QuoteService) {}
 
   @Post()
-  async getQuote(@Body() dto: QuoteRequestDto): Promise<Record<string, unknown>> {
+  async getQuote(
+    @Body() dto: QuoteRequestDto,
+    @Headers(APP_ID_HEADER.toLowerCase()) rawAppId?: string,
+  ): Promise<Record<string, unknown>> {
+    // The optional integrator id is validated here (a malformed one is a 400) and
+    // used by the rate limiter for per-app budgets. A quote has no intent yet, so
+    // provenance is recorded on ingest, where the intent id is known.
+    const app = parseAppId(rawAppId);
+    if (!app.ok) throw new BadRequestException(app.message);
     const q = await this.quote.quote({
       sizeBytes: dto.sizeBytes,
       epochs: dto.epochs,

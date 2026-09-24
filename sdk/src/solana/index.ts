@@ -33,6 +33,8 @@ export type {
   StoreProgress,
   ProgressOptions,
 } from "../store-flow.js";
+// Integrator attribution header (set via the client `appId` option).
+export { APP_ID_HEADER } from "../store-flow.js";
 
 export {
   decodeIntentState,
