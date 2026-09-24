@@ -1,14 +1,16 @@
 # Changelog
 
-## 0.14.0 (2026-09-24)
-
-### Features
-
-- feat(relayer): add NETWORK testnet|mainnet config presets
+## 0.13.5 (2026-09-24)
 
 ### Bug Fixes
 
-- fix(relayer): skip the testnet-only SUI->WAL swap on mainnet
+- fix(relayer): address committed-epochs review (legacy rows, zero epochs, retry pricing)
+- fix(relayer): reject quotes for epochs above the storable max
+- fix(relayer): resolve committed epochs before spend and price the guard on them
+- fix(relayer): store blobs for the committed epochs, capped by WALRUS_MAX_EPOCHS
+- fix(relayer): persist committed storage epochs from IntentReceived
+- fix(relayer): add committed storage-epochs resolution policy
+- fix(relayer): claim only storable rows so orphans can't starve the queue
 
 ## 0.13.4 (2026-09-24)
 

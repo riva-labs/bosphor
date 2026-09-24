@@ -58,7 +58,7 @@ describe('WalrusService', () => {
         },
       });
 
-      const result = await service.upload(Buffer.from('test-data'));
+      const result = await service.upload(Buffer.from('test-data'), 5);
 
       expect(result).toEqual({
         blobId: 'blob123',
@@ -88,8 +88,8 @@ describe('WalrusService', () => {
         blobObject: { id: '0xcost', storage: { end_epoch: 90 } },
       });
 
-      // 1 MiB blob at the default 5 epochs -> 67 storage units.
-      const result = await service.upload(Buffer.alloc(1024 * 1024));
+      // 1 MiB blob stored for 5 epochs -> 67 storage units.
+      const result = await service.upload(Buffer.alloc(1024 * 1024), 5);
 
       // storage 67*100000*5 + write 67*20000 = 33_500_000 + 1_340_000
       expect(result.walCostMist).toBe(34_840_000n);
@@ -104,7 +104,7 @@ describe('WalrusService', () => {
         blobObject: { id: '0xnocost', storage: { end_epoch: 91 } },
       });
 
-      const result = await service.upload(Buffer.from('data'));
+      const result = await service.upload(Buffer.from('data'), 5);
 
       expect(result.walCostMist).toBeUndefined();
     });
@@ -118,7 +118,7 @@ describe('WalrusService', () => {
         blobObject: { id: '0xfresh', storage: { end_epoch: 80 } },
       });
 
-      await service.upload(Buffer.from('fresh-data'));
+      await service.upload(Buffer.from('fresh-data'), 5);
 
       expect(mockReset).toHaveBeenCalledTimes(1);
       const resetOrder = mockReset.mock.invocationCallOrder[0];
@@ -126,7 +126,7 @@ describe('WalrusService', () => {
       expect(resetOrder).toBeLessThan(writeOrder);
     });
 
-    it('should use configured WALRUS_STORE_EPOCHS for upload', async () => {
+    it('stores for the committed epochs, not WALRUS_STORE_EPOCHS', async () => {
       mockConfigGet.mockImplementation((key: string, defaultValue?: any) =>
         key === 'WALRUS_STORE_EPOCHS' ? 10 : defaultValue,
       );
@@ -137,9 +137,32 @@ describe('WalrusService', () => {
         blobObject: { id: '0xobj', storage: { end_epoch: 60 } },
       });
 
-      await service.upload(Buffer.from('data'));
+      await service.upload(Buffer.from('data'), 17);
 
-      expect(mockWriteBlob).toHaveBeenCalledWith(expect.objectContaining({ epochs: 10 }));
+      expect(mockWriteBlob).toHaveBeenCalledWith(
+        expect.objectContaining({ epochs: 17, deletable: true }),
+      );
+    });
+
+    it('meters the WAL cost for the same epochs the store used', async () => {
+      mockSystemState.mockResolvedValue({
+        committee: { n_shards: 1000 },
+        storage_price_per_unit_size: '100000',
+        write_price_per_unit_size: '20000',
+      });
+      mockWriteBlob.mockResolvedValue({
+        blobId: 'blobCost',
+        blobObject: { id: '0xcost', storage: { end_epoch: 90 } },
+      });
+
+      // 1 MiB -> 67 units: storage 67*100000*12 + write 67*20000.
+      const result = await service.upload(Buffer.alloc(1024 * 1024), 12);
+      expect(result.walCostMist).toBe(80_400_000n + 1_340_000n);
+    });
+
+    it('rejects a non-positive epochs value before any write', async () => {
+      await expect(service.upload(Buffer.from('data'), 0)).rejects.toThrow('Invalid Walrus');
+      expect(mockWriteBlob).not.toHaveBeenCalled();
     });
 
     it('should reset the SDK cache and retry once on the stale-cache balance::split abort', async () => {
@@ -154,7 +177,7 @@ describe('WalrusService', () => {
           blobObject: { id: '0xobjRetry', storage: { end_epoch: 70 } },
         });
 
-      const result = await service.upload(Buffer.from('retry-data'));
+      const result = await service.upload(Buffer.from('retry-data'), 5);
 
       // One proactive reset before the first write + one on the retry.
       expect(mockReset).toHaveBeenCalledTimes(2);
@@ -182,7 +205,7 @@ describe('WalrusService', () => {
           blobObject: { id: '0xobjDz', storage: { end_epoch: 75 } },
         });
 
-      const result = await service.upload(Buffer.from('dz-data'));
+      const result = await service.upload(Buffer.from('dz-data'), 5);
 
       expect(mockReset).toHaveBeenCalledTimes(2);
       expect(mockWriteBlob).toHaveBeenCalledTimes(2);
@@ -200,7 +223,7 @@ describe('WalrusService', () => {
       // proactive reset still runs before the one attempt.
       mockWriteBlob.mockRejectedValue(new Error('socket hang up'));
 
-      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow('socket hang up');
+      await expect(service.upload(Buffer.from('fail-data'), 5)).rejects.toThrow('socket hang up');
       expect(mockReset).toHaveBeenCalledTimes(1);
       expect(mockWriteBlob).toHaveBeenCalledTimes(1);
     });
@@ -212,10 +235,56 @@ describe('WalrusService', () => {
         new Error('MoveAbort in 4th command, abort code: 2, in 0x2::balance::split'),
       );
 
-      await expect(service.upload(Buffer.from('fail-data'))).rejects.toThrow('balance::split');
+      await expect(service.upload(Buffer.from('fail-data'), 5)).rejects.toThrow('balance::split');
       // One proactive reset + one on the retry.
       expect(mockReset).toHaveBeenCalledTimes(2);
       expect(mockWriteBlob).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('resolveStoreEpochs', () => {
+    const withMaxAhead = (length: number) =>
+      mockSystemState.mockResolvedValue({ future_accounting: { length } });
+
+    it('uses the committed epochs when within both caps', async () => {
+      withMaxAhead(53);
+      await expect(service.resolveStoreEpochs(20)).resolves.toEqual({
+        ok: true,
+        epochs: 20,
+        source: 'committed',
+      });
+    });
+
+    it('rejects above WALRUS_MAX_EPOCHS without reading Walrus state', async () => {
+      mockConfigGet.mockImplementation((key: string, defaultValue?: any) =>
+        key === 'WALRUS_MAX_EPOCHS' ? 10 : defaultValue,
+      );
+      service.onModuleInit();
+
+      const r = await service.resolveStoreEpochs(11);
+      expect(r.ok).toBe(false);
+      expect(mockSystemState).not.toHaveBeenCalled();
+    });
+
+    it("rejects above Walrus's own max_epochs_ahead", async () => {
+      withMaxAhead(8);
+      const r = await service.resolveStoreEpochs(9);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toContain('max storable 8');
+    });
+
+    it('falls back to WALRUS_STORE_EPOCHS only for a commitment with no epochs', async () => {
+      withMaxAhead(53);
+      await expect(service.resolveStoreEpochs(undefined)).resolves.toEqual({
+        ok: true,
+        epochs: 5,
+        source: 'legacy_default',
+      });
+    });
+
+    it('fails loud when the Walrus cap cannot be read', async () => {
+      // default mock: systemState rejects
+      await expect(service.resolveStoreEpochs(5)).rejects.toThrow('no system state');
     });
   });
 });

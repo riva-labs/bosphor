@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { WALRUS_MIN_EPOCHS } from '../walrus/store-epochs';
 import { ConfigService } from '@nestjs/config';
 import { WalrusService } from '../walrus/walrus.service';
 import { PRICE_ORACLE } from './pricing.tokens';
@@ -8,7 +9,10 @@ import { OriginToken, Quote, QuoteConfig, QuoteEngine } from './quote-engine';
 export interface QuoteRequest {
   /** Blob size in bytes. */
   sizeBytes: number;
-  /** Storage epochs (defaults to WALRUS_STORE_EPOCHS). */
+  /**
+   * Storage epochs the intent will commit. The relayer stores for exactly this
+   * duration, so the quote is priced on it. Defaults to WALRUS_STORE_EPOCHS.
+   */
   epochs?: number;
   /** Origin chain native token. */
   originToken: OriginToken;
@@ -46,8 +50,22 @@ export class QuoteService {
   }
 
   async quote(req: QuoteRequest): Promise<Quote> {
+    // Refuse to quote a duration the relayer will not store: such an intent would
+    // be dead-lettered before any spend and only refund on its deadline.
+    const max = this.walrus.maxStoreEpochs;
+    if (
+      req.epochs !== undefined &&
+      (!Number.isInteger(req.epochs) || req.epochs < 0 || req.epochs > max)
+    ) {
+      throw new BadRequestException(
+        `epochs must be an integer between 0 and ${max} (got ${req.epochs})`,
+      );
+    }
+    // A committed 0 is valid on-chain and stored for the Walrus minimum of one
+    // epoch, so price it as one (same rule as the store path).
+    const epochs = req.epochs === undefined ? undefined : Math.max(req.epochs, WALRUS_MIN_EPOCHS);
     const prices = await this.oracle.getPrices();
-    const walCostFrost = await this.walrus.estimateWalCostFrost(req.sizeBytes, req.epochs);
+    const walCostFrost = await this.walrus.estimateWalCostFrost(req.sizeBytes, epochs);
 
     // Return-leg fee and Sui gas are estimated here for the quote; the break-even
     // guard (#390) recomputes them at execution time against live values before

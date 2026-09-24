@@ -39,7 +39,7 @@ Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. S
 ## Walrus storage
 
 - All blobs are stored as deletable. The relayer configures this at upload time. The protocol does not currently support permanent (non-deletable) storage.
-- Blob storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs). There is no per-intent storage duration customization.
+- Blob storage duration is the per-intent `storageEpochs` the user commits (SDK default: 5 epochs). The relayer stores for exactly that duration, up to `WALRUS_MAX_EPOCHS` (default 53) and Walrus's own maximum epochs ahead. An intent committing more than the cap is not stored: the relayer declines it before spending anything and the escrow refunds on the deadline. Quote such durations first; `POST /quote` rejects them with HTTP 400.
 - If Walrus storage nodes or the upload relay are unavailable, the SDK handles retries internally. Persistent outages block intent fulfillment.
 
 ## Object version conflicts on Sui

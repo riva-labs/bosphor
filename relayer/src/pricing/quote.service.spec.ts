@@ -25,7 +25,10 @@ describe('QuoteService', () => {
       providers: [
         QuoteService,
         { provide: PRICE_ORACLE, useValue: { getPrices: mockGetPrices } },
-        { provide: WalrusService, useValue: { estimateWalCostFrost: mockEstimateWal } },
+        {
+          provide: WalrusService,
+          useValue: { estimateWalCostFrost: mockEstimateWal, maxStoreEpochs: 53 },
+        },
         {
           provide: ConfigService,
           useValue: {
@@ -63,6 +66,26 @@ describe('QuoteService', () => {
     expect(q.breakdown.escrowUsd).toBeCloseTo(2.0531062, 4);
     expect(q.forwardNative).toBe(1_251_000_000_000_000n);
     expect(q.escrowNative).toBeGreaterThan(0n);
+  });
+
+  it('prices the WAL cost on the requested committed epochs', async () => {
+    await service.quote({ sizeBytes: 1024, epochs: 30, originToken: 'ETH' });
+    expect(mockEstimateWal).toHaveBeenCalledWith(1024, 30);
+  });
+
+  it('rejects epochs the relayer will not store (above WALRUS_MAX_EPOCHS)', async () => {
+    await expect(
+      service.quote({ sizeBytes: 1024, epochs: 54, originToken: 'ETH' }),
+    ).rejects.toThrow(/between 0 and 53/);
+    await expect(
+      service.quote({ sizeBytes: 1024, epochs: -1, originToken: 'ETH' }),
+    ).rejects.toThrow(/between 0 and 53/);
+    expect(mockEstimateWal).not.toHaveBeenCalled();
+  });
+
+  it('prices a committed 0 as the one epoch the store path buys', async () => {
+    await service.quote({ sizeBytes: 1024, epochs: 0, originToken: 'ETH' });
+    expect(mockEstimateWal).toHaveBeenCalledWith(1024, 1);
   });
 
   it('propagates an oracle failure (no fabricated quote)', async () => {
