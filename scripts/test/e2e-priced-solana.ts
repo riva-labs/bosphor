@@ -33,13 +33,15 @@
  *
  * Required env (in BOSPHOR_ENV_FILE): RELAYER_URL, SOLANA_RPC_URL (devnet),
  *   SOLANA_KEYPAIR (funded devnet payer; defaults to ~/.config/solana/bosphor-devnet.json)
- * Optional: NATIVE_FEE (lamports, default 3000000), WALRUS_STORE_EPOCHS (5),
+ * Optional: NATIVE_FEE (LayerZero fee cap in lamports, default 10000000; the live fee is quoted), WALRUS_STORE_EPOCHS (5),
  *   PROOF_TIMEOUT_MIN (30), REFUND_DEADLINE_S (90), SKIP_PHASE_A=1, SKIP_PHASE_B=1
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "dotenv";
 import { BosphorSolanaClient } from "../../sdk/src/solana/client.ts";
+import { quoteSolanaLzFee } from "../../sdk/src/solana/lz-fee.ts";
+import { lzSdk, web3 } from "../solana/src/lz-sdk.ts";
 import { defaultComputeBlob } from "../../sdk/src/blob.ts";
 import { connection, payer, SUI_EID } from "../solana/src/config.ts";
 import { assertDevnet, base58, createHttpSolanaChain } from "../solana/src/http-chain.ts";
@@ -73,7 +75,7 @@ type Hex = `0x${string}`;
 
 // From the file itself: a RELAYER_URL already exported in the shell must not win.
 const RELAYER_URL = fileEnv.RELAYER_URL!;
-const NATIVE_FEE = BigInt(process.env.NATIVE_FEE ?? "3000000");
+const NATIVE_FEE = BigInt(process.env.NATIVE_FEE ?? "10000000");
 const STORAGE_EPOCHS = Number(process.env.WALRUS_STORE_EPOCHS) || 5;
 const PROOF_TIMEOUT_MS = (Number(process.env.PROOF_TIMEOUT_MIN) || 30) * 60_000;
 const REFUND_DEADLINE_S = Number(process.env.REFUND_DEADLINE_S) || 90;
@@ -86,6 +88,9 @@ const bosphor = new BosphorSolanaClient({
   relayerUrl: RELAYER_URL,
   dstEid: SUI_EID,
   nativeFee: NATIVE_FEE,
+  // The live LayerZero fee moves (about 5.9M lamports on devnet today); a fixed
+  // value under it reverts in the ULN with InsufficientFee.
+  quoteLzFee: () => quoteSolanaLzFee({ connection: conn, lzSdk, web3 }),
   defaultEpochs: STORAGE_EPOCHS,
   computeBlob: defaultComputeBlob,
 });
