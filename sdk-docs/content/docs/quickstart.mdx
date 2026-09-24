@@ -30,7 +30,7 @@ At current testnet prices, a paid store of a 1 KB file for 5 epochs costs about:
 | Origin | Cost per store | Faucet | Suggested balance |
 |--------|----------------|--------|-------------------|
 | Ethereum Sepolia | ~0.0015 ETH plus gas | [Alchemy](https://www.alchemy.com/faucets/ethereum-sepolia), [Google Cloud](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) | 0.02 ETH |
-| Solana devnet | ~0.035 SOL incl. account rent | [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 1 --url devnet` | 0.5 SOL |
+| Solana devnet | ~0.03 SOL incl. account rent | [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 1 --url devnet` | 0.5 SOL |
 
 The price follows live token prices. Check it any time:
 
@@ -52,8 +52,11 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 
 <Tab value="Solana">
 ```bash
-npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui @layerzerolabs/lz-solana-sdk-v2
 ```
+
+`@layerzerolabs/lz-solana-sdk-v2` is optional; with it, quotes include the exact
+live LayerZero fee instead of a fee cap.
 </Tab>
 
 </Tabs>
@@ -116,11 +119,16 @@ console.log(quote.totalNative);        // wei (EVM) or lamports (Solana)
 console.log(quote.breakdown.totalUsd); // the same amount in USD
 ```
 
+No wallet yet? `quoteEvmStore` / `quoteSolanaStore` return the same quote from a
+read-only provider or connection. See [Pay for storage](/docs/pay-for-storage#quote-without-a-wallet).
+
 ## 4. Store in one call
 
 ```ts
 const { intentId, blobId, endEpoch, txHash, quote: paid } = await client.storePriced(fileBytes, {
   epochs: 5,
+  // Optional: fires after each step, e.g. to show the tx link right after signing.
+  onProgress: (e) => console.log(e.step, e.step === 'submitted' ? e.txHash : ''),
 });
 
 console.log({ intentId, blobId, endEpoch, txHash, paid: paid.totalNative });
