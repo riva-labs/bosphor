@@ -172,6 +172,8 @@ describe('SuiService.executeStore', () => {
     );
     // config, lz_config, system, intent_id, blob, clock, original_sender
     expect(sentArgs()).toHaveLength(7);
+    // Slot 5 is the Clock, not a relayer-supplied u64.
+    expect((sentArgs()[5] as { type?: string }).type).not.toBe('pure');
   });
 
   it('still passes deadline_ms to a legacy package', async () => {
@@ -179,6 +181,9 @@ describe('SuiService.executeStore', () => {
     await service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 123_000n);
     // ... blob, deadline_ms, clock, original_sender
     expect(sentArgs()).toHaveLength(8);
+    // deadline_ms sits right after the blob, before the Clock.
+    expect((sentArgs()[5] as { type?: string }).type).toBe('pure');
+    expect((sentArgs()[6] as { type?: string }).type).not.toBe('pure');
   });
 
   it('resolves the ABI once and reuses it', async () => {
