@@ -78,11 +78,48 @@ const { intentId, blobId, endEpoch, quote: used } = await client.storePriced(
 );
 ```
 
+`storePriced()` also takes an `onProgress` callback, called after each step
+(`encoded`, `quoted`, `submitted` with the tx hash, `uploaded`, `proven`).
+
 The lower-level steps, `priceQuote`, `submitPaid`, `upload`, `awaitProof`, are all
 individually callable. On Solana, `nativeFee` (the LayerZero fee cap passed with
 `submit_intent`) is set from the preset, and the escrow is deposited into the
 intent's vault account. See the SDK examples `store-file-priced.evm.ts` and
 `store-file-priced.solana.ts`.
+
+### Quote without a wallet
+
+To show a price before a wallet is connected, use the read-only helpers. They
+return the same quote as `priceQuote()`:
+
+```ts
+import { JsonRpcProvider } from "ethers";
+import { TESTNET, quoteEvmStore } from "@bosphor/sdk/evm";
+
+const quote = await quoteEvmStore({ provider: new JsonRpcProvider(TESTNET.evm.rpcUrl), sizeBytes: 1024 });
+// Solana: quoteSolanaStore({ connection, sizeBytes: 1024 }) from "@bosphor/sdk/solana"
+```
+
+On Solana the live LayerZero fee is read by simulating the LayerZero endpoint,
+which needs the optional package `@layerzerolabs/lz-solana-sdk-v2`. Without it the
+quote uses a 0.01 SOL fee cap and sets `forwardIsUpperBound: true`; the endpoint
+charges only the live fee, so you pay less than `totalNative`.
+
+### Refund an escrow
+
+If no proof lands before the deadline (one hour after submit by default), anyone
+can refund the escrow to the payer:
+
+```ts
+// EVM (pull payment): refund credits the payer, withdraw pays it out.
+await client.refund(intentId);
+await client.withdraw(); // from the payer's wallet
+
+// Solana: closes the escrow vault back to the payer in one step.
+await solanaClient.refundEscrow(intentId);
+```
+
+`client.getEscrow(intentId)` reads the escrow's amount, deadline, and status.
 
 ## The quote endpoint
 
