@@ -13,6 +13,13 @@ bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
 [programs.devnet]
 bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
 
+# Mainnet placeholder: assumes the same program keypair (and so the same
+# declare_id!) as devnet. If mainnet uses a fresh program keypair, update this,
+# declare_id! in programs/bosphor-adapter/src/lib.rs and SOLANA_PROGRAM_ID
+# together. Build mainnet with `--features mainnet` (Sui mainnet eid 30378).
+[programs.mainnet]
+bosphor_adapter = "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
