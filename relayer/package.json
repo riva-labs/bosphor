@@ -21,6 +21,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.config.ts",
     "bench": "tsx scripts/benchmark.ts",
     "sim:cost-curve": "tsx scripts/cost-curve.ts",
+    "kpi": "tsx scripts/kpi.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",
