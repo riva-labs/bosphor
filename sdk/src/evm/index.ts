@@ -20,6 +20,8 @@ export type {
   AdapterContract,
   BosphorEvmClientOptions,
   MessagingFee,
+  EscrowRecord,
+  RawEscrowRecord,
   EvmLog,
   EvmContractTransaction,
   EvmTransactionReceipt,
