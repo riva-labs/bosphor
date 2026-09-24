@@ -13,6 +13,7 @@ import { EvmService } from '../chain/evm/evm.service';
 import { SuiService, SuiLzEvent } from '../chain/sui/sui.service';
 import { SuiCheckpointService } from '../chain/sui/sui-checkpoint.service';
 import { SuiLzService } from '../chain/sui/sui-lz.service';
+import { WALRUS_MIN_EPOCHS } from '../walrus/store-epochs';
 import { SolanaService } from '../chain/solana/solana.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { WalTopUpService } from '../walrus/wal-topup.service';
@@ -233,6 +234,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
         committedBlobId: u256ToHex(event.committedBlobId),
         deadline: Number(event.deadline) * 1000, // seconds -> ms
         deliveryDigest: event.deliveryDigest || undefined,
+        storageEpochs: event.storageEpochs,
       });
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
       // The row may now be ready (bytes already ingested): drain without waiting
@@ -271,7 +273,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       for (const row of rows) {
         if (ready.length >= this.storeConcurrency) break;
         if (this.inProcess.has(row.intentId)) continue;
-        if (!row.received || !row.hasBytes) continue;
+        // Needs its bytes to upload; an already uploaded row (bytes freed after
+        // execute_store) only resumes the remaining steps, e.g. a return retry.
+        if (!row.received || (!row.hasBytes && !row.walrusObjectId)) continue;
         // Past-deadline rows are left for the reaper to expire.
         if (row.deadline != null && now >= row.deadline) continue;
         // original_sender for execute_store comes from the EVM/Solana commitment
@@ -464,12 +468,62 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    // 1a. Storage duration: store for the epochs the user COMMITTED (and paid for),
+    // never a global setting. execute_store aborts unless the blob covers
+    // current_epoch + committed epochs, so a shorter store would burn WAL for
+    // nothing. A commitment above the cap (WALRUS_MAX_EPOCHS or Walrus's own
+    // max_epochs_ahead) is dead-lettered here, BEFORE any spend, and never
+    // silently shortened: the origin escrow refunds on its deadline, the same
+    // outcome as a break-even skip. Only a legacy row with no committed epochs
+    // falls back to WALRUS_STORE_EPOCHS, and that fallback is logged.
+    // Skipped once the blob is uploaded (retry): the duration is already fixed.
+    // Rows recorded before the epochs were persisted carry NULL: read the
+    // committed value from Sui so they are not stored for the legacy default
+    // (which execute_store would reject after the WAL was spent). Only when that
+    // read fails does the logged legacy fallback apply.
+    let committedEpochs = row.storageEpochs;
+    if (committedEpochs == null) {
+      try {
+        committedEpochs = await io.time(() => this.suiLz.readCommittedStorageEpochs(intentId));
+      } catch (err) {
+        this.logger.warn(`[${intentId}] Could not read committed storage epochs from Sui: ${err}`);
+      }
+    }
+    // Resolved on every attempt (also a retry after upload), so the guard below
+    // prices the same duration the store bought.
+    let storeEpochs: number;
+    {
+      const resolution = await io.time(() => this.walrus.resolveStoreEpochs(committedEpochs));
+      if (!resolution.ok && row.walrusObjectId) {
+        // Already uploaded on an earlier attempt: the duration is fixed on-chain,
+        // so a cap that moved since must not dead-letter it. Price what was bought.
+        storeEpochs = Math.max(committedEpochs ?? 0, WALRUS_MIN_EPOCHS);
+      } else if (!resolution.ok) {
+        await staged.markDead(intentId, `storage epochs rejected: ${resolution.reason}`);
+        this.reconciler?.recordSkip(intentId, resolution.reason);
+        this.logger.warn(
+          `[${intentId}] Not stored (no WAL spent, escrow refunds on deadline): ${resolution.reason}`,
+        );
+        return;
+      } else {
+        if (resolution.source === 'legacy_default') {
+          this.logger.warn(
+            `[${intentId}] Commitment carries no storage epochs (legacy); ` +
+              `falling back to WALRUS_STORE_EPOCHS=${resolution.epochs}`,
+          );
+        }
+        storeEpochs = resolution.epochs;
+      }
+    }
+
     // 1b. Never-lose-money gate: BEFORE any WAL spend, recompute the actual cost at
     // live prices and only proceed if the on-chain escrow covers cost + margin.
     // Skipping spends nothing; the user is refunded on-chain by the escrow deadline.
     // Inert unless enabled AND the escrow reader returns terms for this intent.
     let guardDecision: BreakEvenDecision | null = null;
-    if (this.breakEvenEnabled && this.breakEven && this.escrowReader) {
+    // Only before the spend: once the blob is uploaded the WAL is sunk, and
+    // skipping now would forfeit the escrow release for work already paid for.
+    if (this.breakEvenEnabled && this.breakEven && this.escrowReader && !row.walrusObjectId) {
       const escrow = await io.time(() => this.escrowReader!.getEscrow(intentId, row.srcEid));
       if (escrow) {
         guardDecision = await io.time(() =>
@@ -477,6 +531,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
             escrowNative: escrow.escrowNative,
             originToken: escrow.originToken,
             sizeBytes: row.size ?? 0,
+            // Price the SAME duration the store will buy, so the guard's cost
+            // (and the P&L the reconciler books from it) matches the real spend.
+            epochs: storeEpochs,
             returnLzFeeMist: this.guardReturnLzFeeMist,
             suiGasMist: this.guardSuiGasMist,
           }),
@@ -505,7 +562,7 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       if (!bytes) throw new Error('ready row has no bytes to upload');
       this.logger.log(`[${intentId}] Uploading ingested bytes to Walrus...`);
       const uploadStart = Date.now();
-      const info = await io.time(() => this.walrus.upload(bytes));
+      const info = await io.time(() => this.walrus.upload(bytes, storeEpochs));
       this.metrics.observeWalrusUpload((Date.now() - uploadStart) / 1000);
       await staged.persistUpload(intentId, {
         walrusObjectId: info.suiObjectId,

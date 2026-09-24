@@ -292,7 +292,7 @@ adapter.on("IntentExecuted", (intentId, proof) => {
 
 ### Call execute_store
 
-The relayer calls `execute_store` after uploading the bytes to Walrus and receiving a certified blob. The executor reads the committed blob id and storage epochs back from `LzReceiverConfig` and asserts the certified blob matches; relayer arguments are never trusted for the commitment.
+The relayer calls `execute_store` after uploading the bytes to Walrus and receiving a certified blob. The executor reads the committed blob id, storage epochs, and deadline back from `LzReceiverConfig` and asserts the certified blob and the current time match; relayer arguments are never trusted for the commitment.
 
 ```typescript
 import { SuiClient } from "@mysten/sui/client";
@@ -312,7 +312,6 @@ tx.moveCall({
     tx.object(WALRUS_SYSTEM_ID),           // Walrus System object (current epoch)
     tx.pure.vector("u8", intentIdBytes),   // 32-byte intent ID
     tx.object(certifiedBlobId),            // Walrus Blob object
-    tx.pure.u64(deadlineMs),               // deadline in milliseconds
     tx.object("0x6"),                      // Sui Clock object
     tx.pure.address(senderAddress),        // original sender
   ],
@@ -521,7 +520,7 @@ public struct ProofSent has copy, drop {
 
 #### execute_store
 
-Accepts a certified Walrus `Blob` object, verifies certification and deadline, asserts the certified blob matches the committed reference recorded by `lz_receive` (blob id and storage epochs, read from `LzReceiverConfig`, not from relayer arguments), records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
+Accepts a certified Walrus `Blob` object, verifies certification, enforces the committed deadline, asserts the certified blob matches the committed reference recorded by `lz_receive` (deadline, blob id, and storage epochs are all read from `LzReceiverConfig`, not from relayer arguments), records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
 
 ```move
 public fun execute_store(
@@ -530,14 +529,13 @@ public fun execute_store(
     system: &System,
     intent_id: vector<u8>,
     blob: Blob,
-    deadline_ms: u64,
     clock: &Clock,
     original_sender: address,
     ctx: &mut TxContext,
 )
 ```
 
-**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3), `EBlobIdMismatch` (4) if the certified blob id differs from the commitment, `EInsufficientStorageEpochs` (5) if the blob does not cover the committed epochs.
+**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3) if the Sui clock is past the committed deadline (unix seconds), `EBlobIdMismatch` (4) if the certified blob id differs from the commitment, `EInsufficientStorageEpochs` (5) if the blob does not cover the committed epochs, `lz_receiver::EIntentNotReceived` (4) if the intent was never received.
 
 #### StorageExecuted
 

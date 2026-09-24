@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { SuiService, WALRUS_SEND_TIP_MAX_MIST } from './sui.service';
+import { Transaction } from '@mysten/sui/transactions';
+import { SuiService, WALRUS_SEND_TIP_MAX_MIST, executeStoreAbiFromParams } from './sui.service';
 
 // Raw 32-byte Ed25519 secret key in base64 (test only)
 const FAKE_RELAYER_KEY = 'Jts4zLNTiUvi61WLpwYCEC/EArGJQuaYAIalHTkr+U4=';
@@ -101,5 +102,102 @@ describe('SuiService walrus plugin', () => {
     // send-tip ceiling must stay well clear of real mainnet tips.
     const OBSERVED_MAINNET_TIP_MIST = 2_580_000;
     expect(WALRUS_SEND_TIP_MAX_MIST).toBeGreaterThan(OBSERVED_MAINNET_TIP_MIST);
+  });
+});
+
+// Normalized execute_store parameter lists as returned by getMoveFunction
+// (the trailing &mut TxContext is included).
+const obj = { body: { $kind: 'datatype' } };
+const bytes = { body: { $kind: 'vector' } };
+const addr = { body: { $kind: 'address' } };
+const u64 = { body: { $kind: 'u64' } };
+const LEGACY_PARAMS = [obj, obj, obj, bytes, obj, u64, obj, addr, obj];
+const COMMITTED_PARAMS = [obj, obj, obj, bytes, obj, obj, addr, obj];
+
+describe('executeStoreAbiFromParams', () => {
+  it('detects the legacy relayer-deadline signature', () => {
+    expect(executeStoreAbiFromParams(LEGACY_PARAMS)).toBe('legacy-deadline-arg');
+  });
+
+  it('detects the committed-deadline signature (#374)', () => {
+    expect(executeStoreAbiFromParams(COMMITTED_PARAMS)).toBe('committed-deadline');
+  });
+
+  it('throws on an unrecognized signature instead of guessing', () => {
+    expect(() => executeStoreAbiFromParams([obj, u64])).toThrow(/Unrecognized/);
+  });
+});
+
+describe('SuiService.executeStore', () => {
+  const INTENT_ID = '0x' + '11'.repeat(32);
+  const SENDER = '0x' + 'ab'.repeat(32);
+  const BLOB_OBJ = '0x' + 'cd'.repeat(32);
+  let service: SuiService;
+  let getMoveFunction: jest.SpyInstance;
+  let moveCall: jest.SpyInstance;
+
+  afterEach(() => moveCall.mockRestore());
+
+  async function setup(params: typeof LEGACY_PARAMS) {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SuiService,
+        {
+          provide: ConfigService,
+          useValue: makeConfigService({ SUI_WALRUS_SYSTEM_ID: '0x' + '22'.repeat(32) }),
+        },
+      ],
+    }).compile();
+    service = module.get<SuiService>(SuiService);
+    service.onModuleInit();
+    getMoveFunction = jest
+      .spyOn(service.getClient().core, 'getMoveFunction')
+      .mockResolvedValue({ function: { parameters: params } } as never);
+    jest
+      .spyOn(service, 'signAndExecute')
+      .mockResolvedValue({ digest: '0xdigest', status: { success: true } } as never);
+    moveCall = jest.spyOn(Transaction.prototype, 'moveCall');
+  }
+
+  /** Arguments of the execute_store MoveCall the service built. */
+  function sentArgs(): unknown[] {
+    const call = moveCall.mock.calls.find(([c]) => String(c.target).endsWith('::execute_store'));
+    return call![0].arguments as unknown[];
+  }
+
+  it('omits the deadline argument on a committed-deadline package', async () => {
+    await setup(COMMITTED_PARAMS);
+    await expect(service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 123_000n)).resolves.toBe(
+      '0xdigest',
+    );
+    // config, lz_config, system, intent_id, blob, clock, original_sender
+    expect(sentArgs()).toHaveLength(7);
+    // Slot 5 is the Clock, not a relayer-supplied u64.
+    expect((sentArgs()[5] as { type?: string }).type).not.toBe('pure');
+  });
+
+  it('still passes deadline_ms to a legacy package', async () => {
+    await setup(LEGACY_PARAMS);
+    await service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 123_000n);
+    // ... blob, deadline_ms, clock, original_sender
+    expect(sentArgs()).toHaveLength(8);
+    // deadline_ms sits right after the blob, before the Clock.
+    expect((sentArgs()[5] as { type?: string }).type).toBe('pure');
+    expect((sentArgs()[6] as { type?: string }).type).not.toBe('pure');
+  });
+
+  it('resolves the ABI once and reuses it', async () => {
+    await setup(COMMITTED_PARAMS);
+    await service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 1n);
+    await service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 1n);
+    expect(getMoveFunction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache a failed ABI lookup', async () => {
+    await setup(COMMITTED_PARAMS);
+    getMoveFunction.mockRejectedValueOnce(new Error('rpc down'));
+    await expect(service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 1n)).rejects.toThrow('rpc down');
+    await expect(service.executeStore(INTENT_ID, SENDER, BLOB_OBJ, 1n)).resolves.toBe('0xdigest');
+    expect(getMoveFunction).toHaveBeenCalledTimes(2);
   });
 });
