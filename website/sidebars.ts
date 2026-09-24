@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
       label: 'Operate',
       collapsed: false,
       items: [
+        'self-hosting',
         'deployment',
         'relayer',
         'canary',
