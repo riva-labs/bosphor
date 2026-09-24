@@ -68,7 +68,9 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   logger.log(`Bosphor Relayer listening on port ${port}`);
   logger.log(`API CORS origins: ${cors.origin === '*' ? '*' : cors.origin.join(', ')}`);
-  logger.log(`Rate limits: ${trustProxy ? 'client IP from proxy headers' : 'client IP from socket'}`);
+  logger.log(
+    `Rate limits: ${trustProxy ? 'client IP from proxy headers' : 'client IP from socket'}`,
+  );
 
   // /metrics lives on its own internal port, never on the public API.
   const metricsHost = config.get<string>('METRICS_HOST') ?? '0.0.0.0';

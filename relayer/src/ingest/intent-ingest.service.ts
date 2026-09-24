@@ -55,7 +55,11 @@ export class IntentIngest {
    * ops ledger when the store completes. A re-ingest without one (e.g. the
    * byte-recovery sweep) never clears an id recorded earlier.
    */
-  async ingest(intentId: string, bytes: Buffer, appId: string | null = null): Promise<IngestResult> {
+  async ingest(
+    intentId: string,
+    bytes: Buffer,
+    appId: string | null = null,
+  ): Promise<IngestResult> {
     const commitment = await this.lifecycle.getCommitment(intentId);
     if (!commitment) {
       return this.reject(intentId, 'unknown', 'no pending intent for this id');

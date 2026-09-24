@@ -50,7 +50,12 @@ function makeRow(o: Partial<StagedIntentRow> = {}): StagedIntentRow {
 function build(
   rows: StagedIntentRow[] = [],
   cfgOverrides: Record<string, unknown> = {},
-  guardDeps: { breakEven?: unknown; reconciler?: unknown; escrowReader?: unknown } = {},
+  guardDeps: {
+    breakEven?: unknown;
+    reconciler?: unknown;
+    escrowReader?: unknown;
+    ledger?: unknown;
+  } = {},
 ) {
   const staged = {
     markReceived: jest.fn().mockResolvedValue(undefined),
@@ -162,6 +167,7 @@ function build(
     (guardDeps.breakEven ?? undefined) as never,
     (guardDeps.reconciler ?? undefined) as never,
     (guardDeps.escrowReader ?? undefined) as never,
+    (guardDeps.ledger ?? undefined) as never,
   );
   return { proc, staged, walrus, sui, suiLz, evm, solana, metrics, lifecycle, ingest };
 }
@@ -233,6 +239,69 @@ describe('IntentProcessor durable queue', () => {
     expect(suiLz.lzSendProof).toHaveBeenCalledTimes(1);
     expect(staged.markReturned).toHaveBeenCalledWith('0xintent');
     expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+  });
+
+  describe('durable ops ledger', () => {
+    const makeLedger = () => ({ recordCompletedStore: jest.fn().mockResolvedValue(true) });
+
+    it('records the completed store right after execute_store, before the return leg', async () => {
+      const ledger = makeLedger();
+      const { proc, sui, suiLz } = build([makeRow({ appId: 'my-dapp' })], {}, { ledger });
+      await proc.tick();
+
+      expect(ledger.recordCompletedStore).toHaveBeenCalledTimes(1);
+      const done = ledger.recordCompletedStore.mock.calls[0][0];
+      expect(done).toEqual(
+        expect.objectContaining({
+          sender: '0xsender',
+          committedBlobId: COMMITTED_HEX,
+          walrusBlobId: COMMITTED_B64URL,
+          walrusObjectId: '0xobj',
+          endEpoch: 42,
+          storeDigest: '0xstore',
+        }),
+      );
+      expect(done.row.appId).toBe('my-dapp');
+      const ledgerOrder = ledger.recordCompletedStore.mock.invocationCallOrder[0];
+      expect(ledgerOrder).toBeGreaterThan(sui.executeStore.mock.invocationCallOrder[0]);
+      expect(ledgerOrder).toBeLessThan(suiLz.lzSendProof.mock.invocationCallOrder[0]);
+    });
+
+    it('does not re-record on a return-leg retry of an already-ledgered row', async () => {
+      const ledger = makeLedger();
+      const { proc, staged } = build(
+        [
+          makeRow({
+            walrusObjectId: '0xobj',
+            walrusBlobId: COMMITTED_B64URL,
+            endEpoch: 42,
+            storeDigest: '0xstore',
+            ledgered: true,
+          }),
+        ],
+        {},
+        { ledger },
+      );
+      await proc.tick();
+      expect(ledger.recordCompletedStore).not.toHaveBeenCalled();
+      expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+    });
+
+    it('a ledger that reports failure never fails the store', async () => {
+      const ledger = { recordCompletedStore: jest.fn().mockResolvedValue(false) };
+      const { proc, staged } = build([makeRow()], {}, { ledger });
+      await proc.tick();
+      expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+      expect(staged.reschedule).not.toHaveBeenCalled();
+    });
+
+    it('never records a store that did not complete', async () => {
+      const ledger = makeLedger();
+      const { proc, sui } = build([makeRow()], {}, { ledger });
+      sui.executeStore.mockRejectedValueOnce(new Error('sui down'));
+      await proc.tick();
+      expect(ledger.recordCompletedStore).not.toHaveBeenCalled();
+    });
   });
 
   it('break-even guard skips the WAL spend when escrow does not cover cost', async () => {
