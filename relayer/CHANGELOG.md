@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.14.0 (2026-09-24)
+
+### Features
+
+- feat(relayer): add kpi export script (ledger, latency, npm downloads)
+- feat(relayer): add pure KPI aggregation over the ops ledger
+- feat(relayer): record each completed store in the ops ledger after execute_store
+- feat(relayer): add ops-ledger writer with backfill sweep and ledger module
+- feat(relayer): add ledger ops, ledger bytes and rate-limit Prometheus counters
+- feat(relayer): add durable storage_op_ledger store (exactly-once per intent)
+- feat(relayer): persist app id, stored_at and ledger flag on staged intents
+- feat(relayer): accept X-Bosphor-App on ingest and quote, reject malformed ids
+- feat(relayer): serve /metrics on an internal METRICS_PORT, not the public API
+- feat(relayer): rate-limit /blob, /blob/encode and /quote per IP and per app
+- feat(relayer): open integrator API CORS to a configurable origin allowlist
+- feat(relayer): add X-Bosphor-App integrator id validation
+
+### Bug Fixes
+
+- fix(relayer): harden integrator rate limits (bypass key, no spoofable app budget, bounded map)
+- fix(relayer): claim only storable rows so orphans can't starve the queue
+
 ## 0.13.5 (2026-09-24)
 
 ### Bug Fixes
