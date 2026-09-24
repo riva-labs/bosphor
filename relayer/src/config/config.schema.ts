@@ -93,8 +93,14 @@ export const configValidationSchema = Joi.object({
   RATE_LIMIT_ENABLED: Joi.boolean().default(true),
   RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000), // 1 min
   RATE_LIMIT_PER_IP: Joi.number().integer().min(1).default(120),
-  // Per X-Bosphor-App id, across all IPs (only when the header is sent).
-  RATE_LIMIT_PER_APP: Joi.number().integer().min(1).default(1200),
+  // Per X-Bosphor-App id, across all IPs. 0 = off (default): app ids are
+  // self-declared, so anyone could exhaust another app's budget. Enable only
+  // once app ids are authenticated.
+  RATE_LIMIT_PER_APP: Joi.number().integer().min(0).default(0),
+  // Comma-separated secrets for trusted server-side callers (e.g. a dApp backend
+  // whose users all share its egress IP). A request carrying one in
+  // X-Bosphor-Key skips the rate limits. Empty = no bypass.
+  RATE_LIMIT_BYPASS_KEYS: Joi.string().allow('').default(''),
   // Tighter per-IP budget for the CPU-heavy POST /blob/encode.
   RATE_LIMIT_ENCODE_PER_IP: Joi.number().integer().min(1).default(30),
   // Derive the client IP from CF-Connecting-IP / X-Forwarded-For. Enable ONLY when

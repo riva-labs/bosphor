@@ -42,7 +42,10 @@ export function configureHttp(
         enabled: config.get<boolean>('RATE_LIMIT_ENABLED') ?? true,
         windowMs: config.get<number>('RATE_LIMIT_WINDOW_MS') ?? 60_000,
         perIp: config.get<number>('RATE_LIMIT_PER_IP') ?? 120,
-        perApp: config.get<number>('RATE_LIMIT_PER_APP') ?? 1200,
+        perApp: config.get<number>('RATE_LIMIT_PER_APP') ?? 0,
+        bypassKeys: (config.get<string>('RATE_LIMIT_BYPASS_KEYS') ?? '')
+          .split(',')
+          .map((k) => k.trim()),
         encodePerIp: config.get<number>('RATE_LIMIT_ENCODE_PER_IP') ?? 30,
         trustProxy,
       },

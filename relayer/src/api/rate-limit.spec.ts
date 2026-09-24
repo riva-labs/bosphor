@@ -42,6 +42,12 @@ const BASE: RateLimitConfig = {
 };
 
 describe('FixedWindowLimiter', () => {
+  it('caps tracked keys within one window by evicting the oldest (spoofed-IP flood)', () => {
+    const l = new FixedWindowLimiter(60_000, () => 0, 1_000_000, 3);
+    for (const k of ['a', 'b', 'c', 'd', 'e']) l.hit(k, 10);
+    expect(l.size).toBe(3);
+  });
+
   it('allows up to the limit, then rejects until the window resets', () => {
     let now = 0;
     const l = new FixedWindowLimiter(1000, () => now);
@@ -160,5 +166,42 @@ describe('createRateLimitMiddleware', () => {
     mw(req(), res, jest.fn());
     expect(res.headers['X-RateLimit-Limit']).toBe('3');
     expect(res.headers['X-RateLimit-Remaining']).toBe('2');
+  });
+});
+
+describe('rate limit bypass and per-app default', () => {
+  it('lets a trusted backend with a bypass key through past the per-IP budget', () => {
+    const mw = createRateLimitMiddleware({ ...BASE, perIp: 1, bypassKeys: ['s3cret'] });
+    const next = jest.fn();
+    for (let i = 0; i < 5; i++) {
+      mw(req({ headers: { 'x-bosphor-key': 's3cret' } }), fakeRes(), next);
+    }
+    expect(next).toHaveBeenCalledTimes(5);
+  });
+
+  it('ignores a wrong bypass key', () => {
+    const mw = createRateLimitMiddleware({ ...BASE, perIp: 1, bypassKeys: ['s3cret'] });
+    const next = jest.fn();
+    mw(req({ headers: { 'x-bosphor-key': 'nope' } }), fakeRes(), next);
+    const res = fakeRes();
+    mw(req({ headers: { 'x-bosphor-key': 'nope' } }), res, next);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(429);
+  });
+
+  it('does not budget by self-declared app id when perApp is 0 (off)', () => {
+    const mw = createRateLimitMiddleware({ ...BASE, perIp: 100, perApp: 0 });
+    const next = jest.fn();
+    for (let i = 0; i < 20; i++) {
+      mw(
+        req({
+          headers: { 'x-bosphor-app': 'victim-app' },
+          socket: { remoteAddress: `10.0.0.${i}` },
+        }),
+        fakeRes(),
+        next,
+      );
+    }
+    expect(next).toHaveBeenCalledTimes(20);
   });
 });

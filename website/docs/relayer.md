@@ -66,7 +66,8 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window length |
 | `RATE_LIMIT_PER_IP` | `120` | Requests per window per client IP (all three routes together) |
 | `RATE_LIMIT_ENCODE_PER_IP` | `30` | Extra per-IP budget for `POST /blob/encode` |
-| `RATE_LIMIT_PER_APP` | `1200` | Requests per window per `X-Bosphor-App` id, across IPs |
+| `RATE_LIMIT_PER_APP` | `0` (off) | Requests per window per `X-Bosphor-App` id, across IPs. App ids are self-declared, so leave off until they are authenticated |
+| `RATE_LIMIT_BYPASS_KEYS` | - | Comma-separated secrets. A request with one in the `X-Bosphor-Key` header skips the limits (for trusted server-side callers whose users share one egress IP) |
 | `TRUST_PROXY` | `false` | Take the client IP from `CF-Connecting-IP` / `X-Forwarded-For`. Enable only when the relayer is reachable solely through Cloudflare / nginx; otherwise all clients share the proxy IP (off) or can spoof theirs (on while directly reachable) |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 

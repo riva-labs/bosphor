@@ -25,6 +25,12 @@ export class FixedWindowLimiter {
     private readonly now: () => number = Date.now,
     /** Sweep expired windows every this many hits (keeps memory bounded). */
     private readonly sweepEvery = 1000,
+    /**
+     * Hard cap on tracked keys. A flood of distinct keys (e.g. spoofed IPs)
+     * within one window would otherwise grow the map without bound; past the cap
+     * the oldest windows are evicted (Map keeps insertion order).
+     */
+    private readonly maxKeys = 100_000,
   ) {}
 
   hit(key: string, limit: number): HitResult {
@@ -33,6 +39,14 @@ export class FixedWindowLimiter {
 
     let w = this.windows.get(key);
     if (!w || w.resetAt <= now) {
+      if (!w && this.windows.size >= this.maxKeys) {
+        this.sweep(now);
+        while (this.windows.size >= this.maxKeys) {
+          const oldest = this.windows.keys().next().value;
+          if (oldest === undefined) break;
+          this.windows.delete(oldest);
+        }
+      }
       w = { count: 0, resetAt: now + this.windowMs };
       this.windows.set(key, w);
     }
@@ -78,8 +92,10 @@ export interface RateLimitConfig {
   windowMs: number;
   /** Requests per window per client IP, across /blob, /blob/encode and /quote. */
   perIp: number;
-  /** Requests per window per app id (only when an X-Bosphor-App header is sent). */
+  /** Requests per window per app id (only when an X-Bosphor-App header is sent). 0 = off. */
   perApp: number;
+  /** Secrets that skip the limits when sent in X-Bosphor-Key (trusted server-side callers). */
+  bypassKeys?: readonly string[];
   /** Extra, tighter per-IP budget for the CPU-heavy POST /blob/encode. */
   encodePerIp: number;
   /**
@@ -89,6 +105,9 @@ export interface RateLimitConfig {
    */
   trustProxy: boolean;
 }
+
+/** Header a trusted server-side caller sends to skip the limits (see bypassKeys). */
+export const BYPASS_KEY_HEADER = 'x-bosphor-key';
 
 /** Which budget tripped, for logs and the 429 metric label. */
 export type RateLimitScope = 'ip' | 'app' | 'encode';
@@ -129,9 +148,12 @@ export function createRateLimitMiddleware(
   opts: { now?: () => number; onLimited?: (scope: RateLimitScope) => void } = {},
 ): (req: RateLimitRequest, res: RateLimitResponse, next: () => void) => void {
   const limiter = new FixedWindowLimiter(cfg.windowMs, opts.now);
+  const bypass = new Set((cfg.bypassKeys ?? []).filter((k) => k.length > 0));
 
   return (req, res, next) => {
     if (!cfg.enabled || req.method !== 'POST') return next();
+    const key = firstHeader(req.headers[BYPASS_KEY_HEADER]);
+    if (key && bypass.has(key)) return next();
 
     const ip = clientIp(req, cfg.trustProxy);
     const path = (req.originalUrl ?? req.url ?? '').split('?')[0];
@@ -144,7 +166,7 @@ export function createRateLimitMiddleware(
     // A malformed app id is left for the controller to reject with a 400; only a
     // valid one gets its own bucket.
     const app = parseAppId(req.headers[APP_ID_HEADER.toLowerCase()]);
-    if (app.ok && app.appId) {
+    if (cfg.perApp > 0 && app.ok && app.appId) {
       checks.push({ scope: 'app', key: `app:${app.appId}`, limit: cfg.perApp });
     }
 
