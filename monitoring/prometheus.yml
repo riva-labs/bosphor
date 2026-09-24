@@ -6,11 +6,12 @@ rule_files:
 
 scrape_configs:
   # The mainnet relayer (bosphor-relayer-1), reachable over the compose network.
-  # /metrics is served on the relayer's internal METRICS_PORT (9464), never on
-  # the public API port 3000.
+  # It still runs a pre-0.15 build that serves /metrics on the API port 3000.
+  # Relayer 0.15+ serves it only on the internal METRICS_PORT (9464): switch this
+  # target to 'relayer:9464' in the same change that upgrades the mainnet relayer.
   - job_name: bosphor-relayer
     static_configs:
-      - targets: ['relayer:9464']
+      - targets: ['relayer:3000']
         labels:
           deployment: mainnet
     metrics_path: /metrics
