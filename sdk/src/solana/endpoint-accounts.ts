@@ -23,6 +23,7 @@ import {
   type SolanaChain,
 } from "./client.js";
 import { TESTNET, type BosphorNetwork } from "../networks.js";
+import { LzSolanaSdkMissingError, quoteSolanaLzFee } from "./lz-fee.js";
 
 /** Placeholder in {@link TESTNET_SEND_ACCOUNTS} for the paying wallet. */
 export const PAYER_PLACEHOLDER = "__PAYER__";
@@ -92,7 +93,7 @@ export interface LzSolanaSdkLike {
 
 export interface ResolveEndpointAccountsOptions {
   /** A `@solana/web3.js` `Connection`. */
-  connection: unknown;
+  connection: object;
   /** The paying wallet's public key (a `PublicKey` or base58 string). */
   payer: PublicKeyLike;
   /** Network preset; defaults to {@link TESTNET}. */
@@ -100,7 +101,7 @@ export interface ResolveEndpointAccountsOptions {
   /** Inject `@layerzerolabs/lz-solana-sdk-v2` (tests, or bundlers that cannot lazy-load). */
   lzSdk?: LzSolanaSdkLike;
   /** Inject the `@solana/web3.js` module (only `PublicKey` is used). */
-  web3?: unknown;
+  web3?: object;
 }
 
 /**
@@ -157,7 +158,7 @@ export async function resolveEndpointAccounts(
 export interface CreateSolanaClientFromKeypairOptions
   extends Partial<Omit<BosphorSolanaClientOptions, "chain" | "network">> {
   /** A `@solana/web3.js` `Connection` to the network's cluster. */
-  connection: unknown;
+  connection: object;
   /** A funded `@solana/web3.js` `Keypair` (payer and submitter). */
   wallet: { publicKey: PublicKeyLike };
   /** Network preset; defaults to {@link TESTNET}. */
@@ -173,6 +174,13 @@ export interface CreateSolanaClientFromKeypairOptions
   priorityMicroLamports?: number;
   /** Use a custom chain backend instead of the default web3.js one. */
   chain?: SolanaChain;
+  /**
+   * Quote the live LayerZero fee in `priceQuote()` with `quoteSolanaLzFee`
+   * (read-only simulation). Defaults to true. If the optional peer
+   * `@layerzerolabs/lz-solana-sdk-v2` is not installed, quotes fall back to the
+   * `nativeFee` cap and are flagged `forwardIsUpperBound: true`.
+   */
+  liveLzFee?: boolean;
 }
 
 /**
@@ -222,6 +230,21 @@ export async function createBosphorSolanaClientFromKeypair(
     nativeFee: opts.nativeFee ?? network.solana.nativeFee,
     network: network.walrusNetwork,
   };
+  if (opts.quoteLzFee !== undefined) {
+    clientOpts.quoteLzFee = opts.quoteLzFee;
+  } else if (opts.liveLzFee !== false) {
+    const connection = opts.connection;
+    clientOpts.quoteLzFee = async () => {
+      try {
+        return await quoteSolanaLzFee({ connection, network });
+      } catch (err) {
+        // Missing optional peer: fall back to the flagged cap. Any other failure
+        // (RPC, program) is surfaced, never replaced by a made-up fee.
+        if (err instanceof LzSolanaSdkMissingError) return null;
+        throw err;
+      }
+    };
+  }
   if (opts.defaultEpochs !== undefined) clientOpts.defaultEpochs = opts.defaultEpochs;
   if (opts.deadlineSeconds !== undefined) clientOpts.deadlineSeconds = opts.deadlineSeconds;
   if (opts.computeBlob !== undefined) clientOpts.computeBlob = opts.computeBlob;

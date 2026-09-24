@@ -44,6 +44,10 @@ export type { DecodedIntentState } from "./proof.js";
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
 export type { DefaultSolanaChainOptions, SolanaAccountMetaInput } from "./backend.js";
 
+// Read-only LayerZero fee quote (simulated endpoint `quote`).
+export { quoteSolanaLzFee, LzSolanaSdkMissingError, FORWARD_MESSAGE_LEN } from "./lz-fee.js";
+export type { QuoteSolanaLzFeeOptions } from "./lz-fee.js";
+
 // LayerZero send accounts + one-call client from a Keypair.
 export {
   PAYER_PLACEHOLDER,

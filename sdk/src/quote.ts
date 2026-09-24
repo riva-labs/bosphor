@@ -47,6 +47,12 @@ export interface PricedQuote {
   forwardNative: bigint;
   /** escrowNative + forwardNative = msg.value at submit. */
   totalNative: bigint;
+  /**
+   * True when `forwardNative` is a fee CAP rather than the live LayerZero fee (the
+   * Solana client without a live fee quoter). The amount actually charged is then
+   * lower: `escrowNative` plus the live fee, which is at most `forwardNative`.
+   */
+  forwardIsUpperBound: boolean;
   breakdown: QuoteBreakdown;
 }
 
@@ -104,6 +110,7 @@ export async function fetchQuote(
     escrowNative: BigInt(body.escrowNative),
     forwardNative: BigInt(body.forwardNative),
     totalNative: BigInt(body.totalNative),
+    forwardIsUpperBound: false,
     breakdown: body.breakdown,
   };
 }
