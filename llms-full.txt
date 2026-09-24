@@ -383,8 +383,15 @@ Storage is committed as a **duration** (`storageEpochs`), never as an absolute e
 epoch. Origin chains do not know the current Walrus epoch, so an absolute end epoch
 would not be verifiable at submission time. The Sui executor turns the duration into
 an end-epoch check at execution: it asserts the certified blob's end epoch is at least
-`current_epoch + storageEpochs`. The default `storageEpochs` matches the relayer's
-`WALRUS_STORE_EPOCHS` (5).
+`current_epoch + storageEpochs`.
+
+The relayer stores each blob for exactly the committed `storageEpochs`, so the
+stored duration always covers the commitment. The SDK default is 5 epochs; pass
+`{ epochs }` to commit a different duration. The relayer caps the duration at
+`WALRUS_MAX_EPOCHS` (default 53) and at Walrus's own maximum epochs ahead. A
+commitment above the cap is never stored for a shorter duration: the relayer
+declines it before spending anything and the origin escrow refunds on the
+intent deadline.
 
 ## Intent identifier
 
@@ -1563,7 +1570,7 @@ Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. S
 ## Walrus storage
 
 - All blobs are stored as deletable. The relayer configures this at upload time. The protocol does not currently support permanent (non-deletable) storage.
-- Blob storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs). There is no per-intent storage duration customization.
+- Blob storage duration is the per-intent `storageEpochs` the user commits (SDK default: 5 epochs). The relayer stores for exactly that duration, up to `WALRUS_MAX_EPOCHS` (default 53) and Walrus's own maximum epochs ahead. An intent committing more than the cap is not stored: the relayer declines it before spending anything and the escrow refunds on the deadline. Quote such durations first; `POST /quote` rejects them with HTTP 400.
 - If Walrus storage nodes or the upload relay are unavailable, the SDK handles retries internally. Persistent outages block intent fulfillment.
 
 ## Object version conflicts on Sui
@@ -1976,6 +1983,12 @@ Body (JSON): `sizeBytes` (number), `originToken` (`"ETH"` or `"SOL"`), and
 optional `epochs`, `forwardLzFeeNative` (decimal string, from the on-chain
 adapter quote), `originGasNative` (decimal string).
 
+Pass the same `epochs` you will commit in the intent: the relayer stores the blob
+for exactly the committed duration, so the quote is priced on it. `epochs` must be
+an integer between 1 and the relayer's `WALRUS_MAX_EPOCHS` (default 53); anything
+outside that range returns HTTP 400. When omitted, the quote uses the relayer's
+`WALRUS_STORE_EPOCHS` default (5).
+
 ```bash
 curl -s https://api.bosphor.xyz/testnet/quote \
   -H 'content-type: application/json' \
@@ -2223,7 +2236,8 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
 | `SOLANA_SRC_EID` | `40168` | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
 | `SOLANA_RELAYER_KEYPAIR` | - | Store-admin keypair (inline JSON secret-key array or a path) that signs the Solana return leg `confirm_execution`. Unset disables the return leg |
-| `WALRUS_STORE_EPOCHS` | `5` | Number of Walrus storage epochs |
+| `WALRUS_STORE_EPOCHS` | `5` | Legacy fallback only. Blobs are stored for the intent's committed `storageEpochs`; this default applies only to a commitment recorded without epochs, and the relayer logs each such fallback |
+| `WALRUS_MAX_EPOCHS` | `53` | Largest committed storage duration the relayer stores (Walrus's own max epochs ahead also applies). Larger commitments are dead-lettered before any WAL spend, never shortened, and the escrow refunds on the deadline |
 | `WAL_MIN_BALANCE_MIST` | `500000000` | WAL floor (0.5 WAL); below this the relayer auto-swaps SUI for WAL |
 | `WAL_TOPUP_SUI_MIST` | `1000000000` | SUI to swap per top-up (1 SUI) |
 | `WAL_TOPUP_SUI_RESERVE_MIST` | `1000000000` | SUI kept in reserve for gas, never spent on a swap (1 SUI) |
@@ -2407,7 +2421,7 @@ The relayer uploads intent payloads to Walrus using the `@mysten/walrus` SDK's `
 
 - All blobs are stored as **deletable**
 - Blob ownership is transferred to the relayer's Sui address
-- Storage duration is configured via `WALRUS_STORE_EPOCHS` (default: 5 epochs)
+- Storage duration is the intent's committed `storageEpochs`, so the stored end epoch covers what the Sui executor checks (`current_epoch + storageEpochs`). The break-even guard and WAL cost metering use the same duration. `WALRUS_STORE_EPOCHS` (default 5) is used only when a commitment carries no epochs
 - The upload relay is configured via `WALRUS_RELAY_URL` in `SuiService`
 
 ### WAL auto top-up
