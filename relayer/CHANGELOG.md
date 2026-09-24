@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.0 (2026-09-24)
+
+### Features
+
+- feat(relayer): add NETWORK testnet|mainnet config presets
+
+### Bug Fixes
+
+- fix(relayer): never echo an RPC URL (and its API key) in mainnet config errors
+- fix(relayer): skip the testnet-only SUI->WAL swap on mainnet
+
 ## 0.13.6 (2026-09-24)
 
 ### Bug Fixes
