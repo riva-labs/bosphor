@@ -4,10 +4,19 @@
 
 ### Features
 
+- feat(sdk): add wallet-free quoteEvmStore and quoteSolanaStore
+- feat(sdk): add Solana getEscrow and refundEscrow via the refund_escrow instruction
+- feat(sdk): add EVM getEscrow, refund, and withdraw to the client
+- feat(sdk): report store progress through an onProgress callback
+- feat(sdk): add a public Sepolia RPC URL to the TESTNET preset
 - feat(sdk): re-export fetchQuote and quote types from the chain subpaths
 - feat(sdk): add Solana LayerZero send accounts and a one-call Keypair client
 - feat(sdk): export EVM adapter ABI and build a client from an ethers Signer
 - feat(sdk): add TESTNET network preset and Walrus blob URL helpers
+
+### Bug Fixes
+
+- fix(sdk): quote the live Solana LayerZero fee instead of the fee cap
 
 ## 0.11.0 (2026-09-05)
 
