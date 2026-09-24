@@ -1,13 +1,16 @@
 /**
  * deploy-evm.ts
  *
- * Builds and deploys the BosphorAdapter contract to Sepolia, then
+ * Builds and deploys the BosphorAdapter contract to the EVM chain behind
+ * EVM_RPC_URL (Sepolia on testnet), then
  * configures setPeer for the Sui LZ OApp if SUI_LZ_PACKAGE_ID is set.
  * Updates .env with the deployed EVM_ADAPTER_ADDRESS.
  *
  * Usage: npm run deploy:evm
  * Required env: EVM_RPC_URL, EVM_RELAYER_KEY
- * Optional env: SUI_LZ_PACKAGE_ID (for automatic peer setup)
+ * Required on NETWORK=mainnet: LZ_ENDPOINT_ADDRESS, EVM_CHAIN_ID
+ * Optional env: NETWORK (testnet|mainnet, default testnet), SUI_EID,
+ *   SUI_LZ_PACKAGE_ID (for automatic peer setup)
  */
 import { config } from "dotenv";
 import { resolve } from "path";
@@ -21,6 +24,7 @@ const ENV_PATH = process.env.BOSPHOR_ENV_FILE
 config({ path: ENV_PATH });
 
 import { ethers } from "ethers";
+import { presetEid, presetEnv, resolveNetwork } from "../util/network.js";
 
 // --- Config ---
 const EVM_RPC_URL = process.env.EVM_RPC_URL;
@@ -32,8 +36,14 @@ if (!EVM_RPC_URL || !EVM_RELAYER_KEY) {
   process.exit(1);
 }
 
-const LZ_ENDPOINT = process.env.LZ_ENDPOINT_ADDRESS || "0x6EDCE65403992e310A62460808c4b910D972f10f";
-const SUI_EID = Number(process.env.SUI_EID) || 40378;
+// Sepolia defaults on testnet only; on mainnet the endpoint must be explicit.
+const NETWORK = resolveNetwork();
+const LZ_ENDPOINT = presetEnv("LZ_ENDPOINT_ADDRESS", NETWORK);
+const SUI_EID = presetEid("SUI_EID", NETWORK);
+if (NETWORK === "mainnet" && !process.env.EVM_CHAIN_ID) {
+  console.error("NETWORK=mainnet requires EVM_CHAIN_ID (the target EVM chain) in .env");
+  process.exit(1);
+}
 
 const provider = new ethers.JsonRpcProvider(EVM_RPC_URL, undefined, { staticNetwork: true });
 const wallet = new ethers.Wallet(EVM_RELAYER_KEY, provider);
@@ -55,7 +65,12 @@ function updateEnv(updates: Record<string, string>) {
 
 async function main() {
   const deployer = wallet.address;
+  const { chainId } = await provider.getNetwork();
+  if (process.env.EVM_CHAIN_ID && chainId !== BigInt(process.env.EVM_CHAIN_ID)) {
+    throw new Error(`EVM_RPC_URL is on chain ${chainId}, expected EVM_CHAIN_ID=${process.env.EVM_CHAIN_ID}`);
+  }
   console.log("=== Bosphor EVM Deployment ===");
+  console.log(`  Network:  ${NETWORK} (chain ${chainId}, Sui EID ${SUI_EID})`);
   console.log(`  Deployer: ${deployer}`);
   console.log(`  RPC:      ${EVM_RPC_URL}`);
   console.log(`  Endpoint: ${LZ_ENDPOINT}`);
