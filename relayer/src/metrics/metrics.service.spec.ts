@@ -1,4 +1,4 @@
-import { MetricsService } from './metrics.service';
+import { MAX_APP_LABELS, MetricsService } from './metrics.service';
 
 describe('MetricsService', () => {
   let service: MetricsService;
@@ -18,6 +18,37 @@ describe('MetricsService', () => {
     expect(out).toContain(
       'bosphor_relayer_intents_processed_total{result="failure",path="sui_lz"} 1',
     );
+  });
+
+  it('counts ledger ops by origin chain and app, plus bytes by chain', async () => {
+    service.recordLedgerOp(40161, 'my-dapp', 100);
+    service.recordLedgerOp(40161, null, 50);
+    service.recordLedgerOp(40168, null, 25);
+
+    const out = await service.getMetrics();
+
+    expect(out).toContain('bosphor_relayer_ledger_ops_total{src_eid="40161",app_id="my-dapp"} 1');
+    expect(out).toContain('bosphor_relayer_ledger_ops_total{src_eid="40161",app_id="none"} 1');
+    expect(out).toContain('bosphor_relayer_ledger_ops_total{src_eid="40168",app_id="none"} 1');
+    expect(out).toContain('bosphor_relayer_ledger_bytes_total{src_eid="40161"} 150');
+    expect(out).toContain('bosphor_relayer_ledger_bytes_total{src_eid="40168"} 25');
+  });
+
+  it('bounds the app_id label cardinality', async () => {
+    for (let i = 0; i < MAX_APP_LABELS + 5; i++) service.recordLedgerOp(40161, `app-${i}`, 1);
+    const out = await service.getMetrics();
+    expect(out).toContain('bosphor_relayer_ledger_ops_total{src_eid="40161",app_id="other"} 5');
+    const series = out.split('\n').filter((l) => l.startsWith('bosphor_relayer_ledger_ops_total{'));
+    expect(series).toHaveLength(MAX_APP_LABELS + 1);
+  });
+
+  it('counts ledger write failures and rate-limited requests', async () => {
+    service.recordLedgerWriteFailure();
+    service.recordRateLimited('encode');
+    const out = await service.getMetrics();
+    expect(out).toContain('bosphor_relayer_ledger_write_failures_total 1');
+    expect(out).toContain('bosphor_relayer_rate_limited_total{scope="encode"} 1');
+    expect(out).toContain('bosphor_relayer_rate_limited_total{scope="ip"} 0');
   });
 
   it('counts LZ send outcomes by result', async () => {
