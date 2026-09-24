@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.0 (2026-09-24)
+
+### Features
+
+- feat(sdk): re-export fetchQuote and quote types from the chain subpaths
+- feat(sdk): add Solana LayerZero send accounts and a one-call Keypair client
+- feat(sdk): export EVM adapter ABI and build a client from an ethers Signer
+- feat(sdk): add TESTNET network preset and Walrus blob URL helpers
+
 ## 0.11.0 (2026-09-05)
 
 ### Features
