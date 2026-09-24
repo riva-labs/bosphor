@@ -67,10 +67,11 @@ describe('EvmService', () => {
         EVM_RPC_URL: 'https://rpc.invalid',
         EVM_RELAYER_KEY: '0x' + '11'.repeat(32),
         EVM_ADAPTER_ADDRESS: '0x' + '22'.repeat(20),
+        EVM_CHAIN_ID: 11155111,
       };
       const config = {
         getOrThrow: jest.fn((key: string) => values[key]),
-        get: jest.fn((key: string) => (key === 'EVM_CHAIN_ID' ? 11155111 : undefined)),
+        get: jest.fn(() => undefined),
       };
       const fresh = new EvmService(config as any, mockReporter as any);
 

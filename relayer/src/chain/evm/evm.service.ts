@@ -95,7 +95,8 @@ export class EvmService implements OnModuleInit {
     const privateKey = this.config.getOrThrow<string>('EVM_RELAYER_KEY');
     const adapterAddress = this.config.getOrThrow<string>('EVM_ADAPTER_ADDRESS');
 
-    const chainId = this.config.get<number>('EVM_CHAIN_ID') ?? 11155111;
+    // Sepolia by default on testnet, required on mainnet (NETWORK preset).
+    const chainId = this.config.getOrThrow<number>('EVM_CHAIN_ID');
 
     // Pin the network explicitly: with staticNetwork alone (no network arg)
     // ethers still probes eth_chainId once at startup, and on a flaky RPC that

@@ -36,6 +36,10 @@ describe('QuoteService', () => {
               };
               return key in cfg ? cfg[key] : def;
             },
+            getOrThrow: (key: string) => {
+              if (key === 'QUOTE_RETURN_LZ_FEE_MIST') return '1760000000';
+              throw new Error(`missing ${key}`);
+            },
           },
         },
       ],

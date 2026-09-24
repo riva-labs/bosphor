@@ -138,9 +138,16 @@ function build(
   const config = {
     // Mirror ConfigService.get(key, default): fall back to the default when unset.
     get: jest.fn((k: string, d?: unknown) => cfg[k] ?? d),
+    // Mirror ConfigService.getOrThrow over the schema-applied testnet preset.
     getOrThrow: jest.fn((k: string) => {
-      if (k === 'EVM_DST_EID') return 40161;
-      throw new Error(`missing ${k}`);
+      const preset: Record<string, unknown> = {
+        EVM_DST_EID: 40161,
+        BREAK_EVEN_GUARD_ENABLED: 'false',
+        QUOTE_RETURN_LZ_FEE_MIST: '1760000000',
+      };
+      const v = cfg[k] ?? preset[k];
+      if (v === undefined) throw new Error(`missing ${k}`);
+      return v;
     }),
   };
   const proc = new IntentProcessor(
