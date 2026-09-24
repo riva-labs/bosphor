@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
 import { StagedModule } from './staged/staged.module';
+import { LedgerModule } from './ledger/ledger.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { WakerModule } from './common/waker.module';
 
@@ -25,6 +26,7 @@ import { WakerModule } from './common/waker.module';
     MetricsModule,
     LifecycleModule,
     StagedModule,
+    LedgerModule,
     EvmModule,
     SuiModule,
     SolanaModule,
