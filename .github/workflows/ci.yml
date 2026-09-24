@@ -156,6 +156,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
+            sdk/package-lock.json
             scripts/solana/package-lock.json
 
       # The e2e and Solana operator scripts import the SDK and relayer sources
@@ -163,6 +164,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
+          npm ci --prefix sdk
           npm ci --prefix scripts/solana
 
       - name: Typecheck scripts/solana
