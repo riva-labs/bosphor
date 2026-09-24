@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0 (2026-09-24)
+
+### Features
+
+- feat(sdk): add appId option to the EVM and Solana clients
+- feat(sdk): send optional X-Bosphor-App app id on quote and upload
+
 ## 0.11.0 (2026-09-05)
 
 ### Features
