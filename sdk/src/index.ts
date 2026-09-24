@@ -44,6 +44,7 @@ export type {
   QuoteBreakdown,
   PricedQuote,
   FetchQuoteOptions,
+  StoreSize,
 } from "./quote.js";
 
 // Network presets: addresses, endpoint ids, and URLs for the hosted testnet.

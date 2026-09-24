@@ -50,7 +50,7 @@ function stubEthers(seen: Seen): EthersModuleLike {
   return { Contract };
 }
 
-const SIGNER = { tag: "signer" };
+const SIGNER = { provider: null, getAddress: async () => "0x0000000000000000000000000000000000000001" };
 
 test("ADAPTER_ABI covers the calls, events, and errors an integrator needs", () => {
   const joined = ADAPTER_ABI.join("\n");
@@ -90,7 +90,7 @@ test("connectAdapter honors an address override", async () => {
 });
 
 test("connectAdapter rejects a missing signer", async () => {
-  await assert.rejects(connectAdapter(undefined, { ethers: stubEthers({}) }), /Signer/);
+  await assert.rejects(connectAdapter(undefined as never, { ethers: stubEthers({}) }), /Signer/);
 });
 
 test("createBosphorClientFromSigner wires the preset dstEid, LZ options, and relayer", async () => {

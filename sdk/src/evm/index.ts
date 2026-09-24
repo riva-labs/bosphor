@@ -10,7 +10,11 @@ export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./cl
 export { fromEthersContract } from "./adapter.js";
 export { ADAPTER_ABI, EscrowStatus } from "./abi.js";
 export { connectAdapter, createBosphorClientFromSigner } from "./signer.js";
+export { quoteEvmStore } from "./quote-store.js";
+export type { QuoteEvmStoreOptions } from "./quote-store.js";
 export type {
+  EthersRunnerLike,
+  EthersSignerLike,
   EthersModuleLike,
   ConnectAdapterOptions,
   CreateClientFromSignerOptions,
@@ -72,4 +76,5 @@ export type {
   QuoteBreakdown,
   PricedQuote,
   FetchQuoteOptions,
+  StoreSize,
 } from "../quote.js";

@@ -21,6 +21,7 @@ test("evm entry exports the preset, quote client, ABI, and signer helpers", () =
     "createBosphorClientFromSigner",
     "createBosphorClient",
     "fromEthersContract",
+    "quoteEvmStore",
   ]) {
     assert.ok(name in evm, `@bosphor/sdk/evm is missing ${name}`);
   }
@@ -35,6 +36,9 @@ test("solana entry exports the preset, quote client, and send-account helpers", 
     "createBosphorSolanaClientFromKeypair",
     "createDefaultSolanaChain",
     "BOSPHOR_PROGRAM_ID",
+    "quoteSolanaStore",
+    "quoteSolanaLzFee",
+    "LzSolanaSdkMissingError",
   ]) {
     assert.ok(name in solana, `@bosphor/sdk/solana is missing ${name}`);
   }

@@ -44,6 +44,10 @@ export type { DecodedIntentState } from "./proof.js";
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
 export type { DefaultSolanaChainOptions, SolanaAccountMetaInput } from "./backend.js";
 
+// Wallet-free store quote.
+export { quoteSolanaStore } from "./quote-store.js";
+export type { QuoteSolanaStoreOptions } from "./quote-store.js";
+
 // Read-only LayerZero fee quote (simulated endpoint `quote`).
 export { quoteSolanaLzFee, LzSolanaSdkMissingError, FORWARD_MESSAGE_LEN } from "./lz-fee.js";
 export type { QuoteSolanaLzFeeOptions } from "./lz-fee.js";
@@ -95,4 +99,5 @@ export type {
   QuoteBreakdown,
   PricedQuote,
   FetchQuoteOptions,
+  StoreSize,
 } from "../quote.js";

@@ -13,9 +13,26 @@ import { fromEthersContract, type EthersContractLike, type FromEthersContractOpt
 import { BosphorEvmClient, type AdapterContract, type BosphorEvmClientOptions } from "./client.js";
 import { TESTNET, type BosphorNetwork } from "../networks.js";
 
-/** The slice of the `ethers` module these helpers use. */
+/**
+ * An `ethers` v6 contract runner: a Provider (read-only) or a Signer. Both carry a
+ * `provider` field, which is all these helpers rely on structurally.
+ */
+export interface EthersRunnerLike {
+  readonly provider: object | null;
+}
+
+/** An `ethers` v6 Signer (e.g. `Wallet`, or `BrowserProvider#getSigner()`). */
+export interface EthersSignerLike extends EthersRunnerLike {
+  getAddress(): Promise<string>;
+}
+
+/**
+ * The slice of the `ethers` module these helpers use. The runner parameter is
+ * typed `never` so the real `ethers` module (whose `ContractRunner` type is richer
+ * than {@link EthersRunnerLike}) can be injected without a cast.
+ */
 export interface EthersModuleLike {
-  Contract: new (address: string, abi: readonly string[], runner?: unknown) => unknown;
+  Contract: new (address: string, abi: readonly string[], runner?: never) => object;
 }
 
 export interface ConnectAdapterOptions extends FromEthersContractOptions {
@@ -31,7 +48,7 @@ export interface CreateClientFromSignerOptions
   extends ConnectAdapterOptions,
     Partial<Omit<BosphorEvmClientOptions, "adapter" | "network">> {}
 
-async function loadEthers(injected?: EthersModuleLike): Promise<EthersModuleLike> {
+export async function loadEthers(injected?: EthersModuleLike): Promise<EthersModuleLike> {
   if (injected) return injected;
   const spec = "ethers";
   try {
@@ -52,14 +69,14 @@ async function loadEthers(injected?: EthersModuleLike): Promise<EthersModuleLike
  * @param signer - An `ethers` v6 Signer connected to the adapter's chain.
  */
 export async function connectAdapter(
-  signer: unknown,
+  signer: EthersSignerLike,
   opts: ConnectAdapterOptions = {},
 ): Promise<AdapterContract> {
   if (!signer) throw new Error("connectAdapter requires an ethers Signer");
   const network = opts.network ?? TESTNET;
   const address = opts.address ?? network.evm.adapterAddress;
   const { Contract } = await loadEthers(opts.ethers);
-  const contract = new Contract(address, ADAPTER_ABI, signer) as EthersContractLike;
+  const contract = new Contract(address, ADAPTER_ABI, signer as never) as unknown as EthersContractLike;
   const adapterOpts: FromEthersContractOptions = {};
   if (opts.proofLookbackBlocks !== undefined) adapterOpts.proofLookbackBlocks = opts.proofLookbackBlocks;
   return fromEthersContract(contract, adapterOpts);
@@ -80,7 +97,7 @@ export async function connectAdapter(
  * ```
  */
 export async function createBosphorClientFromSigner(
-  signer: unknown,
+  signer: EthersSignerLike,
   opts: CreateClientFromSignerOptions = {},
 ): Promise<BosphorEvmClient> {
   const network = opts.network ?? TESTNET;

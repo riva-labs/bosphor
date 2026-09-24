@@ -56,6 +56,16 @@ export interface PricedQuote {
   breakdown: QuoteBreakdown;
 }
 
+/** The file to price: its bytes, or just its size. */
+export type StoreSize = { data: Uint8Array } | { sizeBytes: number };
+
+/** Resolve the byte size from a {@link StoreSize}, rejecting empty or invalid sizes. */
+export function resolveStoreSize(size: StoreSize): number {
+  const n = "data" in size ? size.data.length : size.sizeBytes;
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`size must be a positive integer, got ${n}`);
+  return n;
+}
+
 export interface FetchQuoteOptions {
   /** Injected fetch (defaults to global fetch). */
   fetch?: FetchLike;
