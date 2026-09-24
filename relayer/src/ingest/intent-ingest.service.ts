@@ -49,8 +49,17 @@ export class IntentIngest {
    *   unknown -> already-executed -> expired -> oversized -> wrong-size -> wrong-blob-id.
    * On acceptance the bytes are durably written to the store queue (not uploaded)
    * keyed by intent id for the processor to store after IntentReceived.
+   *
+   * `appId` is the validated X-Bosphor-App integrator id (null when the client
+   * sent none). It is persisted on the staged row and flows into the durable
+   * ops ledger when the store completes. A re-ingest without one (e.g. the
+   * byte-recovery sweep) never clears an id recorded earlier.
    */
-  async ingest(intentId: string, bytes: Buffer): Promise<IngestResult> {
+  async ingest(
+    intentId: string,
+    bytes: Buffer,
+    appId: string | null = null,
+  ): Promise<IngestResult> {
     const commitment = await this.lifecycle.getCommitment(intentId);
     if (!commitment) {
       return this.reject(intentId, 'unknown', 'no pending intent for this id');
@@ -124,7 +133,7 @@ export class IntentIngest {
     if (this.staged) {
       const outcome = await this.staged.upsertBytes(
         intentId,
-        { bytes, blobId, size: bytes.length },
+        { bytes, blobId, size: bytes.length, appId },
         this.maxStagedBytes,
       );
       if (outcome === 'backpressure') {
@@ -139,7 +148,8 @@ export class IntentIngest {
       this.waker?.wake();
     }
     this.logger.log(
-      `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId} (staged for store)`,
+      `[${intentId}] Ingest accepted: ${bytes.length} bytes, blobId ${blobId}` +
+        `${appId ? `, app ${appId}` : ''} (staged for store)`,
     );
     return { ok: true, intentId, blobId, size: bytes.length };
   }

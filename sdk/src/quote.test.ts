@@ -54,6 +54,37 @@ describe("fetchQuote", () => {
     assert.equal(q.breakdown.floorApplied, false);
   });
 
+  it("sends the app id as X-Bosphor-App when given, and nothing otherwise", async () => {
+    const seen: Record<string, string>[] = [];
+    const fetchFn: FetchLike = async (_url, init) => {
+      seen.push(init.headers);
+      return { ok: true, status: 200, text: async () => JSON.stringify(RESPONSE) };
+    };
+    const req = { sizeBytes: 10, originToken: "ETH" as const };
+    await fetchQuote("https://relayer.example", req, { fetch: fetchFn, appId: "my-dapp" });
+    await fetchQuote("https://relayer.example", req, { fetch: fetchFn });
+    assert.equal(seen[0]!["X-Bosphor-App"], "my-dapp");
+    assert.equal(seen[0]!["content-type"], "application/json");
+    assert.equal(seen[1]!["X-Bosphor-App"], undefined);
+  });
+
+  it("rejects a malformed app id before calling the relayer", async () => {
+    let called = false;
+    const fetchFn: FetchLike = async () => {
+      called = true;
+      return { ok: true, status: 200, text: async () => JSON.stringify(RESPONSE) };
+    };
+    await assert.rejects(
+      fetchQuote(
+        "https://relayer.example",
+        { sizeBytes: 10, originToken: "ETH" },
+        { fetch: fetchFn, appId: "bad id" },
+      ),
+      /invalid appId/,
+    );
+    assert.equal(called, false);
+  });
+
   it("throws BosphorError on a non-2xx response (no fabricated quote)", async () => {
     const fetchFn: FetchLike = async () => ({
       ok: false,

@@ -133,8 +133,32 @@ export const configValidationSchema = Joi.object({
     .uri({ scheme: ['postgres', 'postgresql'] })
     .optional()
     .allow(''),
-  // Origin allowed to read the public API (CORS). The deployed dashboard.
+  // Origin allowed to read the public API (CORS). The deployed dashboard. Always
+  // kept in the allowlist when CORS_ORIGINS is an explicit list.
   DASHBOARD_ORIGIN: Joi.string().uri().default('https://status.bosphor.xyz'),
+  // Integrator API CORS allowlist (comma-separated origins). `*` opens POST /blob,
+  // POST /blob/encode and POST /quote to browser dApps on any origin (default).
+  CORS_ORIGINS: Joi.string().default('*'),
+  // Integrator API rate limits (in-memory fixed window). Apply to POST /blob/:id,
+  // POST /blob/encode and POST /quote; over the budget the relayer answers 429.
+  RATE_LIMIT_ENABLED: Joi.boolean().default(true),
+  RATE_LIMIT_WINDOW_MS: Joi.number().integer().min(1000).default(60000), // 1 min
+  RATE_LIMIT_PER_IP: Joi.number().integer().min(1).default(120),
+  // Per X-Bosphor-App id, across all IPs. 0 = off (default): app ids are
+  // self-declared, so anyone could exhaust another app's budget. Enable only
+  // once app ids are authenticated.
+  RATE_LIMIT_PER_APP: Joi.number().integer().min(0).default(0),
+  // Comma-separated secrets for trusted server-side callers (e.g. a dApp backend
+  // whose users all share its egress IP). A request carrying one in
+  // X-Bosphor-Key skips the rate limits. Empty = no bypass.
+  RATE_LIMIT_BYPASS_KEYS: Joi.string().allow('').default(''),
+  // Tighter per-IP budget for the CPU-heavy POST /blob/encode.
+  RATE_LIMIT_ENCODE_PER_IP: Joi.number().integer().min(1).default(30),
+  // Derive the client IP from CF-Connecting-IP / X-Forwarded-For. Enable ONLY when
+  // the relayer is reachable solely through a proxy that sets them (Cloudflare
+  // tunnel + nginx); otherwise every client shares the proxy's IP (off) or could
+  // spoof its IP (on while directly reachable).
+  TRUST_PROXY: Joi.boolean().default(false),
 
   // Observability: Sentry runtime error tracking. When SENTRY_DSN is unset,
   // error reporting is disabled (the relayer runs unchanged).
@@ -202,6 +226,12 @@ export const configValidationSchema = Joi.object({
   // App
   INTENT_TTL_MS: Joi.number().integer().default(3600000),
   PORT: Joi.number().default(3000),
+  // Internal Prometheus scrape port. /metrics is NOT served on PORT (it exposes
+  // wallet balances); keep this port off the public tunnel / reverse proxy.
+  METRICS_PORT: Joi.number().integer().min(1).max(65535).default(9464),
+  METRICS_HOST: Joi.string().default('0.0.0.0'),
+  // Optional bearer token required on scrapes (defence in depth).
+  METRICS_TOKEN: Joi.string().optional().allow(''),
   LOG_LEVEL: Joi.string().default('info'),
 }).custom((value: Record<string, unknown>, helpers) => {
   // Cross-field sanity for mainnet: catch a testnet value copied into a mainnet

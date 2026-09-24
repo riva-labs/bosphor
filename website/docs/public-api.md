@@ -70,9 +70,40 @@ Timestamps are epoch milliseconds. `txHash` holds the EVM transaction hash or Su
 
 If the feed store is unavailable, the endpoint responds `503 Service Unavailable` rather than returning stale or fabricated data. Consumers should surface this as an explicit "feed unavailable" state.
 
-### CORS
+## Calling the API from a browser dApp
 
-The API is read-only and restricted to the dashboard origin via CORS. Set `DASHBOARD_ORIGIN` in the relayer environment to the origin that is allowed to read it (defaults to `https://status.bosphor.xyz`).
+The integrator endpoints (`POST /quote`, `POST /blob/{intentId}`, `POST /blob/encode`) are meant to be called straight from a browser, so the relayer answers CORS preflights and allows `GET`, `POST` and `OPTIONS` from its configured origin allowlist.
+
+- The public relayers allow any origin (`CORS_ORIGINS=*`), so a dApp on your own domain works without any setup.
+- An operator can restrict this with a comma-separated `CORS_ORIGINS` list. The dashboard origin (`DASHBOARD_ORIGIN`, default `https://status.bosphor.xyz`) is always added to an explicit list, so the public status page keeps working.
+- Allowed request headers are `Content-Type` and `X-Bosphor-App`. `Retry-After`, `X-RateLimit-Limit` and `X-RateLimit-Remaining` are exposed to browser code. No credentials (cookies) are used.
+
+### Identifying your app: `X-Bosphor-App`
+
+Send an optional `X-Bosphor-App` header with a short slug that names your application, for example `X-Bosphor-App: my-dapp`. The relayer records it with the intent when the bytes are ingested, so usage from your app is counted separately from scripts and tests.
+
+- Format: starts with a letter or digit, then letters, digits, `-`, `_` or `.`, at most 64 characters. Ids are case-insensitive (stored lower-case).
+- The header is optional. Without it the intent is recorded with no app.
+- A malformed value is rejected with `400 Bad Request`.
+- It is attribution only, not authentication: it grants nothing.
+
+The SDK sends it for you when you pass `appId` to the client:
+
+```ts
+const client = createBosphorClient({ adapter, relayerUrl, dstEid: 40378, appId: "my-dapp" });
+```
+
+### Rate limits
+
+The relayer limits `POST /quote`, `POST /blob/{intentId}` and `POST /blob/encode` per client IP, and per app id when `X-Bosphor-App` is sent. Over the limit it answers `429 Too Many Requests` with a `Retry-After` header (seconds). Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+
+| Budget | Default | Scope |
+|--------|---------|-------|
+| Per IP | 120 requests / minute | `/quote`, `/blob/{intentId}` and `/blob/encode` together |
+| Per IP, encode | 30 requests / minute | `POST /blob/encode` only (it is CPU heavy) |
+| Per app id | 1200 requests / minute | All three routes, across all IPs sending that app id |
+
+Back off and retry after `Retry-After` on a `429`. Preflight (`OPTIONS`) requests are never counted.
 
 ## Quote (pricing)
 
@@ -124,7 +155,7 @@ This is the M3 data-independent-cost design in practice. Only the 49-byte commit
 Send the raw blob bytes as the request body. The relayer recomputes the Walrus blob id and size from the body and binds them to the on-chain commitment recorded for `intentId`.
 
 - **Path parameter**: `intentId`, the 0x-prefixed 32-byte intent id returned by `submitIntent`.
-- **Headers**: `content-type: application/octet-stream`.
+- **Headers**: `content-type: application/octet-stream`, and optionally `X-Bosphor-App: <your-app>` (see [identifying your app](#identifying-your-app-x-bosphor-app)).
 - **Body**: the raw blob bytes (not base64, not multipart, not JSON).
 
 Base URL: `https://api.bosphor.xyz/testnet` on testnet, `https://api.bosphor.xyz` on mainnet.
@@ -148,15 +179,20 @@ Each rejection maps to a precise HTTP status so a client can react without parsi
 
 | Status | Meaning |
 |--------|---------|
-| `400 Bad Request` | Body is empty or not raw bytes |
+| `400 Bad Request` | Body is empty or not raw bytes, or `X-Bosphor-App` is malformed |
 | `404 Not Found` | No pending intent for that id (or the relayer has not seen it yet) |
 | `409 Conflict` | The intent is already executed |
 | `410 Gone` | The intent deadline has passed |
 | `413 Payload Too Large` | Body exceeds the ingest cap (`MAX_INGEST_BLOB_BYTES`, default 10 MiB) |
 | `422 Unprocessable Entity` | The recomputed blob id or size does not match the commitment |
+| `429 Too Many Requests` | Rate limit exceeded; honor `Retry-After` |
 | `503 Service Unavailable` | The relayer is not ready or is shedding load (backpressure); honor `Retry-After` |
 
 A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff. A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
+
+### `POST {relayerBaseUrl}/blob/encode`
+
+Encode-only helper: send raw bytes, get back the Walrus blob id you must commit to on-chain (`{ "blobId": "...", "size": 1024 }`). Nothing is stored and no WAL is spent. It lets a browser dApp derive the blob id without loading the Walrus SDK or depending on a public publisher. It has a tighter rate limit than the other routes because encoding is CPU heavy.
 
 The `@bosphor/sdk` `store()` flow performs this upload for you (`client.upload(intentId, data)` is also exposed as an escape hatch). See [sdk.bosphor.xyz](https://sdk.bosphor.xyz).
 

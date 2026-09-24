@@ -22,6 +22,13 @@ export interface PgQueryable {
 
 const TABLE = 'staged_intent';
 
+/** Row metadata projection shared by every read: never the BYTEA payload. */
+const ROW_COLUMNS = `intent_id, committed_blob_id, size, deadline, src_eid, received,
+              delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
+              walrus_object_id, walrus_blob_id, end_epoch, storage_epochs, store_digest, returned,
+              state, attempts, next_attempt_at, last_error, created_at, updated_at,
+              claimed_by, lease_expires_at, app_id, stored_at, ledgered`;
+
 /** Default claim lease: 10 minutes, 5x the per-attempt store timeout. */
 export const DEFAULT_LEASE_MS = 600_000;
 
@@ -111,6 +118,15 @@ export class StagedIntentStore {
     // this table and keeping the injected `now` the single clock source.
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS claimed_by TEXT`);
     await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT`);
+    // Additive migration: integrator provenance (X-Bosphor-App) captured on ingest,
+    // the execute_store completion time, and whether the durable ops ledger
+    // (storage_op_ledger) has recorded this store yet. `ledgered` defaults false,
+    // so completed rows that predate the ledger are backfilled while retained.
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS app_id TEXT`);
+    await this.pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS stored_at BIGINT`);
+    await this.pool.query(
+      `ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS ledgered BOOLEAN NOT NULL DEFAULT false`,
+    );
     // Additive migration: the committed storage duration from IntentReceived.
     // Nullable: rows recorded before it existed read as "no epochs" (legacy),
     // which the store path resolves to WALRUS_STORE_EPOCHS and logs.
@@ -166,20 +182,21 @@ export class StagedIntentStore {
           WHERE bytes IS NOT NULL AND intent_id <> $1
        )
        INSERT INTO ${TABLE}
-         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at)
-       SELECT $1, $2, $3, $4::bigint, $5, $5, $5
+         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at, app_id)
+       SELECT $1, $2, $3, $4::bigint, $5, $5, $5, $8
          FROM capacity
         WHERE $6 = false OR capacity.staged + $4::bigint <= $7::bigint
        ON CONFLICT (intent_id) DO UPDATE SET
          bytes = EXCLUDED.bytes,
          blob_id = EXCLUDED.blob_id,
          size = EXCLUDED.size,
-         updated_at = EXCLUDED.updated_at
+         updated_at = EXCLUDED.updated_at,
+         app_id = COALESCE(EXCLUDED.app_id, ${TABLE}.app_id)
        WHERE ${TABLE}.state = 'active'
          AND ($6 = false
               OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7::bigint)
        RETURNING intent_id`,
-      [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap],
+      [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap, blob.appId ?? null],
     );
     if (rows.length > 0) return 'accepted';
     // No row written. Distinguish "cap would be breached" from "row is terminal"
@@ -313,11 +330,7 @@ export class StagedIntentStore {
            LIMIT $2
            FOR UPDATE SKIP LOCKED
         )
-        RETURNING intent_id, committed_blob_id, size, deadline, src_eid, received,
-              delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
-              walrus_object_id, walrus_blob_id, end_epoch, storage_epochs, store_digest, returned,
-              state, attempts, next_attempt_at, last_error, created_at, updated_at,
-              claimed_by, lease_expires_at`,
+        RETURNING ${ROW_COLUMNS}`,
       [now, limit, this.claimant, this.leaseMs],
     );
     // RETURNING does not guarantee the subselect's order; restore oldest-first.
@@ -343,12 +356,38 @@ export class StagedIntentStore {
     );
   }
 
-  /** Persist a successful execute_store so a retry never re-records on Sui. */
+  /**
+   * Persist a successful execute_store so a retry never re-records on Sui. Also
+   * stamps `stored_at`, the completion time the durable ops ledger records.
+   */
   async persistStore(intentId: string, storeDigest: string): Promise<void> {
     await this.pool.query(
-      `UPDATE ${TABLE} SET store_digest = $2, updated_at = $3 WHERE intent_id = $1`,
+      `UPDATE ${TABLE} SET store_digest = $2, stored_at = $3, updated_at = $3 WHERE intent_id = $1`,
       [intentId, storeDigest, Date.now()],
     );
+  }
+
+  /** Flag that the durable ops ledger has recorded this completed store. */
+  async markLedgered(intentId: string): Promise<void> {
+    await this.pool.query(`UPDATE ${TABLE} SET ledgered = true WHERE intent_id = $1`, [intentId]);
+  }
+
+  /**
+   * Completed stores (execute_store succeeded, store_digest set) the ops ledger
+   * has not recorded yet, oldest first. The ledger backfill sweep drains these,
+   * so a ledger write that failed inline is retried until it lands. Any state:
+   * a store can complete and then dead-letter on its return leg.
+   */
+  async pendingLedger(limit: number): Promise<StagedIntentRow[]> {
+    const { rows } = await this.pool.query(
+      `SELECT ${ROW_COLUMNS}
+         FROM ${TABLE}
+        WHERE store_digest IS NOT NULL AND NOT ledgered
+        ORDER BY created_at
+        LIMIT $1`,
+      [limit],
+    );
+    return rows.map((r) => this.mapRow(r));
   }
 
   /** Mark the return-leg proof confirmed. */
@@ -457,11 +496,16 @@ export class StagedIntentStore {
     return rows.length;
   }
 
-  /** Delete terminal rows older than `cutoff` (retention). Returns the number purged. */
+  /**
+   * Delete terminal rows older than `cutoff` (retention). Returns the number
+   * purged. A completed store is kept until the ops ledger has recorded it, so a
+   * persistently failing ledger write can never lose the op to the reaper.
+   */
   async purgeTerminal(cutoff: number): Promise<number> {
     const { rows } = await this.pool.query(
       `DELETE FROM ${TABLE}
         WHERE state IN ('done', 'dead', 'expired') AND updated_at < $1
+          AND (store_digest IS NULL OR ledgered)
         RETURNING intent_id`,
       [cutoff],
     );
@@ -471,11 +515,7 @@ export class StagedIntentStore {
   /** Read a single row's metadata (no bytes). Used for inspection and tests. */
   async get(intentId: string): Promise<StagedIntentRow | undefined> {
     const { rows } = await this.pool.query(
-      `SELECT intent_id, committed_blob_id, size, deadline, src_eid, received,
-              delivery_digest, (bytes IS NOT NULL) AS has_bytes, blob_id,
-              walrus_object_id, walrus_blob_id, end_epoch, storage_epochs, store_digest, returned,
-              state, attempts, next_attempt_at, last_error, created_at, updated_at,
-              claimed_by, lease_expires_at
+      `SELECT ${ROW_COLUMNS}
          FROM ${TABLE} WHERE intent_id = $1`,
       [intentId],
     );
@@ -508,6 +548,9 @@ export class StagedIntentStore {
       claimedBy: str(row.claimed_by),
       leaseExpiresAt: num(row.lease_expires_at),
       lastError: str(row.last_error),
+      appId: str(row.app_id),
+      storedAt: num(row.stored_at),
+      ledgered: Boolean(row.ledgered),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
     };

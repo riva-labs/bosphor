@@ -7,7 +7,7 @@
  * breakdown. Bigint amounts cross the wire as decimal strings and are parsed
  * back to `bigint` here so no precision is lost.
  */
-import { resolveFetch, type FetchLike } from "./store-flow.js";
+import { relayerHeaders, resolveFetch, validateAppId, type FetchLike } from "./store-flow.js";
 import { BosphorError } from "./errors.js";
 
 export type OriginToken = "ETH" | "SOL";
@@ -54,6 +54,8 @@ export interface FetchQuoteOptions {
   /** Injected fetch (defaults to global fetch). */
   fetch?: FetchLike;
   signal?: AbortSignal;
+  /** Integrator app id, sent as the `X-Bosphor-App` header (attribution only). */
+  appId?: string;
 }
 
 /**
@@ -68,6 +70,7 @@ export async function fetchQuote(
   opts: FetchQuoteOptions = {},
 ): Promise<PricedQuote> {
   const fetchFn = resolveFetch(opts.fetch);
+  const appId = validateAppId(opts.appId);
   const url = `${relayerUrl.replace(/\/+$/, "")}/quote`;
   const payload: Record<string, unknown> = {
     sizeBytes: request.sizeBytes,
@@ -82,7 +85,7 @@ export async function fetchQuote(
   const init = {
     method: "POST",
     body: new TextEncoder().encode(JSON.stringify(payload)),
-    headers: { "content-type": "application/json" },
+    headers: relayerHeaders("application/json", appId),
     ...(opts.signal ? { signal: opts.signal } : {}),
   };
 

@@ -107,6 +107,7 @@ export async function runLocalProfile(
       storageEpochs: 5,
       blobId: COMMITTED_B64URL,
       returned: false,
+      ledgered: false,
       state: 'active',
       attempts: 0,
       nextAttemptAt: 0,

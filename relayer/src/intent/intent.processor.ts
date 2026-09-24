@@ -33,14 +33,12 @@ import { BreakEvenGuardService } from '../settlement/break-even-guard.service';
 import { SettlementReconciler } from '../settlement/settlement-reconciler.service';
 import { EscrowReader, ESCROW_READER } from '../settlement/escrow-reader';
 import { BreakEvenDecision } from '../pricing/break-even-guard';
-
-/**
- * Marker stored in store_digest when execute_store aborts with
- * EIntentAlreadyExecuted (a prior attempt recorded this intent on Sui). It lets
- * a retry skip the re-record without a real digest, and keeps the column
- * non-null so the idempotency guard fires.
- */
-const ALREADY_RECORDED = 'already-recorded';
+// ALREADY_RECORDED: marker stored in store_digest when execute_store aborts with
+// EIntentAlreadyExecuted (a prior attempt recorded this intent on Sui). It lets a
+// retry skip the re-record without a real digest, and keeps the column non-null
+// so the idempotency guard fires. Shared with the ops ledger, which maps it to a
+// null digest.
+import { ALREADY_RECORDED, StorageOpLedger } from '../ledger/storage-op-ledger.service';
 
 /**
  * Drives the durable store queue.
@@ -129,6 +127,9 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     @Inject(SettlementReconciler)
     private readonly reconciler: SettlementReconciler | null = null,
     @Optional() @Inject(ESCROW_READER) private readonly escrowReader: EscrowReader | null = null,
+    // Durable ops ledger writer. Optional: without it (no DATABASE_URL, tests)
+    // the store pipeline runs unchanged, it just records no KPI evidence.
+    @Optional() @Inject(StorageOpLedger) private readonly ledger: StorageOpLedger | null = null,
   ) {
     this.evmDstEid = this.config.getOrThrow<number>('EVM_DST_EID');
     // Network-preset values: always set by the config schema (see
@@ -616,6 +617,23 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
     await this.trackHop(intentId, 'recorded_sui', {
       txHash: storeDigest === ALREADY_RECORDED ? undefined : storeDigest,
     });
+
+    // 3b. The store is complete: record it in the durable ops ledger, exactly
+    // once per intent (idempotent insert + the row's `ledgered` flag, so a
+    // return-leg retry re-running this step is a no-op). Never throws: a ledger
+    // failure is logged + counted and the backfill sweep retries it, so KPI
+    // bookkeeping can never fail or block the store.
+    if (!row.ledgered && this.ledger) {
+      await this.ledger.recordCompletedStore({
+        row,
+        sender,
+        committedBlobId: commitment?.committedBlobId ?? row.committedBlobId,
+        walrusBlobId,
+        walrusObjectId,
+        endEpoch,
+        storeDigest,
+      });
+    }
 
     // 4. Blob is safe on Walrus + recorded on Sui: free the bytes.
     await staged.freeBytes(intentId);

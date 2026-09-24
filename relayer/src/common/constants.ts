@@ -49,6 +49,14 @@ export const REAP_INTERVAL_MS = 10_000;
  */
 export const BYTES_RECOVERY_INTERVAL_MS = 15_000;
 
+/**
+ * Ops-ledger backfill cadence (ms). Records completed stores that the inline
+ * ledger write missed (a transient DB error or a crash between execute_store and
+ * the ledger write). Well inside STAGED_RETENTION_MS, and the reaper keeps
+ * un-ledgered completed rows regardless.
+ */
+export const LEDGER_BACKFILL_INTERVAL_MS = 30_000;
+
 /** WAL coin type (the token that pays for storage) per Sui network. */
 export const WAL_COIN_TYPE_BY_NETWORK: Record<'mainnet' | 'testnet', string> = {
   testnet: '0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a::wal::WAL',

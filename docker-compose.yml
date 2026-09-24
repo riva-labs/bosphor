@@ -23,6 +23,10 @@ services:
     env_file: .env
     ports:
       - "3000:3000"
+    # Internal Prometheus scrape port (METRICS_PORT). Reachable by prometheus over
+    # the compose network only; deliberately not published on the host.
+    expose:
+      - "9464"
     # Headroom for staged blob buffers (BYTEA payloads are fetched lazily, but a
     # store batch can hold several blobs in memory at once).
     mem_limit: 1536m
@@ -59,8 +63,9 @@ services:
       - bosphor-promdata:/prometheus
     ports:
       - "9090:9090"
-    # Lets Prometheus scrape host-published services (e.g. the testnet relayer on
-    # :3399, which runs in a separate compose project) via host.docker.internal.
+    # Lets Prometheus scrape host-published services (e.g. the testnet relayer's
+    # metrics port :9465, which runs in a separate compose project) via
+    # host.docker.internal.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 512m

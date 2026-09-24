@@ -133,6 +133,7 @@ describe('InMemoryStagedStore', () => {
       received: true,
       hasBytes: true,
       returned: false,
+      ledgered: false,
       state: 'active' as const,
       attempts: 0,
       updatedAt: 0,
