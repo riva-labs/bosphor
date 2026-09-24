@@ -7,8 +7,9 @@
  * releases the escrow to the relayer.
  *
  * Not run in CI. Needs a devnet keypair with SOL (a 1 KB store costs roughly
- * 0.035 SOL at current prices, including the LayerZero fee and account rent) and
- * the optional peers `@solana/web3.js`, `@mysten/walrus`, `@mysten/sui`.
+ * 0.03 SOL at current prices, including the LayerZero fee and account rent) and
+ * the optional peers `@solana/web3.js`, `@mysten/walrus`, `@mysten/sui`. Install
+ * `@layerzerolabs/lz-solana-sdk-v2` too for an exact LayerZero fee in the quote.
  *
  *   KEYPAIR, FILE, RPC_URL (optional)
  *
@@ -44,11 +45,14 @@ async function main(): Promise<void> {
   const quote = await client.priceQuote(encoded);
   console.log("All-in quote:");
   console.log(`  escrow:  ${sol(quote.escrowNative)} SOL ($${quote.breakdown.escrowUsd.toFixed(4)})`);
-  console.log(`  LZ fee:  up to ${sol(quote.forwardNative)} SOL`);
+  console.log(`  LZ fee:  ${quote.forwardIsUpperBound ? "up to " : ""}${sol(quote.forwardNative)} SOL`);
   console.log(`  total:   ${sol(quote.totalNative)} SOL ($${quote.breakdown.totalUsd.toFixed(4)})`);
 
   console.log(`Storing ${data.length} bytes via one storePriced() call...`);
-  const result = await client.storePriced(data, { epochs: 5 });
+  const result = await client.storePriced(data, {
+    epochs: 5,
+    onProgress: (e) => console.log(`  .. ${e.step}${e.step === "submitted" ? ` ${e.txHash}` : ""}`),
+  });
 
   console.log("Stored, verified, and escrow released on proof:");
   console.log(`  intentId: ${result.intentId}`);

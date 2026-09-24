@@ -42,7 +42,10 @@ async function main(): Promise<void> {
   console.log(`  total:    ${ethers.formatEther(quote.totalNative)} ETH ($${quote.breakdown.totalUsd.toFixed(4)})`);
 
   console.log(`Storing ${data.length} bytes via one storePriced() call...`);
-  const result = await client.storePriced(data, { epochs: 5 });
+  const result = await client.storePriced(data, {
+    epochs: 5,
+    onProgress: (e) => console.log(`  .. ${e.step}${e.step === "submitted" ? ` ${e.txHash}` : ""}`),
+  });
 
   console.log("Stored, verified, and escrow released on proof:");
   console.log(`  intentId: ${result.intentId}`);
