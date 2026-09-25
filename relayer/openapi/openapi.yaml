@@ -604,8 +604,9 @@ components:
             message: rate limit exceeded (ip); retry after 42s
     InternalError:
       description: |
-        Unexpected failure, for example no usable price source for a quote or an
-        unsupported `originToken`. The body carries no `error` field.
+        Unexpected failure, for example no usable price source for a quote. A
+        malformed request is always a `400`, never a `500`. The body carries no
+        `error` field.
       content:
         application/json:
           schema:

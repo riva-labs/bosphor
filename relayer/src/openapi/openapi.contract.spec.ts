@@ -293,6 +293,21 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
       await expectDocumented('post', '/quote', res);
     });
 
+    it.each([
+      ['an unsupported originToken', { sizeBytes: 1, originToken: 'DOGE' }],
+      ['a missing sizeBytes', { originToken: 'ETH' }],
+      ['a negative sizeBytes', { sizeBytes: -5, originToken: 'ETH' }],
+      ['a fractional sizeBytes', { sizeBytes: 1.5, originToken: 'ETH' }],
+      [
+        'a non-decimal forwardLzFeeNative',
+        { sizeBytes: 1, originToken: 'ETH', forwardLzFeeNative: '0x10' },
+      ],
+    ])('POST /quote with %s returns the documented 400 (never a 500)', async (_label, body) => {
+      const res = await post('/quote', JSON.stringify(body), jsonHeaders);
+      expect(res.status).toBe(400);
+      await expectDocumented('post', '/quote', res);
+    });
+
     it('POST /quote with a malformed X-Bosphor-App returns the documented 400', async () => {
       const res = await post('/quote', JSON.stringify({ sizeBytes: 1, originToken: 'ETH' }), {
         ...jsonHeaders,
