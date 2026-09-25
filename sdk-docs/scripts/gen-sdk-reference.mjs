@@ -234,6 +234,30 @@ function absoluteLinks(body, pageUrl) {
   );
 }
 
+/**
+ * Structural sub-headings the plugin emits under every symbol (Parameters,
+ * Returns, ...). Rendered as bold labels instead, so the table of contents lists
+ * only symbols and their members.
+ */
+const SECTION_LABELS = new Set([
+  'Accessors', 'Call Signature', 'Constructors', 'Default Value', 'Deprecated', 'Example', 'Examples',
+  'Extended by', 'Extends', 'Implementation of', 'Implements', 'Index Signature', 'Inherited from',
+  'Methods', 'Overrides', 'Parameters', 'Properties', 'Remarks', 'Returns', 'See', 'Throws',
+  'Type Declaration', 'Type Parameters',
+]);
+
+function sectionLabels(body) {
+  let inFence = false;
+  return body
+    .split('\n')
+    .map((line) => {
+      if (line.startsWith('```')) inFence = !inFence;
+      const m = !inFence && /^#{4,6} (.+)$/.exec(line);
+      return m && SECTION_LABELS.has(m[1]) ? `**${m[1]}**` : line;
+    })
+    .join('\n');
+}
+
 const code = (name) => `\`${name}\``;
 
 /**
@@ -351,7 +375,7 @@ async function main() {
       title = model.name;
       description = `${group?.description ?? ''} Exported from ${areaOf(model.parent).importPath}.`.trim();
     }
-    body = absoluteLinks(body, page.url);
+    body = absoluteLinks(sectionLabels(body), page.url);
     page.contents = `---\ntitle: ${yamlString(title)}\ndescription: ${yamlString(description)}\n---\n\n${body.trim()}\n`;
   });
 
