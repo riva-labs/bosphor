@@ -7,13 +7,22 @@ The relayer is the only off-chain service an integrator talks to. The SDK calls
 it for you, so you only need this page if you build your own client, show a
 live status view, or debug a store.
 
-| Method | Path | What it does |
-|--------|------|--------------|
-| `GET` | [`/public/intents`](#get-publicintents) | The live lifecycle of recent intents, newest first |
-| `POST` | [`/quote`](#post-relayerbaseurlquote) | An all-in price for a store, in the origin chain's native token |
-| `POST` | [`/blob/{intentId}`](#post-relayerbaseurlblobintentid) | Upload the file bytes for an on-chain intent, out-of-band |
-| `POST` | [`/blob/encode`](#post-relayerbaseurlblobencode) | Compute a blob id without storing anything |
-| `GET` | `/health` | Liveness of the relayer and its chain connections |
+Every endpoint has its own reference page, generated from the relayer's
+[OpenAPI 3.1 spec](https://github.com/riva-labs/bosphor/blob/main/relayer/openapi/openapi.yaml),
+with request and response schemas, code samples (curl, `fetch` and the
+`@bosphor/sdk` call where one exists) and a **try it** console that calls the
+hosted testnet relayer straight from your browser. The relayer also serves the
+spec itself at [`/openapi.json`](https://api.bosphor.xyz/testnet/openapi.json),
+so you can load it into Postman, Insomnia or a client generator.
+
+| Group | Method | Path | What it does |
+|-------|--------|------|--------------|
+| Health | `GET` | [`/health`](/docs/api/health/get-health) | Liveness of the relayer and its chain connections |
+| Pricing | `POST` | [`/quote`](/docs/api/pricing/create-quote) | An all-in price for a store, in the origin chain's native token |
+| Ingest | `POST` | [`/blob/encode`](/docs/api/ingest/encode-blob) | Compute a blob id without storing anything |
+| Ingest | `POST` | [`/blob/{intentId}`](/docs/api/ingest/ingest-blob) | Upload the file bytes for an on-chain intent, out-of-band |
+| Status | `GET` | [`/public/intents`](/docs/api/status/list-intents) | The live lifecycle of recent intents, newest first |
+| Meta | `GET` | [`/openapi.json`](/docs/api/meta/get-open-api-json), [`/openapi.yaml`](/docs/api/meta/get-open-api-yaml) | This API description |
 
 Base URLs:
 
@@ -22,10 +31,16 @@ Base URLs:
 | Testnet (Sepolia, Solana devnet, Sui testnet) | `https://api.bosphor.xyz/testnet` |
 | Mainnet | `https://api.bosphor.xyz` |
 
-<Callout type="info" title="Interactive reference coming">
-An OpenAPI-rendered reference with a "try it" console will replace this
-hand-written page. The endpoints and their behaviour below are current.
+<Callout type="info" title="Trying it out">
+`GET /health`, `POST /quote` and `GET /public/intents` work straight from the
+try it console. `POST /blob/{intentId}` needs the id of an intent you have
+already submitted on chain (any other id gets a `404`), so upload through the
+SDK `store()` call instead of the console. `POST /blob/encode` is rate limited
+tightly because it is CPU heavy.
 </Callout>
+
+The sections below explain the concepts behind the endpoints: the intent
+lifecycle, browser use and rate limits, pricing and the out-of-band upload.
 
 ## Intent feed
 
@@ -51,6 +66,8 @@ Each intent travels six hops on its cross-chain round trip. The relayer records 
 An intent's `status` is the furthest hop it has reached. The `stored_walrus` hop carries the Walrus `blobId`, the Sui object id of the blob, and the storage expiry epoch, so a consumer can deep-link the payload on Walruscan.
 
 ## `GET /public/intents`
+
+[Reference and try it](/docs/api/status/list-intents).
 
 Returns the most recent intents, newest first.
 
@@ -137,6 +154,8 @@ truth (contracts hold no oracle), exposed as a quote endpoint. See the
 
 ### `POST {relayerBaseUrl}/quote`
 
+[Reference and try it](/docs/api/pricing/create-quote).
+
 Body (JSON): `sizeBytes` (number), `originToken` (`"ETH"` or `"SOL"`), and
 optional `epochs`, `forwardLzFeeNative` (decimal string, from the on-chain
 adapter quote), `originGasNative` (decimal string).
@@ -175,6 +194,8 @@ rather than returning a fabricated quote. The SDK wraps this as
 This is the M3 data-independent-cost design in practice. Only the 49-byte commitment travels cross-chain; the file bytes go out-of-band to the relayer, which is held to the commitment. After `submitIntent` returns an `intentId`, upload the exact bytes you committed to the relayer so it can store them on Walrus and fulfill the intent.
 
 ### `POST {relayerBaseUrl}/blob/{intentId}`
+
+[Reference](/docs/api/ingest/ingest-blob).
 
 Send the raw blob bytes as the request body. The relayer recomputes the Walrus blob id and size from the body and binds them to the on-chain commitment recorded for `intentId`.
 
@@ -215,6 +236,8 @@ Each rejection maps to a precise HTTP status so a client can react without parsi
 A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff. A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
 
 ### `POST {relayerBaseUrl}/blob/encode`
+
+[Reference and try it](/docs/api/ingest/encode-blob).
 
 Encode-only helper: send raw bytes, get back the Walrus blob id you must commit to on-chain (`{ "blobId": "...", "size": 1024 }`). Nothing is stored and no WAL is spent. It lets a browser dApp derive the blob id without loading the Walrus SDK or depending on a public publisher. It has a tighter rate limit than the other routes because encoding is CPU heavy.
 

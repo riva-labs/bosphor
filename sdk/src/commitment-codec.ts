@@ -11,15 +11,23 @@
  *
  * intentId derivation:
  *   keccak256( commitment(49) ++ sender(32, left-padded big-endian) ++ nonce(u64) )
+ *
+ * @module
  */
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
+/** Length of the encoded commitment on the wire, in bytes. */
 export const COMMITMENT_BYTES = 49;
+/** Length of a Walrus blob id inside the commitment, in bytes. */
 export const BLOB_ID_BYTES = 32;
 /** Canonical sender width in the intentId preimage (big-endian, left-padded). */
 export const SENDER_BYTES = 32;
 
+/**
+ * The storage terms an intent commits to, the payload that travels over
+ * LayerZero. {@link encodeCommitment} packs it into its 49-byte wire form.
+ */
 export interface Commitment {
   /** 32-byte Walrus blob id. */
   blobId: Uint8Array;

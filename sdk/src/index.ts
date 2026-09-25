@@ -9,6 +9,8 @@
  *   - `@bosphor/sdk`        core codec + shared types (no chain SDK)
  *   - `@bosphor/sdk/evm`    the EVM client and one-call `store()` (opt-in ethers)
  *   - `@bosphor/sdk/solana` the Solana client and one-call `store()` (opt-in web3.js)
+ *
+ * @module
  */
 
 export {

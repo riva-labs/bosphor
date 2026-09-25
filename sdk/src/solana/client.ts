@@ -120,6 +120,11 @@ export interface SolanaChain {
   refundEscrow?(intentId: Hex): Promise<{ signature: string }>;
 }
 
+/**
+ * Options for `new BosphorSolanaClient(opts)` and {@link createBosphorSolanaClient}.
+ * Most integrators use `createBosphorSolanaClientFromKeypair`, which fills these
+ * from a network preset.
+ */
 export interface BosphorSolanaClientOptions {
   /** A `SolanaChain` backend bound to the deployed adapter and a funded wallet. */
   chain: SolanaChain;
@@ -163,6 +168,7 @@ export interface BosphorSolanaClientOptions {
   appId?: string;
 }
 
+/** Per-call overrides for `submit()`, `submitPaid()` and the one-call store methods. */
 export interface SubmitOptions {
   /** Override the client's destination endpoint id. */
   dstEid?: number;

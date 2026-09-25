@@ -49,7 +49,7 @@ export function getSections(): { title: string; description: string; pages: Entr
       const home = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
       const pages = linked
         .filter((p) => dirOf(p) === home)
-        .map((p) => ({ title: p.data.title, url: p.url, description: p.data.description }));
+        .map((p) => ({ title: p.data.title ?? p.url, url: p.url, description: p.data.description }));
       return { title: text(folder.name), description: text(folder.description), pages };
     });
 }

@@ -1,39 +1,45 @@
 ---
 title: Playground
 description: Price a store and run a real round-trip on the hosted testnet from your browser.
+full: true
 ---
 
-The playground will let you try Bosphor without writing code: get a live price for
-any file size with no wallet, then connect a Sepolia or Solana devnet wallet and
-run a real store on the hosted testnet.
+import { Playground } from '@/components/playground';
 
-<Callout type="info" title="Coming soon">
-The interactive playground is being built. Until it lands, you can do the same
-things below.
+Try Bosphor without writing code. Price any file on the hosted testnet with no wallet,
+see the SDK call that does the same thing, then optionally connect a Sepolia wallet
+and run a real store: pay once, watch LayerZero carry the intent to Sui, the relayer
+store the file on Walrus, and the proof come back.
+
+<Playground />
+
+<Callout type="warn" title="Testnet only">
+Everything here runs against the hosted testnet (Ethereum Sepolia, Solana devnet,
+Sui testnet, Walrus testnet). Prices use live token rates, but you pay in test ETH.
+Requests from this page are attributed to the app id `bosphor-playground`.
 </Callout>
 
-## Get a live price now
+## What the numbers mean
 
-The relayer quotes any store with no wallet. `sizeBytes` is your file size and
-`originToken` is `ETH` or `SOL`:
+The quote is one amount in the origin chain's native token. It has two parts:
 
-```bash
-curl -s -X POST https://api.bosphor.xyz/testnet/quote \
-  -H 'content-type: application/json' \
-  -d '{"sizeBytes":1024,"epochs":5,"originToken":"ETH"}'
-```
+- **Escrow**: Walrus storage, Sui gas, the LayerZero fee for the proof's return
+  trip, a price buffer, and the service margin. It is held by the adapter and
+  released to the relayer only when the storage proof arrives, or refunded after
+  the deadline if it never does.
+- **LayerZero forward fee**: paid to LayerZero at submit to carry the intent to Sui.
 
-From code, `quoteEvmStore` and `quoteSolanaStore` return the all-in price
-including the LayerZero fee. See
-[Quote without a wallet](/docs/guides/pay-for-storage#quote-without-a-wallet).
+On Solana, this page prices the forward fee at the preset cap, because the live fee
+needs the optional `@layerzerolabs/lz-solana-sdk-v2` package. The amount actually
+charged is lower. See [What the quote contains](/docs/guides/pay-for-storage#what-the-quote-contains) for the full
+pricing model.
 
-## Run a store now
+## Keep going
 
-- [demo.bosphor.xyz](https://demo.bosphor.xyz): the reference dApp, a real
-  round-trip from a browser wallet.
-- [Quickstart](/docs/quickstart): the same round-trip from a Node.js script in
-  about 15 minutes.
-- [Examples](/docs/examples): starter repos you can clone and run.
+- [Quickstart](/docs/quickstart): the same round-trip from a Node.js script.
+- [Examples](/docs/examples): EVM and Solana starter repos you can clone and run.
+- [demo.bosphor.xyz](https://demo.bosphor.xyz): the reference dApp, with a file
+  drive on top of the same flow.
 
 ## Watch live traffic
 

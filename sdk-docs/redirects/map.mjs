@@ -50,6 +50,8 @@ export const legacySdkSite = {
   '/docs/errors': '/docs/guides/errors',
   '/docs/resume': '/docs/guides/resume',
   '/docs/faq': '/docs/guides/faq',
+  // The hand-written codec page became a page of the generated Core reference.
+  '/docs/reference/codec': '/docs/reference/core/commitment-codec',
 };
 
 /**
@@ -67,7 +69,6 @@ export const unchangedSdkPaths = [
   '/docs/reference/core',
   '/docs/reference/evm',
   '/docs/reference/solana',
-  '/docs/reference/codec',
   '/llms.txt',
   '/llms-full.txt',
   '/sitemap.xml',

@@ -4,6 +4,11 @@
   "icon": "Webhook",
   "root": true,
   "pages": [
-    "index"
+    "index",
+    "health",
+    "pricing",
+    "ingest",
+    "status",
+    "meta"
   ]
 }
