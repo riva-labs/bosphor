@@ -1,104 +1,107 @@
 ---
-title: Bosphor SDK
-description: TypeScript SDK for Bosphor. Store a file on Walrus from an EVM or Solana wallet, over LayerZero, and get a verifiable proof back on the origin chain. One package, one call.
+title: Overview
+description: Bosphor lets an EVM or Solana wallet store a file on Walrus over LayerZero and get a verifiable proof back on the origin chain. One package, one call.
 ---
 
-TypeScript SDK for building on Bosphor. Store a file on Walrus from an EVM or
-Solana wallet, over LayerZero, and get a verifiable proof back on the origin
-chain. One package, one call.
-
-## Installation
-
-The SDK ships as ESM. Install it alongside the peer packages for the chain you
-target. Chain SDKs are optional peer dependencies, loaded lazily, so a
-codec-only or single-chain consumer never pulls the ones it does not use.
-
-<Tabs groupId="package-manager" persist items={['npm', 'pnpm', 'yarn', 'bun']}>
-
-<Tab value="npm">
-```bash
-# EVM path
-npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
-# Solana path
-npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
-```
-</Tab>
-
-<Tab value="pnpm">
-```bash
-# EVM path
-pnpm add @bosphor/sdk ethers @mysten/walrus @mysten/sui
-# Solana path
-pnpm add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
-```
-</Tab>
-
-<Tab value="yarn">
-```bash
-# EVM path
-yarn add @bosphor/sdk ethers @mysten/walrus @mysten/sui
-# Solana path
-yarn add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
-```
-</Tab>
-
-<Tab value="bun">
-```bash
-# EVM path
-bun add @bosphor/sdk ethers @mysten/walrus @mysten/sui
-# Solana path
-bun add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
-```
-</Tab>
-
-</Tabs>
-
-<Callout title="Node 22+">
-The SDK is ESM-only and targets Node.js 22 or newer.
-</Callout>
-
-## Quick start
-
-Build a client from your wallet, then call `storePriced`. The whole paid
-cross-chain flow runs in one call against the hosted testnet and returns a result
-verified against on-chain state.
+Bosphor is a cross-chain storage router. A wallet on an EVM chain or Solana pays
+once on its own chain, the file is stored on [Walrus](https://www.walrus.xyz/)
+(decentralized storage on Sui), and a verifiable proof of storage comes back to
+the chain it started from. You integrate it with one TypeScript package,
+`@bosphor/sdk`, and one call.
 
 ```ts
 import { createBosphorClientFromSigner } from '@bosphor/sdk/evm';
 
 const client = await createBosphorClientFromSigner(signer);
-const result = await client.storePriced(bytes, { epochs: 5 });
-// { intentId, blobId, endEpoch, txHash, quote }
+const { intentId, blobId, endEpoch, txHash } = await client.storePriced(bytes, { epochs: 5 });
 ```
 
-The [Quickstart](/docs/quickstart) takes you from install to a verified
-round-trip.
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart">
+    Store your first file from Sepolia or Solana devnet on the hosted testnet.
+  </Card>
+  <Card title="How it works" href="/docs/how-it-works">
+    The commitment model, the out-of-band bytes, and why the fee is flat.
+  </Card>
+  <Card title="Guides" href="/docs/guides/pay-for-storage">
+    Pay for storage, drive the steps yourself, build a dApp, recover from errors.
+  </Card>
+  <Card title="Testnet addresses" href="/docs/reference/testnet">
+    Every deployed address, endpoint id, and URL, also shipped as the `TESTNET` preset.
+  </Card>
+</Cards>
+
+## What it does
+
+1. **Commit**: The SDK computes the Walrus blob id locally from your bytes, and your origin contract (EVM or Solana) submits a compact **commitment**: the blob id, size, encoding, storage duration, and a deadline.
+2. **Route**: LayerZero v2 delivers the commitment cross-chain to Sui, verified by DVNs. The file bytes go to the relayer **out-of-band** over HTTP, never through the bridge.
+3. **Store**: The relayer stores the bytes on Walrus, and `execute_store` on Sui asserts the stored blob id and end epoch match the commitment.
+4. **Prove**: A DVN-verified proof (blob id, end epoch) returns to the origin chain, which verifies the returned blob id equals the one it committed, and releases your payment from escrow to the relayer.
+
+Both legs of the round-trip are trustless. The relayer triggers execution but cannot forge proofs or substitute the stored bytes. Because only the commitment crosses the bridge, the cross-chain fee is **flat regardless of file size**.
+
+## Why Bosphor
+
+EVM and Solana developers cannot use Walrus natively. Walrus lives on Sui, so storing data from another chain would otherwise require bridging, transaction construction on Sui, and proof management across chains. Bosphor handles all of this behind a single SDK call.
+
+Without Bosphor, a developer would need to:
+
+- Run a Sui wallet and manage SUI tokens
+- Build and sign Sui transactions for Walrus blob uploads
+- Implement their own cross-chain message verification
+- Track storage proofs manually across two chains
+
+With Bosphor, the developer calls `storePriced()` from `@bosphor/sdk` on EVM or Solana and receives a verified result when the data is stored.
 
 ## Why the SDK
 
 <Cards>
   <Card title="One call" href="/docs/quickstart">
-    `await client.store(bytes, { epochs })` runs the whole cross-chain flow and
-    returns `{ intentId, blobId, endEpoch }`, verified against on-chain state.
+    `await client.storePriced(bytes, { epochs })` runs the whole cross-chain flow and
+    returns `{ intentId, blobId, endEpoch, txHash }`, verified against on-chain state.
   </Card>
   <Card title="Flat cross-chain cost" href="/docs/how-it-works">
     The blob id is committed on-chain and the bytes travel out-of-band, so the
     LayerZero fee is the same for a 1 KB file and a 1 GB file.
   </Card>
-  <Card title="Same API on every chain" href="/docs/solana">
+  <Card title="Same API on every chain" href="/docs/guides/solana">
     The EVM and Solana clients are identical where they overlap; the intent id is
     the same keccak digest across EVM, Sui, and Solana.
   </Card>
-  <Card title="Lean by default" href="/docs/evm">
+  <Card title="Lean by default" href="/docs/reference#installation">
     Chain SDKs are optional peer dependencies loaded lazily, so a codec-only or
     single-chain consumer never pulls them.
   </Card>
 </Cards>
 
-## Where to go next
+## Ecosystem
 
-- [Quickstart](/docs/quickstart): from install to a verified round-trip.
-- [Store from EVM](/docs/evm) and [Store from Solana](/docs/solana): the one-line API per chain.
-- [Handle errors](/docs/errors) and [Resume after a crash](/docs/resume): the failure model.
-- [How routing works](/docs/how-it-works): the commitment model and the cross-chain flow.
-- [API reference](/docs/reference/core): type tables generated from the SDK source.
+Bosphor connects several protocols:
+
+- **[Walrus](https://www.walrus.xyz/)**: Decentralized storage on Sui. Bosphor stores intent data as Walrus blobs.
+- **[LayerZero v2](https://layerzero.network/)**: Cross-chain messaging. Both message directions are DVN-verified.
+- **[Sui](https://sui.io/)**: The execution layer where Walrus storage and proof generation happen.
+- **Origin chains**: any EVM chain, and **Solana**, submit the same commitment over the same protocol.
+
+## Current status
+
+The hosted testnet runs the full paid round-trip from **Ethereum Sepolia** and **Solana devnet**:
+
+- **Paid storage**: users escrow one all-in payment on the origin chain, released to the relayer only by the LayerZero proof and refundable after a deadline. See [Pay for storage](/docs/guides/pay-for-storage).
+- **Reference commitments**: intents carry only a compact commitment (blob id, size, encoding, storage duration); the bytes travel out-of-band, so the cross-chain fee is flat regardless of file size.
+- **EVM and Solana origins live**: both submit the same commitment over LayerZero, with a verified round-trip on each.
+- **Unified TypeScript SDK** (`@bosphor/sdk`, published on [npm](https://www.npmjs.com/package/@bosphor/sdk)): one call for both EVM and Solana, with the blob id computed locally and the result verified on-chain.
+- **Reference dApp** at [demo.bosphor.xyz](https://demo.bosphor.xyz): a permanence-focused UX that runs real EVM and Solana round-trips end to end.
+- Sui-side assertions bind the stored blob id and end epoch to the commitment, so the relayer cannot substitute or under-fund the data.
+
+The operational stack stays live: Prometheus and Grafana monitoring, a status page at [status.bosphor.xyz](https://status.bosphor.xyz), a continuous [canary](/docs/protocol/canary), the public intent feed (`GET /public/intents`) at api.bosphor.xyz, Sentry, an on-demand [chaos harness](/docs/protocol/chaos-harness), and a self-operated LayerZero DVN. The [milestone changelog](/docs/changelog/milestones) has the full history.
+
+## Next steps
+
+- [Quickstart](/docs/quickstart): store your first file from Sepolia or Solana devnet on the hosted testnet.
+- [Examples](/docs/examples): the [EVM](https://github.com/riva-labs/bosphor-evm-starter) and [Solana](https://github.com/riva-labs/bosphor-solana-starter) starter repos, clone and run.
+- [Store from EVM](/docs/guides/evm) and [Store from Solana](/docs/guides/solana): the one-line API per chain.
+- [Errors and troubleshooting](/docs/guides/errors) and [Resume after a crash](/docs/guides/resume): the failure model.
+- [Architecture](/docs/protocol/architecture) and [Security model](/docs/protocol/security-model): the system design and its trust assumptions.
+- [Contracts](/docs/contracts): function signatures for calling the adapters directly.
+- [Self-hosting](/docs/protocol/self-hosting): deploy the contracts and relayer yourself.
