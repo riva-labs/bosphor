@@ -1,6 +1,6 @@
 ---
-title: Handle errors
-description: Catch the base error once and narrow on the concrete type; nothing is fabricated on failure.
+title: Errors and troubleshooting
+description: The typed error model, the two failures you will actually hit, and how to trace a store across chains when something stalls.
 ---
 
 Every failure throws a typed error that extends `BosphorError`, so you can catch
@@ -51,3 +51,35 @@ failed. The intent is on-chain and the bytes are with the relayer, so re-poll:
 ```ts
 const { blobId, endEpoch } = await client.awaitProof(e.intentId, { timeoutMs: 300_000 });
 ```
+
+## Trace a store across chains
+
+When a store stalls, find the hop it stopped at. Every hop is public.
+
+1. **Origin transaction.** Open `txHash` on Etherscan (Sepolia) or Solscan
+   (devnet, `?cluster=devnet`). It must show `IntentSubmitted`.
+2. **LayerZero delivery.** Search the same transaction hash on
+   [LayerZero Testnet Scan](https://testnet.layerzeroscan.com). The message shows
+   `DELIVERED` once the DVNs verified it; delivery typically takes one to five
+   minutes on testnet. `INFLIGHT` means wait; `FAILED` means the destination
+   could not execute it.
+3. **Relayer progress.** The public intent feed shows how far the relayer got
+   (`received`, `stored_walrus`, `recorded_sui`, `proof_sent`, `confirmed`):
+
+   ```bash
+   curl -s "https://api.bosphor.xyz/testnet/public/intents?limit=20"
+   ```
+
+4. **The proof.** `awaitProof(intentId)` resolves once the origin chain marks the
+   intent executed. If the deadline passes without a proof, refund the escrow (see
+   [Pay for storage](/docs/guides/pay-for-storage#refund-an-escrow)).
+
+Check the hosted testnet health on [status.bosphor.xyz](https://status.bosphor.xyz).
+Running your own contracts and relayer? The
+[operator troubleshooting guide](/docs/protocol/troubleshooting) covers setup,
+deployment, and relayer issues.
+
+## More answers
+
+The [FAQ](/docs/guides/faq) covers blob-id mismatches, reverts on EVM, ESM import
+errors, mainnet, and costs.
