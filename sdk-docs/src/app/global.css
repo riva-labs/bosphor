@@ -2,16 +2,156 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
-/* Bosphor brand: one functional blue accent over the neutral Fumadocs base.
-   --color-fd-primary drives links, active nav, and inline-accent surfaces. */
+/*
+ * Bosphor brand theme for Fumadocs.
+ *
+ * Dark (default): deep navy ground, navy surfaces, white headings, cool grey body.
+ * Light: navy text on a warm off-white ground.
+ * Blue is functional and reserved for links (and the focus ring). Callouts use
+ * the semantic green, amber and red. There is no purple anywhere, including the
+ * Fumadocs defaults and the code highlighting, which are overridden below.
+ */
+
+@theme {
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: 'Satoshi', var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+}
+
 :root {
+  /* Brand palette */
+  --bosphor-navy: #0b1221;
+  --bosphor-navy-deep: #060c17;
+  --bosphor-surface-1: #0f1729;
+  --bosphor-surface-2: #141d32;
+  --bosphor-surface-3: #1a2540;
+  --bosphor-text: #ffffff;
+  --bosphor-body: #b8c1ce;
+  --bosphor-muted: #5e6e82;
+  --bosphor-faint: #334158;
+  --bosphor-blue: #4a8ec7;
+  --bosphor-success: #3d8b6b;
+  --bosphor-warning: #9e8540;
+  --bosphor-error: #a84d4a;
+
+  /* Light theme: navy on warm off-white. */
+  --color-fd-background: #f7f6f3;
+  --color-fd-foreground: #0b1221;
+  --color-fd-muted: #efede8;
+  --color-fd-muted-foreground: #5e6e82;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #0b1221;
+  --color-fd-card: #ffffff;
+  --color-fd-card-foreground: #0b1221;
+  --color-fd-border: #e3e0d9;
   --color-fd-primary: #2f6d9e;
-  --color-fd-ring: #3a7aaf;
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: #efede8;
+  --color-fd-secondary-foreground: #0b1221;
+  --color-fd-accent: #e8e5de;
+  --color-fd-accent-foreground: #0b1221;
+  --color-fd-ring: #2f6d9e;
+  --color-fd-overlay: rgb(6 12 23 / 0.35);
+  --bosphor-body-text: #334158;
+  --bosphor-hero-from: #eef2f7;
+  --bosphor-hero-to: #f7f6f3;
+
+  /* Semantic colors (callouts, diffs) */
+  --color-fd-info: #5e6e82;
+  --color-fd-warning: #9e8540;
+  --color-fd-error: #a84d4a;
+  --color-fd-success: #3d8b6b;
+  --color-fd-idea: #9e8540;
+  --color-fd-diff-remove: rgb(168 77 74 / 0.12);
+  --color-fd-diff-remove-symbol: #a84d4a;
+  --color-fd-diff-add: rgb(61 139 107 / 0.12);
+  --color-fd-diff-add-symbol: #3d8b6b;
 }
 
 .dark {
-  --color-fd-primary: #6db3e0;
-  --color-fd-ring: #6db3e0;
+  --color-fd-background: #0b1221;
+  --color-fd-foreground: #ffffff;
+  --color-fd-muted: #141d32;
+  --color-fd-muted-foreground: #8594a8;
+  --color-fd-popover: #0f1729;
+  --color-fd-popover-foreground: #ffffff;
+  --color-fd-card: #0f1729;
+  --color-fd-card-foreground: #ffffff;
+  --color-fd-border: #1a2540;
+  --color-fd-primary: #4a8ec7;
+  --color-fd-primary-foreground: #060c17;
+  --color-fd-secondary: #141d32;
+  --color-fd-secondary-foreground: #ffffff;
+  --color-fd-accent: #1a2540;
+  --color-fd-accent-foreground: #ffffff;
+  --color-fd-ring: #4a8ec7;
+  --color-fd-overlay: rgb(6 12 23 / 0.6);
+  --bosphor-body-text: #b8c1ce;
+  --bosphor-hero-from: #060c17;
+  --bosphor-hero-to: #0b1221;
+  --color-fd-info: #8594a8;
+}
+
+/* neutral.css repaints the sidebar in grey; keep it on the navy scale. */
+.dark #nd-sidebar {
+  --color-fd-muted: #141d32;
+  --color-fd-secondary: #1a2540;
+  --color-fd-muted-foreground: #8594a8;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+}
+
+/* Headings use Satoshi; an <em> inside a heading becomes the warm serif accent. */
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+h1 em,
+h2 em,
+h3 em,
+.accent-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Prose: cool grey body under white headings, blue links. */
+.prose {
+  --tw-prose-body: var(--bosphor-body-text);
+  --tw-prose-links: var(--color-fd-primary);
+  --tw-prose-bullets: var(--color-fd-muted-foreground);
+  --tw-prose-counters: var(--color-fd-muted-foreground);
+}
+
+.prose a:not([data-card]) {
+  text-decoration-color: color-mix(in oklab, var(--color-fd-primary) 45%, transparent);
+}
+
+/*
+ * Code highlighting: the GitHub themes color function names purple. Swap that
+ * token to a brand teal. The inline style carries the token color as a CSS
+ * variable, so an !important rule on the same variable wins.
+ */
+.shiki span[style*='--shiki-light:#6F42C1'] {
+  --shiki-light: #1f6f6a !important;
+}
+.shiki span[style*='--shiki-dark:#B392F0'] {
+  --shiki-dark: #7cc4bd !important;
 }
 
 html {
