@@ -4,10 +4,12 @@
  *
  * Re-exports the core codec and shared types too, so a Solana consumer needs only
  * this one import. `@solana/web3.js` is an optional peer
- * dependencies: the default backend (`createDefaultSolanaChain`) loads them via a
+ * dependency: the default backend (`createDefaultSolanaChain`) loads them via a
  * lazy dynamic import, and unit tests inject a fake `SolanaChain`. This module
  * itself never imports the Solana stack, so a codec-only or EVM-only consumer never
  * pulls it.
+ *
+ * @module
  */
 
 export { BosphorSolanaClient, createBosphorSolanaClient } from "./client.js";
