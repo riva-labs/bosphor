@@ -1,9 +1,19 @@
 {
   "title": "Examples",
-  "description": "Starter repos and runnable scripts",
+  "description": "Starters, scripts, and recipes",
   "icon": "LayoutGrid",
   "root": true,
   "pages": [
-    "index"
+    "index",
+    "---Recipes---",
+    "react-injected-wallet",
+    "store-progress",
+    "backend-quote",
+    "refund-expired-escrow",
+    "app-id",
+    "---Repositories---",
+    "[EVM starter](https://github.com/riva-labs/bosphor-evm-starter)",
+    "[Solana starter](https://github.com/riva-labs/bosphor-solana-starter)",
+    "[Demo dApp](https://demo.bosphor.xyz)"
   ]
 }
