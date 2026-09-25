@@ -146,9 +146,12 @@ function SmartLink({
   );
 }
 
+// Section label. Deliberately not text-transform: uppercase, which would render
+// the product name as all caps; the copy is written in sentence case instead.
 function Eyebrow({ children }: { children: ReactNode }) {
   return (
-    <p className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-fd-muted-foreground">
+    <p className="flex items-center gap-2 font-mono text-xs font-medium tracking-wide text-fd-muted-foreground">
+      <span aria-hidden className="h-px w-5 bg-[var(--bosphor-faint)]" />
       {children}
     </p>
   );
@@ -165,7 +168,7 @@ export default function HomePage() {
         />
         <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-4 py-16 sm:px-6 md:py-24 lg:grid-cols-[1.1fr_1fr] lg:items-center">
           <div className="min-w-0">
-            <Eyebrow>Developer portal</Eyebrow>
+            <Eyebrow>Bosphor developer portal</Eyebrow>
             <h1 className="mt-5 text-[2.5rem] font-black leading-[1.05] tracking-tight text-fd-foreground sm:text-5xl lg:text-6xl">
               Making Permanence <em>Portable</em>
             </h1>
