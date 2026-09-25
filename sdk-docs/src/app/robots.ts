@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { siteUrl } from '@/lib/shared';
 
 // The docs are public and meant to be indexed by search engines AND cited by AI
 // assistants (GEO). We explicitly welcome the major AI crawlers rather than
@@ -26,7 +27,7 @@ export default function robots(): MetadataRoute.Robots {
       { userAgent: '*', allow: '/' },
       ...AI_CRAWLERS.map((userAgent) => ({ userAgent, allow: '/' })),
     ],
-    sitemap: 'https://sdk.bosphor.xyz/sitemap.xml',
-    host: 'https://sdk.bosphor.xyz',
+    sitemap: `${siteUrl}/sitemap.xml`,
+    host: siteUrl,
   };
 }

@@ -1,7 +1,8 @@
 import type { MetadataRoute } from 'next';
 import { source } from '@/lib/source';
+import { siteUrl } from '@/lib/shared';
 
-const BASE = 'https://sdk.bosphor.xyz';
+const BASE = siteUrl;
 
 export const dynamic = 'force-static';
 
