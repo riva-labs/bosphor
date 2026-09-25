@@ -1,0 +1,81 @@
+---
+title: AI assistants
+description: Point Cursor, Claude, ChatGPT, or any coding agent at the Bosphor docs with llms.txt, per-page markdown, and ready-made prompts.
+---
+
+Every page in this portal is also published as plain markdown, and the whole
+portal is indexed in [llms.txt](https://llmstxt.org) form. Give those URLs to your
+assistant instead of letting it scrape HTML: it gets the same content with no
+navigation noise, and the code samples stay intact.
+
+## The URLs
+
+| URL | What it holds | Use it when |
+|-----|---------------|-------------|
+| [`https://sdk.bosphor.xyz/llms.txt`](/llms.txt) | A short index: a summary of Bosphor, then every page grouped by section, each with a one-line description and a link to its markdown | The assistant can fetch links on demand (Cursor, Claude Code, ChatGPT with browsing) |
+| [`https://sdk.bosphor.xyz/llms-full.txt`](/llms-full.txt) | Every page in one markdown file, in navigation order | You want the assistant to hold all of the docs in context at once |
+| `https://sdk.bosphor.xyz/docs/<page>.md` | One page as markdown. Add `.md` to any docs URL, for example [`/docs/quickstart.md`](/docs/quickstart.md) | You only need one topic, such as the quickstart or the error model |
+
+The relayer HTTP API also has a machine-readable description:
+[`https://api.bosphor.xyz/testnet/openapi.json`](https://api.bosphor.xyz/testnet/openapi.json)
+(OpenAPI 3.1). Tools that generate clients or call HTTP APIs can load it directly.
+
+## From a docs page
+
+Each page has two buttons under its title:
+
+- **Copy Markdown** copies the page as markdown, ready to paste into any chat.
+- **Open** lists **View as Markdown**, **Open in ChatGPT**, **Open in Claude**,
+  **Open in Cursor**, and **Open on GitHub**. The assistant links start a new chat
+  with a prompt that points at the page's markdown URL and at `llms.txt`, so the
+  assistant reads the page and can follow links to the rest of the docs.
+
+Some pages, such as the [Quickstart](/docs/quickstart) and the
+[dApp tutorial](/docs/guides/dapp-tutorial), also carry an **AI prompt** block: a
+task-sized prompt you can copy or open in an assistant to have it write the
+integration for you.
+
+## Cursor
+
+Add the docs once, then reference them in any chat.
+
+<Steps>
+<Step>
+Open **Cursor Settings**, go to **Indexing & Docs**, and choose **Add Doc**.
+</Step>
+<Step>
+Enter `https://sdk.bosphor.xyz/llms-full.txt` and name it `Bosphor`.
+</Step>
+<Step>
+In a chat, type `@Bosphor` to pull the docs into context, for example:
+"@Bosphor add a paid store with progress reporting to this React component."
+</Step>
+</Steps>
+
+## Claude
+
+- **Claude Code**: ask it to read the index first, for example
+  "Read https://sdk.bosphor.xyz/llms.txt, then add a Bosphor store to this app."
+  It fetches the pages it needs from the links. To keep the docs in every session,
+  add that line to your project's `CLAUDE.md`.
+- **claude.ai**: use **Open in Claude** on the page you are working from, or attach
+  `llms-full.txt` to a Project so every chat in it has the full docs.
+
+## ChatGPT
+
+Use **Open in ChatGPT** on a page, or start a chat with
+"Read https://sdk.bosphor.xyz/llms.txt and use it to answer questions about
+Bosphor." With browsing on, ChatGPT follows the links it needs. For a Custom GPT
+or a Project, upload `llms-full.txt` as a knowledge file.
+
+## Other agents
+
+Any agent that can fetch a URL works the same way: give it `llms.txt` as the entry
+point, or `llms-full.txt` when it cannot follow links. The markdown is regenerated
+on every docs deploy, so it always matches the published pages.
+
+<Callout type="info" title="Check what the assistant writes">
+The SDK surface is small and typed, so compile what the assistant produces. Every
+recipe under [Examples](/docs/examples) is type-checked against the published
+`@bosphor/sdk`, and makes a good reference to compare against.
+</Callout>
