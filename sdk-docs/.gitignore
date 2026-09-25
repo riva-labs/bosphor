@@ -3,6 +3,11 @@
 
 # generated content
 .source
+# SDK reference, generated from sdk/src by scripts/gen-sdk-reference.mjs
+/content/docs/reference/core/
+/content/docs/reference/evm/
+/content/docs/reference/solana/
+/.sdk-reference/
 
 # test & build
 /coverage
