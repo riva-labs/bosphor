@@ -1,0 +1,78 @@
+---
+title: SDK reference
+description: Install @bosphor/sdk and find every exported type, function, and error, by entry point.
+---
+
+`@bosphor/sdk` is one TypeScript package for storing on Walrus from EVM or Solana.
+It ships as ESM, targets Node.js 22 or newer, and runs in the browser.
+
+## Installation
+
+Install it alongside the peer packages for the chain you target. Chain SDKs are
+optional peer dependencies, loaded lazily, so a codec-only or single-chain
+consumer never pulls the ones it does not use.
+
+<Tabs groupId="package-manager" persist items={['npm', 'pnpm', 'yarn', 'bun']}>
+
+<Tab value="npm">
+```bash
+# EVM path
+npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="pnpm">
+```bash
+# EVM path
+pnpm add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+pnpm add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="yarn">
+```bash
+# EVM path
+yarn add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+yarn add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+<Tab value="bun">
+```bash
+# EVM path
+bun add @bosphor/sdk ethers @mysten/walrus @mysten/sui
+# Solana path
+bun add @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
+```
+</Tab>
+
+</Tabs>
+
+<Callout title="Node 22+">
+The SDK is ESM-only and targets Node.js 22 or newer. It cannot be `require()`-d
+from CommonJS.
+</Callout>
+
+## Entry points
+
+| Import | Use it for | Reference |
+|--------|------------|-----------|
+| `@bosphor/sdk` | Shared types, errors, `TESTNET`, `fetchQuote`, `walrusBlobUrl` | [Core](/docs/reference/core) |
+| `@bosphor/sdk/evm` | The EVM client, `ADAPTER_ABI`, `quoteEvmStore`, escrow helpers | [EVM](/docs/reference/evm) |
+| `@bosphor/sdk/solana` | The Solana client, LayerZero send accounts, `quoteSolanaStore` | [Solana](/docs/reference/solana) |
+| `@bosphor/sdk/commitment` | The 49-byte commitment codec and intent-id derivation only | [Commitment codec](/docs/reference/codec) |
+
+Errors and shared types are re-exported from both chain subpaths, so any import
+path works. The tables on these pages are generated from the SDK source at build
+time.
+
+## Versions
+
+The SDK is pre-1.0: `feat` bumps the minor version and `fix` bumps the patch, and
+breaking changes bump the minor while pre-1.0. Pin a version in production. See
+the [changelog](/docs/changelog) and the package on
+[npm](https://www.npmjs.com/package/@bosphor/sdk).

@@ -4,7 +4,7 @@ description: The EVM client, its options, and the adapter contract shape, from @
 ---
 
 The EVM client wraps an `ethers` contract bound to a signer. See the
-[EVM guide](/docs/evm) for usage. The tables below are generated from the SDK
+[EVM guide](/docs/guides/evm) for usage. The tables below are generated from the SDK
 source.
 
 ## BosphorEvmClient
@@ -35,10 +35,10 @@ and the individual steps.
 everything above the LayerZero fee until the proof lands. `store()` runs
 `encode, quote, submit, upload, awaitProof` and pays only the LayerZero fee. Both
 resolve only once the result is verified on-chain. See
-[Pay for storage](/docs/pay-for-storage).
+[Pay for storage](/docs/guides/pay-for-storage).
 
 `refund` and `withdraw` need the escrow adapter members, which `connectAdapter` /
-`createBosphorClientFromSigner` bind. See [Pay for storage](/docs/pay-for-storage#refund-an-escrow).
+`createBosphorClientFromSigner` bind. See [Pay for storage](/docs/guides/pay-for-storage#refund-an-escrow).
 
 ## EscrowRecord
 
