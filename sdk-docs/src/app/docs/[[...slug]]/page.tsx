@@ -13,15 +13,14 @@ import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { gitConfig } from '@/lib/shared';
 import { PageStructuredData } from '@/components/structured-data';
+import { APIPage } from '@/components/api-page';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   const params = await props.params;
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
-  const MDX = page.data.body;
   const markdownUrl = getPageMarkdownUrl(page).url;
-  const lastModified = page.data.lastModified;
 
   // Breadcrumb trail from the page slugs (Docs → …section… → page).
   const breadcrumb = [
@@ -31,6 +30,37 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
       url: `/docs/${page.slugs.slice(0, i + 1).join('/')}`,
     })),
   ];
+
+  // API reference: one generated page per relayer operation, rendered from
+  // relayer/openapi/openapi.yaml.
+  if (page.type === 'openapi') {
+    const title = page.data.title ?? 'API reference';
+    return (
+      <DocsPage full>
+        <PageStructuredData
+          title={title}
+          description={page.data.description ?? title}
+          url={page.url}
+          breadcrumb={breadcrumb}
+        />
+        <DocsTitle>{title}</DocsTitle>
+        <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
+        <div className="flex flex-row gap-2 items-center border-b pb-6">
+          <MarkdownCopyButton markdownUrl={markdownUrl} />
+          <ViewOptionsPopover
+            markdownUrl={markdownUrl}
+            githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/relayer/openapi/openapi.yaml`}
+          />
+        </div>
+        <DocsBody>
+          <APIPage {...page.data.getOpenAPIPageProps()} />
+        </DocsBody>
+      </DocsPage>
+    );
+  }
+
+  const MDX = page.data.body;
+  const lastModified = page.data.lastModified;
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
