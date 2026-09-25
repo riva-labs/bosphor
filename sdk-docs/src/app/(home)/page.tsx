@@ -18,6 +18,7 @@ import {
   Webhook,
 } from 'lucide-react';
 import { CopyCommand } from '@/components/home/copy-command';
+import { SiteFooter } from '@/components/site-footer';
 import { links, tagline } from '@/lib/shared';
 
 export const metadata: Metadata = {
@@ -332,25 +333,7 @@ export default function HomePage() {
         </p>
       </section>
 
-      <footer className="mt-auto border-t">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-fd-muted-foreground">
-          <span>
-            <span className="font-display font-bold text-fd-foreground">Bosphor</span>
-            <span className="mx-2">·</span>
-            <span className="accent-serif text-base">{tagline}</span>
-          </span>
-          <span>
-            Stores on{' '}
-            <a href="https://www.walrus.xyz/" className="text-fd-primary hover:underline">
-              Walrus
-            </a>{' '}
-            over{' '}
-            <a href="https://layerzero.network/" className="text-fd-primary hover:underline">
-              LayerZero
-            </a>
-          </span>
-        </div>
-      </footer>
+      <SiteFooter className="mt-auto" />
     </main>
   );
 }

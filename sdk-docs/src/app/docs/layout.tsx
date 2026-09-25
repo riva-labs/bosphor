@@ -1,6 +1,7 @@
 import { source } from '@/lib/source';
 import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { baseOptions } from '@/lib/layout.shared';
+import { SiteFooter } from '@/components/site-footer';
 
 // Notebook layout: the root sections (Get started, Guides, SDK reference, ...)
 // render as tabs in the top navbar, and the sidebar lists only the active
@@ -16,6 +17,8 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       tabMode="navbar"
     >
       {children}
+      {/* A full-width row under the sidebar, page and TOC columns. */}
+      <SiteFooter className="[grid-column:1/-1] mt-8" />
     </DocsLayout>
   );
 }
