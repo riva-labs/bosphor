@@ -2,12 +2,14 @@
   "name": "bosphor-sdk-docs",
   "version": "0.1.0",
   "private": true,
-  "description": "Documentation site for @bosphor/sdk (sdk.bosphor.xyz), built with Fumadocs.",
+  "description": "Bosphor developer portal (docs, guides, SDK and API reference), built with Fumadocs.",
   "scripts": {
-    "build": "next build",
+    "build": "next build && npm run check",
+    "check": "node scripts/check-links.mjs && node scripts/check-redirects.mjs && npm run test:worker",
+    "test:worker": "node --test scripts/test-worker.mjs",
     "dev": "next dev",
     "start": "serve out",
-    "preview": "serve out",
+    "preview": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "types:check": "next typegen && tsc --noEmit",
     "lint": "oxlint"
