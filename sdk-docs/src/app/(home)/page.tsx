@@ -63,7 +63,7 @@ const sections: { title: string; href: string; icon: Icon; body: string }[] = [
     title: 'Examples',
     href: '/docs/examples',
     icon: LayoutGrid,
-    body: 'Starter repos for EVM and Solana, and runnable SDK scripts.',
+    body: 'Starter repos, SDK scripts, a live reference dApp, and copy-paste recipes.',
   },
   {
     title: 'Playground',
