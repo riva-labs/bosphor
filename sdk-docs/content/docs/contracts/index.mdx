@@ -1,0 +1,37 @@
+---
+title: Contracts
+description: The on-chain side of Bosphor on each chain, and the one wire format they share.
+---
+
+Bosphor runs one contract per chain. The origin adapters take the user's intent
+and payment; the Sui side records the intent, verifies the Walrus store, and sends
+the proof back. All of them speak the same 49-byte commitment.
+
+Most integrators never call these directly: `@bosphor/sdk` does it for you. Read
+on when you call an adapter from your own contract, index its events, or audit it.
+
+<Cards>
+  <Card title="EVM adapter" href="/docs/contracts/evm-adapter">
+    `BosphorEscrowAdapter` on Sepolia: submitIntent, quote, escrow, refund, events, and errors.
+  </Card>
+  <Card title="Solana program" href="/docs/contracts/solana-program">
+    The Anchor OApp on devnet: instructions, PDAs, events, and errors.
+  </Card>
+  <Card title="Sui executor" href="/docs/contracts/sui-executor">
+    `lz_receiver` and `walrus_executor`: receive the intent, verify the store, send the proof.
+  </Card>
+  <Card title="Commitment format" href="/docs/contracts/commitment-format">
+    The 49-byte commitment and the canonical intent id, identical on every chain.
+  </Card>
+</Cards>
+
+## Deployed addresses
+
+| Chain | Contract | Address |
+|-------|----------|---------|
+| Ethereum Sepolia (EID 40161) | BosphorEscrowAdapter | `0x3296686Fc61076d27488278c1da5468E1e0A7156` |
+| Solana devnet (EID 40168) | Bosphor program | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` |
+| Sui testnet (EID 40378) | Sui package, LayerZero peer | `0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5` |
+
+The [testnet reference](/docs/reference/testnet) is the single up-to-date list,
+including the Sui object ids and the relayer URL.
