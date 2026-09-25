@@ -2280,6 +2280,15 @@ The relayer HTTP API has two integration surfaces: the read-only intent feed doc
 
 The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples on this page use the testnet path.
 
+## OpenAPI description
+
+Every relayer serves a machine-readable OpenAPI 3.1 description of this API, with request and response schemas, error codes and examples. Load it into Postman, Insomnia or a client generator:
+
+- `GET /openapi.json` (for example `https://api.bosphor.xyz/testnet/openapi.json`)
+- `GET /openapi.yaml`
+
+The source lives in the Bosphor repository at `relayer/openapi/openapi.yaml`, and a relayer test checks it against the running code on every change.
+
 ## The intent lifecycle
 
 Each intent travels six hops on its cross-chain round trip. The relayer records each hop as it observes it:
