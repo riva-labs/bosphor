@@ -18,6 +18,7 @@ import {
   Webhook,
 } from 'lucide-react';
 import { CopyCommand } from '@/components/home/copy-command';
+import { SiteFooter } from '@/components/site-footer';
 import { links, tagline } from '@/lib/shared';
 
 export const metadata: Metadata = {
@@ -62,7 +63,7 @@ const sections: { title: string; href: string; icon: Icon; body: string }[] = [
     title: 'Examples',
     href: '/docs/examples',
     icon: LayoutGrid,
-    body: 'Starter repos for EVM and Solana, and runnable SDK scripts.',
+    body: 'Starter repos, SDK scripts, a live reference dApp, and copy-paste recipes.',
   },
   {
     title: 'Playground',
@@ -146,9 +147,12 @@ function SmartLink({
   );
 }
 
+// Section label. Deliberately not text-transform: uppercase, which would render
+// the product name as all caps; the copy is written in sentence case instead.
 function Eyebrow({ children }: { children: ReactNode }) {
   return (
-    <p className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-fd-muted-foreground">
+    <p className="flex items-center gap-2 font-mono text-xs font-medium tracking-wide text-fd-muted-foreground">
+      <span aria-hidden className="h-px w-5 bg-[var(--bosphor-faint)]" />
       {children}
     </p>
   );
@@ -165,7 +169,7 @@ export default function HomePage() {
         />
         <div className="relative mx-auto grid w-full max-w-6xl gap-12 px-4 py-16 sm:px-6 md:py-24 lg:grid-cols-[1.1fr_1fr] lg:items-center">
           <div className="min-w-0">
-            <Eyebrow>Developer portal</Eyebrow>
+            <Eyebrow>Bosphor developer portal</Eyebrow>
             <h1 className="mt-5 text-[2.5rem] font-black leading-[1.05] tracking-tight text-fd-foreground sm:text-5xl lg:text-6xl">
               Making Permanence <em>Portable</em>
             </h1>
@@ -329,25 +333,7 @@ export default function HomePage() {
         </p>
       </section>
 
-      <footer className="mt-auto border-t">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-fd-muted-foreground">
-          <span>
-            <span className="font-display font-bold text-fd-foreground">Bosphor</span>
-            <span className="mx-2">·</span>
-            <span className="accent-serif text-base">{tagline}</span>
-          </span>
-          <span>
-            Stores on{' '}
-            <a href="https://www.walrus.xyz/" className="text-fd-primary hover:underline">
-              Walrus
-            </a>{' '}
-            over{' '}
-            <a href="https://layerzero.network/" className="text-fd-primary hover:underline">
-              LayerZero
-            </a>
-          </span>
-        </div>
-      </footer>
+      <SiteFooter className="mt-auto" />
     </main>
   );
 }

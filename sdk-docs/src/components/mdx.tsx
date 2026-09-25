@@ -6,6 +6,7 @@ import { Step, Steps } from 'fumadocs-ui/components/steps';
 import { FaqStructuredData } from '@/components/structured-data';
 import { Mermaid } from '@/components/mermaid';
 import { AgentPrompt } from '@/components/agent-prompt';
+import { ExamplesGallery } from '@/components/examples-gallery';
 import type { MDXComponents } from 'mdx/types';
 
 export function getMDXComponents(components?: MDXComponents) {
@@ -24,6 +25,8 @@ export function getMDXComponents(components?: MDXComponents) {
     Mermaid,
     // Copyable prompt with "open in Claude / ChatGPT / Gemini" links.
     AgentPrompt,
+    // Filterable card gallery on the Examples index.
+    ExamplesGallery,
     ...components,
   } satisfies MDXComponents;
 }

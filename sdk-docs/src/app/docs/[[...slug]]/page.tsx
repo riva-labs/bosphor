@@ -5,14 +5,16 @@ import {
   DocsPage,
   DocsTitle,
   MarkdownCopyButton,
-  ViewOptionsPopover,
-} from 'fumadocs-ui/layouts/docs/page';
+} from 'fumadocs-ui/layouts/notebook/page';
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
-import { gitConfig } from '@/lib/shared';
+import { gitConfig, siteUrl } from '@/lib/shared';
+import { markdownPathOf } from '@/lib/llms';
+import { PageActions } from '@/components/page-actions';
 import { PageStructuredData } from '@/components/structured-data';
+import { PageFeedback } from '@/components/page-feedback';
 import { APIPage } from '@/components/api-page';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
@@ -47,14 +49,17 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
         <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
         <div className="flex flex-row gap-2 items-center border-b pb-6">
           <MarkdownCopyButton markdownUrl={markdownUrl} />
-          <ViewOptionsPopover
-            markdownUrl={markdownUrl}
+          <PageActions
+            markdownPath={markdownPathOf(page.url)}
+            markdownUrl={`${siteUrl}${markdownPathOf(page.url)}`}
+            llmsUrl={`${siteUrl}/llms.txt`}
             githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/relayer/openapi/openapi.yaml`}
           />
         </div>
         <DocsBody>
           <APIPage {...page.data.getOpenAPIPageProps()} />
         </DocsBody>
+        <PageFeedback title={title} url={page.url} path={page.path} />
       </DocsPage>
     );
   }
@@ -74,8 +79,10 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
       <div className="flex flex-row gap-2 items-center border-b pb-6">
         <MarkdownCopyButton markdownUrl={markdownUrl} />
-        <ViewOptionsPopover
-          markdownUrl={markdownUrl}
+        <PageActions
+          markdownPath={markdownPathOf(page.url)}
+          markdownUrl={`${siteUrl}${markdownPathOf(page.url)}`}
+          llmsUrl={`${siteUrl}/llms.txt`}
           githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/sdk-docs/content/docs/${page.path}`}
         />
       </div>
@@ -99,6 +106,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
           </time>
         </p>
       ) : null}
+      <PageFeedback title={page.data.title} url={page.url} path={page.path} />
     </DocsPage>
   );
 }
@@ -117,6 +125,8 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
     description: page.data.description,
     alternates: {
       canonical: page.url,
+      // The page's markdown twin, for AI assistants and llms.txt readers.
+      types: { 'text/markdown': markdownPathOf(page.url) },
     },
     openGraph: {
       type: 'article',

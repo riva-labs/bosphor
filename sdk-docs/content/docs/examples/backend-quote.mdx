@@ -1,0 +1,95 @@
+---
+title: Quote without a wallet on your backend
+description: Serve live EVM and Solana storage prices from a server route with quoteEvmStore and quoteSolanaStore, no keys or wallet needed.
+---
+
+Show a price on a pricing page, in a checkout summary, or before a user connects
+a wallet. `quoteEvmStore()` and `quoteSolanaStore()` need only a read-only RPC
+connection: they read the live LayerZero fee on-chain and ask the relayer for the
+storage price. The result is the same `PricedQuote` that `client.priceQuote()`
+returns, so what you show matches what the user pays.
+
+## Install
+
+```bash
+npm install @bosphor/sdk ethers @solana/web3.js
+```
+
+## The route
+
+```ts title="app/api/quote/route.ts"
+import { JsonRpcProvider } from "ethers";
+import { Connection } from "@solana/web3.js";
+import { TESTNET, quoteEvmStore, type PricedQuote } from "@bosphor/sdk/evm";
+import { quoteSolanaStore } from "@bosphor/sdk/solana";
+
+// Created once and reused across requests. Bring your own RPC URLs in production.
+const provider = new JsonRpcProvider(process.env.SEPOLIA_RPC_URL ?? TESTNET.evm.rpcUrl);
+const connection = new Connection(process.env.SOLANA_RPC_URL ?? TESTNET.solana.rpcUrl, "confirmed");
+
+/** bigint amounts do not survive JSON.stringify: send them as decimal strings. */
+function toJson(quote: PricedQuote) {
+  return {
+    token: quote.originToken,
+    total: quote.totalNative.toString(),
+    escrow: quote.escrowNative.toString(),
+    forward: quote.forwardNative.toString(),
+    forwardIsUpperBound: quote.forwardIsUpperBound,
+    totalUsd: quote.breakdown.totalUsd,
+  };
+}
+
+/**
+ * GET /quote?chain=evm|solana&size=<bytes>&epochs=<n>
+ * A standard Request -> Response handler: works as a Next.js route handler,
+ * a Cloudflare Worker, Bun, Deno, or Hono.
+ */
+export async function GET(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const chain = url.searchParams.get("chain") ?? "evm";
+  const sizeBytes = Number(url.searchParams.get("size"));
+  const epochs = Number(url.searchParams.get("epochs") ?? 5);
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
+    return Response.json({ error: "size must be a positive integer" }, { status: 400 });
+  }
+
+  const quote =
+    chain === "solana"
+      ? await quoteSolanaStore({ connection, sizeBytes, epochs, appId: "my-dapp" })
+      : await quoteEvmStore({ provider, sizeBytes, epochs, appId: "my-dapp" });
+
+  return Response.json(toJson(quote), {
+    // Prices move with gas and token prices: cache briefly, not for long.
+    headers: { "cache-control": "public, max-age=30" },
+  });
+}
+```
+
+Call it with `GET /api/quote?chain=evm&size=1048576`. The response looks like:
+
+```json
+{
+  "token": "ETH",
+  "total": "1267781979879960",
+  "escrow": "968314000000000",
+  "forward": "299467979879960",
+  "forwardIsUpperBound": false,
+  "totalUsd": 3.4095
+}
+```
+
+## Notes
+
+- **Size, not bytes.** Pass `sizeBytes` when you only know the size, or `data`
+  to price exact bytes. The price depends only on the size.
+- **Amounts are strings.** Amounts are in the smallest unit (wei or lamports).
+  Format them in the client with `formatEther` or by dividing by
+  `LAMPORTS_PER_SOL`.
+- **Solana fee cap.** Without the optional `@layerzerolabs/lz-solana-sdk-v2`
+  package, the Solana LayerZero fee falls back to a cap and
+  `forwardIsUpperBound` is `true`. Show that total as "up to".
+- **Rate limits.** The relayer limits `/quote` per IP. Cache briefly on your
+  server rather than quoting on every keystroke. See
+  [Rate limits](/docs/api#rate-limits).
+- **Quotes move.** Gas and token prices change, so quote again right before the
+  user pays. `storePriced()` and `priceQuote()` always fetch a fresh one.

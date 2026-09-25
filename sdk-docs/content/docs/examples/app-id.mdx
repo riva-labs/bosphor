@@ -1,0 +1,69 @@
+---
+title: Attribute your app's traffic with appId
+description: Name your app once so the relayer records it with every quote and upload, from the SDK clients, the quote helpers, or raw HTTP.
+---
+
+Pass an `appId` and the SDK sends it to the relayer as the `X-Bosphor-App`
+header on quotes and uploads. The relayer stores it with each intent, so the
+stores your app makes are counted apart from scripts and tests, and apart from
+other apps.
+
+It is attribution only, not authentication: it grants no access and costs
+nothing. Use a short slug: letters, digits, `-`, `_`, or `.`, starting with a
+letter or digit, at most 64 characters. Ids are case-insensitive.
+
+## Everywhere the SDK talks to the relayer
+
+```ts title="app-id.ts"
+import { JsonRpcProvider, Wallet } from "ethers";
+import { Connection, Keypair } from "@solana/web3.js";
+import {
+  APP_ID_HEADER,
+  TESTNET,
+  createBosphorClientFromSigner,
+  fetchQuote,
+  quoteEvmStore,
+} from "@bosphor/sdk/evm";
+import { createBosphorSolanaClientFromKeypair, quoteSolanaStore } from "@bosphor/sdk/solana";
+
+const APP_ID = "my-dapp";
+
+// EVM client: sent on every quote and upload the client makes.
+const signer = new Wallet(process.env.PRIVATE_KEY!, new JsonRpcProvider(TESTNET.evm.rpcUrl));
+const evm = await createBosphorClientFromSigner(signer, { appId: APP_ID });
+
+// Solana client: same option.
+const connection = new Connection(TESTNET.solana.rpcUrl, "confirmed");
+const solana = await createBosphorSolanaClientFromKeypair({
+  connection,
+  wallet: Keypair.generate(),
+  appId: APP_ID,
+});
+
+// Wallet-free quote helpers and the low-level quote client take it too.
+await quoteEvmStore({ provider: signer.provider!, sizeBytes: 1024, appId: APP_ID });
+await quoteSolanaStore({ connection, sizeBytes: 1024, appId: APP_ID });
+await fetchQuote(TESTNET.relayerUrl, { sizeBytes: 1024, originToken: "ETH" }, { appId: APP_ID });
+
+// Calling the relayer yourself? Send the header by name.
+await fetch(`${TESTNET.relayerUrl}/quote`, {
+  method: "POST",
+  headers: { "content-type": "application/json", [APP_ID_HEADER]: APP_ID },
+  body: JSON.stringify({ sizeBytes: 1024, originToken: "ETH" }),
+});
+
+export { evm, solana };
+```
+
+## Good to know
+
+- **Fails fast.** The clients check the format when they are created, so a typo
+  throws right away instead of as a `400 Bad Request` in the middle of a store.
+- **Per-app rate limits.** A relayer operator can set a request budget per app id
+  in addition to the per-IP budget. See [Rate limits](/docs/api#rate-limits).
+- **One id per product.** Use the same id in your frontend and backend so all of
+  your traffic is counted together. Keep separate ids for staging and
+  production if you want to tell them apart.
+
+The header is documented in the
+[relayer API reference](/docs/api#identifying-your-app-x-bosphor-app).

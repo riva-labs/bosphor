@@ -5,7 +5,7 @@
   "description": "Bosphor developer portal (docs, guides, SDK and API reference), built with Fumadocs.",
   "scripts": {
     "gen:sdk-ref": "node scripts/gen-sdk-reference.mjs",
-    "build": "npm run gen:sdk-ref && next build && npm run check",
+    "build": "npm run gen:sdk-ref && next build && node scripts/markdown-aliases.mjs && npm run check",
     "check": "node scripts/check-links.mjs && node scripts/check-redirects.mjs && npm run test:worker",
     "test:worker": "node --test scripts/test-worker.mjs",
     "dev": "npm run gen:sdk-ref && next dev",

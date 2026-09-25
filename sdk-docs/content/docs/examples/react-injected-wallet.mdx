@@ -1,0 +1,151 @@
+---
+title: Store a file from a React dApp
+description: Connect an injected wallet such as MetaMask, show the price before the wallet prompt, then pay, upload, and wait for the verified proof.
+---
+
+A React component that stores a user's file from their browser wallet on
+Ethereum Sepolia. It splits the flow in two so the user sees the price before
+any wallet prompt: **pick a file** (encode and quote), then **Pay and store**
+(submit, upload, wait for the proof).
+
+## Install
+
+```bash
+npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+```
+
+`@mysten/walrus` and `@mysten/sui` compute the Walrus blob id in the browser. No
+Sui wallet or SUI is needed.
+
+## The component
+
+```tsx title="StoreFile.tsx"
+"use client";
+
+import { useState, type ChangeEvent } from "react";
+import { BrowserProvider, formatEther, type Eip1193Provider } from "ethers";
+import {
+  BosphorError,
+  TESTNET,
+  createBosphorClientFromSigner,
+  walrusBlobUrl,
+  type BosphorEvmClient,
+  type EncodedIntent,
+  type Hex,
+  type PricedQuote,
+} from "@bosphor/sdk/evm";
+
+declare global {
+  interface Window {
+    ethereum?: Eip1193Provider;
+  }
+}
+
+/** Connect the injected wallet, make sure it is on Sepolia, and build a client. */
+async function connect(): Promise<BosphorEvmClient> {
+  if (!window.ethereum) throw new Error("No wallet found. Install MetaMask or another browser wallet.");
+  let provider = new BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+
+  const { chainId } = await provider.getNetwork();
+  if (chainId !== BigInt(TESTNET.evm.chainId)) {
+    await provider.send("wallet_switchEthereumChain", [
+      { chainId: `0x${TESTNET.evm.chainId.toString(16)}` },
+    ]);
+    // A BrowserProvider is bound to one network: make a new one after the switch.
+    provider = new BrowserProvider(window.ethereum);
+  }
+
+  const signer = await provider.getSigner();
+  return createBosphorClientFromSigner(signer, { appId: "my-dapp" });
+}
+
+type Pending = { client: BosphorEvmClient; bytes: Uint8Array; encoded: EncodedIntent; quote: PricedQuote };
+
+export function StoreFile() {
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [status, setStatus] = useState("Pick a file to see the price.");
+  const [result, setResult] = useState<{ blobId: Hex; endEpoch: bigint } | null>(null);
+
+  // Step 1: price the file before any wallet prompt.
+  async function onFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setResult(null);
+    try {
+      setStatus("Connecting wallet...");
+      const client = await connect();
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      setStatus("Pricing...");
+      const encoded = await client.encode(bytes, { epochs: 5 });
+      const quote = await client.priceQuote(encoded);
+      setPending({ client, bytes, encoded, quote });
+      setStatus(`Storing ${file.name} costs ${formatEther(quote.totalNative)} ETH ($${quote.breakdown.totalUsd.toFixed(2)}).`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Step 2: pay, upload, and wait for the proof.
+  async function onStore() {
+    if (!pending) return;
+    const { client, bytes, encoded, quote } = pending;
+    try {
+      setStatus("Confirm the transaction in your wallet...");
+      const { intentId } = await client.submitPaid(encoded, quote);
+      setStatus("Uploading the bytes to the relayer...");
+      await client.upload(intentId, bytes);
+      setStatus("Waiting for the storage proof (1 to 3 minutes)...");
+      const proof = await client.awaitProof(intentId, { timeoutMs: 10 * 60_000 });
+      setResult(proof);
+      setPending(null);
+      setStatus("Stored on Walrus. The proof is verified on Sepolia.");
+    } catch (err) {
+      // BosphorError carries a stable code; the intent stays on-chain, so you can resume.
+      setStatus(err instanceof BosphorError ? `${err.code}: ${err.message}` : String(err));
+    }
+  }
+
+  return (
+    <div>
+      <input type="file" onChange={onFile} />
+      <p>{status}</p>
+      {pending ? <button onClick={onStore}>Pay and store</button> : null}
+      {result ? (
+        <a href={walrusBlobUrl(result.blobId)} target="_blank" rel="noreferrer">
+          Download from Walrus (expires at epoch {result.endEpoch.toString()})
+        </a>
+      ) : null}
+    </div>
+  );
+}
+```
+
+## How it works
+
+- **`connect()`** asks the wallet for accounts, switches it to Sepolia
+  (`TESTNET.evm.chainId`) when needed, and builds the client with
+  `createBosphorClientFromSigner`. The adapter address, relayer URL, and
+  LayerZero options all come from the `TESTNET` preset.
+- **Pricing first.** `client.encode()` derives the blob id locally, and
+  `client.priceQuote()` returns the all-in amount (`totalNative`) with a USD
+  breakdown. Nothing is signed yet.
+- **Paying.** `client.submitPaid(encoded, quote)` sends one transaction whose
+  value is the quote. The adapter forwards the LayerZero fee and escrows the rest
+  until the proof arrives.
+- **Uploading.** The file bytes never cross the bridge: `client.upload()` sends
+  them to the relayer, which checks them against the on-chain commitment.
+- **Proof.** `client.awaitProof()` resolves once the proof is verified on
+  Sepolia, with the blob id and the Walrus epoch the storage lasts until.
+
+If you do not need the price step, `client.storePriced(bytes)` runs the whole
+flow in one call. See [Show store progress in your UI](/docs/examples/store-progress)
+to report each step while it runs.
+
+## When something fails
+
+The intent stays on-chain after `submitPaid`, so a failure later is resumable:
+retry `client.upload(intentId, bytes)`, then `client.awaitProof(intentId)`. If no
+proof lands before the deadline (one hour by default), the payer gets the escrow
+back: see [Refund an expired escrow](/docs/examples/refund-expired-escrow). The
+[error guide](/docs/guides/errors) lists each error class and what to do.

@@ -1,0 +1,110 @@
+---
+title: Refund an expired escrow
+description: Read an intent's escrow, tell a released payment from a pending one, and refund it after the deadline on EVM and Solana.
+---
+
+A paid store escrows the storage part of the price on the origin chain. The
+proof of storage releases it to the relayer. If no proof lands before the intent
+deadline (one hour after submit by default), anyone can send a refund and the
+escrow goes back to the payer. The LayerZero fee is not refunded: it paid for the
+message to Sui.
+
+Pass the intent id (from `storePriced()`, `submitPaid()`, or the `submitted`
+progress event) as the first argument.
+
+<Tabs items={["EVM", "Solana"]}>
+<Tab value="EVM">
+
+The EVM adapter uses pull payments: `refund()` credits the payer, and
+`withdraw()`, sent from the payer's wallet, pays it out.
+
+```ts title="refund.ts"
+import { JsonRpcProvider, Wallet, formatEther } from "ethers";
+import { EscrowStatus, TESTNET, createBosphorClientFromSigner, type Hex } from "@bosphor/sdk/evm";
+
+const intentId = process.argv[2] as Hex;
+const signer = new Wallet(process.env.PRIVATE_KEY!, new JsonRpcProvider(TESTNET.evm.rpcUrl));
+const client = await createBosphorClientFromSigner(signer);
+
+const escrow = await client.getEscrow(intentId);
+const now = BigInt(Math.floor(Date.now() / 1000));
+
+if (escrow.status === EscrowStatus.Released) {
+  console.log("The proof landed and the relayer was paid. Nothing to refund.");
+} else if (escrow.status === EscrowStatus.Pending && now <= escrow.deadline) {
+  console.log(`The proof can still land. A refund opens in ${escrow.deadline - now} s.`);
+} else if (escrow.status === EscrowStatus.Pending) {
+  // Anyone can send the refund; it is credited to the recorded payer.
+  const { txHash } = await client.refund(intentId);
+  console.log(`Refunded ${formatEther(escrow.amount)} ETH to ${escrow.payer}: ${txHash}`);
+  // Pull payments: only the payer's wallet can withdraw the credited balance.
+  if (escrow.payer.toLowerCase() === (await signer.getAddress()).toLowerCase()) {
+    const withdrawal = await client.withdraw();
+    console.log(`Withdrawn: ${withdrawal.txHash}`);
+  }
+} else if (escrow.status === EscrowStatus.Refunded) {
+  console.log("Already refunded. Call client.withdraw() from the payer wallet if it is not paid out yet.");
+} else {
+  console.log("No escrow for this intent (a free store, or a wrong intent id).");
+}
+```
+
+| `status` | `EscrowStatus` | Meaning |
+|----------|----------------|---------|
+| 0 | `None` | No escrow: a free `store()` or a wrong intent id |
+| 1 | `Pending` | Waiting for the proof. Refundable after `deadline` |
+| 2 | `Released` | The proof landed and the relayer was paid |
+| 3 | `Refunded` | Credited back to the payer. Withdraw to receive it |
+
+</Tab>
+<Tab value="Solana">
+
+The Solana program pays the payer directly: `refundEscrow()` returns the escrow
+and the vault's rent in one instruction and closes the vault.
+
+```ts title="refund.ts"
+import { readFileSync } from "node:fs";
+import { Connection, Keypair, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { TESTNET, createBosphorSolanaClientFromKeypair, type Hex } from "@bosphor/sdk/solana";
+
+const intentId = process.argv[2] as Hex;
+const connection = new Connection(TESTNET.solana.rpcUrl, "confirmed");
+const wallet = Keypair.fromSecretKey(
+  Uint8Array.from(JSON.parse(readFileSync("keypair.json", "utf8")) as number[]),
+);
+const client = await createBosphorSolanaClientFromKeypair({ connection, wallet });
+
+// Solana escrow status: 0 Pending, 1 Released, 2 Refunded. null means no vault.
+const escrow = await client.getEscrow(intentId);
+const now = BigInt(Math.floor(Date.now() / 1000));
+
+if (!escrow) {
+  console.log("No escrow vault: a free store, a wrong intent id, or already refunded.");
+} else if (escrow.status === 1) {
+  console.log("The proof landed and the relayer was paid. Nothing to refund.");
+} else if (escrow.status === 0 && now <= escrow.deadline) {
+  console.log(`The proof can still land. A refund opens in ${escrow.deadline - now} s.`);
+} else if (escrow.status === 0) {
+  // Anyone can send it; the escrow and the vault rent always go to the payer.
+  const { txHash } = await client.refundEscrow(intentId);
+  const sol = Number(escrow.amount) / LAMPORTS_PER_SOL;
+  console.log(`Refunded ${sol} SOL to ${escrow.payer}: ${txHash}`);
+} else {
+  console.log("Already refunded.");
+}
+```
+
+| `status` | Meaning |
+|----------|---------|
+| `null` | No vault: a free store, a wrong intent id, or already refunded |
+| 0 | Pending. Refundable after `deadline` |
+| 1 | Released to the relayer |
+| 2 | Refunded |
+
+</Tab>
+</Tabs>
+
+Before the deadline the contracts reject a refund (`DeadlineNotReached` on EVM),
+because the proof can still arrive. Both starter repos ship this as
+`npm run refund -- <intentId>`. The [Pay for storage](/docs/guides/pay-for-storage)
+guide explains how the escrow is priced and released.

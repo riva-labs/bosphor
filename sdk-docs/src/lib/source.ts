@@ -1,5 +1,6 @@
 import { loader } from 'fumadocs-core/source';
-import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
+import { docsContentRoute, docsImageRoute, docsRoute, siteUrl } from './shared';
+import { examplesMarkdown } from './examples';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
@@ -56,12 +57,22 @@ export function getPageMarkdownUrl(page: DocsPage) {
 }
 
 export async function getLLMText(page: DocsPage) {
+  // OpenAPI operations render from the spec; components that render data (not
+  // prose) get a markdown stand-in, so the markdown twin and llms-full.txt carry
+  // the same content as the page.
   const processed =
     page.type === 'openapi'
       ? operationToMarkdown(page.data)
-      : await page.data.getText('processed');
+      : (await page.data.getText('processed')).replace(/<ExamplesGallery\s*\/>/g, () =>
+          examplesMarkdown(siteUrl),
+        );
 
-  return `# ${page.data.title} (${page.url})
+  const description = page.data.description ? `\n> ${page.data.description}\n` : '';
 
-${processed}`;
+  return `# ${page.data.title}
+
+Source: ${siteUrl}${page.url}
+${description}
+${processed.trim()}
+`;
 }
