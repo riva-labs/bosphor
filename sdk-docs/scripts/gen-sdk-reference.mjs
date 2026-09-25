@@ -143,6 +143,10 @@ function prepare(context) {
   }
 }
 
+/** True when a declaration (or, for a function, its first signature) has a TSDoc summary. */
+const hasSummary = (r) =>
+  [r.comment, ...(r.signatures ?? []).map((sig) => sig.comment)].some((c) => c?.summary.some((p) => p.text.trim()));
+
 /** Kind sections inside a group page, in order. */
 const KIND_ORDER = [
   ReflectionKind.Class,
@@ -178,10 +182,12 @@ function groupByKind(owner, children) {
  */
 function regroup(context) {
   const project = context.project;
+  const undocumented = [];
   for (const module of project.getChildrenByKind(ReflectionKind.Module)) {
     const buckets = new Map();
     for (const child of [...(module.children ?? [])]) {
       if (child.kindOf(ReflectionKind.Reference)) continue; // listed on the index page
+      if (!hasSummary(child)) undocumented.push(`${module.name}: ${child.name}`);
       const name = groupOf(child);
       if (!buckets.has(name)) buckets.set(name, []);
       buckets.get(name).push(child);
@@ -205,6 +211,10 @@ function regroup(context) {
     for (const ns of namespaces) module.addChild(ns);
     module.groups = groupByKind(module, [...namespaces, ...references]);
     module.categories = undefined;
+  }
+  // Every public export needs a TSDoc summary, or its reference entry is empty.
+  if (undocumented.length) {
+    throw new Error(`gen-sdk-reference: public exports without a TSDoc summary:\n  ${undocumented.join('\n  ')}`);
   }
 }
 
