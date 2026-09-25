@@ -5,10 +5,9 @@ export const docsContentRoute = '/llms.mdx/docs';
 
 /**
  * Public origin of the portal, used for canonical URLs, the sitemap, robots and
- * structured data. It stays on sdk.bosphor.xyz until the docs.bosphor.xyz
- * cutover, which changes it here in one place.
+ * structured data.
  */
-export const siteUrl = 'https://sdk.bosphor.xyz';
+export const siteUrl = 'https://docs.bosphor.xyz';
 
 export const tagline = 'Making Permanence Portable';
 

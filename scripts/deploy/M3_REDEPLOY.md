@@ -150,4 +150,4 @@ restart. Keep a copy of the pre-redeploy `.env.testnet` before Step 1.
 ## Docs
 
 After the redeploy, update `CLAUDE.md` "Deployed Contracts" and
-`website/docs/changelog.md` with the new v6 addresses.
+the portal testnet reference (`sdk-docs/content/docs/reference/testnet.mdx`) with the new v6 addresses.
