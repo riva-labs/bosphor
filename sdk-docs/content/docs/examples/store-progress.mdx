@@ -1,0 +1,119 @@
+---
+title: Show store progress in your UI
+description: Turn the onProgress events of store() and storePriced() into status lines with explorer links, on EVM and Solana, and wrap it in a React hook.
+---
+
+A store takes one to three minutes end to end. `store()` and `storePriced()`
+accept an `onProgress` callback that fires as each step completes, so your UI can
+say where the round trip is instead of showing a spinner.
+
+| Step | When it fires | What it carries |
+|------|---------------|-----------------|
+| `encoded` | The blob id is derived, before any chain call | `encoded` (blob id, size, epochs, deadline) |
+| `quoted` | The price is known | `amount` (native value paid at submit), `quote` on the paid path |
+| `submitted` | The intent is on-chain | `intentId`, `txHash` (EVM tx hash or Solana signature) |
+| `uploaded` | The relayer accepted the bytes | `intentId` |
+| `proven` | The proof is verified on the origin chain | `intentId`, `blobId`, `endEpoch` |
+
+## Map events to status lines
+
+`StoreProgress` is a discriminated union on `step`, so a `switch` covers every
+case and TypeScript tells you when a new step appears. The explorer links are
+available from `submitted` on, well before the proof lands.
+
+```ts title="progress.ts"
+import { TESTNET, type StoreProgress } from "@bosphor/sdk";
+
+/** One UI line per step, with explorer links as soon as they exist. */
+export function describe(event: StoreProgress, origin: "evm" | "solana") {
+  switch (event.step) {
+    case "encoded":
+      return { label: "Prepared", detail: `blob id ${event.encoded.blobId}` };
+    case "quoted":
+      return { label: "Priced", detail: `paying ${event.amount} (smallest unit)` };
+    case "submitted": {
+      const explorer =
+        origin === "evm"
+          ? `https://sepolia.etherscan.io/tx/${event.txHash}`
+          : `https://solscan.io/tx/${event.txHash}?cluster=devnet`;
+      return {
+        label: "Submitted",
+        detail: `intent ${event.intentId}`,
+        links: [explorer, `${TESTNET.layerZeroScanUrl}/tx/${event.txHash}`],
+      };
+    }
+    case "uploaded":
+      return { label: "Uploaded", detail: "waiting for the storage proof (1 to 3 minutes)" };
+    case "proven":
+      return { label: "Proven", detail: `stored until epoch ${event.endEpoch}` };
+  }
+}
+```
+
+## React hook (EVM)
+
+```tsx title="useStore.tsx"
+import { useState } from "react";
+import type { StoreProgress } from "@bosphor/sdk";
+import type { BosphorEvmClient } from "@bosphor/sdk/evm";
+
+const STEPS = ["encoded", "quoted", "submitted", "uploaded", "proven"] as const;
+
+export function useStore(client: BosphorEvmClient) {
+  const [events, setEvents] = useState<StoreProgress[]>([]);
+  const [error, setError] = useState<unknown>(null);
+
+  async function store(bytes: Uint8Array) {
+    setEvents([]);
+    setError(null);
+    try {
+      return await client.storePriced(bytes, {
+        epochs: 5,
+        // Called synchronously after each step. Keep it cheap: a throw here aborts the flow.
+        onProgress: (event) => setEvents((prev) => [...prev, event]),
+      });
+    } catch (err) {
+      setError(err);
+      throw err;
+    }
+  }
+
+  const done = new Set(events.map((e) => e.step));
+  const current = STEPS.find((s) => !done.has(s)) ?? "proven";
+  const submitted = events.find((e) => e.step === "submitted");
+  return { store, events, current, error, txHash: submitted?.txHash };
+}
+```
+
+Render `events.map((e) => describe(e, "evm"))` as a checklist, highlight
+`current`, and link `txHash` to Etherscan and LayerZero Scan as soon as it is set.
+
+## Node script (Solana)
+
+The same callback works on the Solana client:
+
+```ts title="store-solana.ts"
+import { readFileSync } from "node:fs";
+import { Connection, Keypair } from "@solana/web3.js";
+import { TESTNET, createBosphorSolanaClientFromKeypair } from "@bosphor/sdk/solana";
+import { describe } from "./progress.js";
+
+const connection = new Connection(TESTNET.solana.rpcUrl, "confirmed");
+const wallet = Keypair.fromSecretKey(
+  Uint8Array.from(JSON.parse(readFileSync("keypair.json", "utf8")) as number[]),
+);
+const client = await createBosphorSolanaClientFromKeypair({ connection, wallet });
+
+await client.storePriced(new TextEncoder().encode("hello, Walrus"), {
+  onProgress: (event) => {
+    const line = describe(event, "solana");
+    console.log(line.label.padEnd(10), line.detail, ...(line.links ?? []));
+  },
+});
+```
+
+<Callout type="warn" title="Keep the callback cheap">
+`onProgress` runs synchronously between steps. If it throws, the flow stops. The
+on-chain intent is not rolled back, so resume with `upload(intentId, bytes)` and
+`awaitProof(intentId)` (see [Resume after a crash](/docs/guides/resume)).
+</Callout>
