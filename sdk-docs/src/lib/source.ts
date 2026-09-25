@@ -1,5 +1,5 @@
 import { loader } from 'fumadocs-core/source';
-import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
+import { docsContentRoute, docsImageRoute, docsRoute, siteUrl } from './shared';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
@@ -48,7 +48,12 @@ export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
 export async function getLLMText(page: (typeof source)['$inferPage']) {
   const processed = await page.data.getText('processed');
 
-  return `# ${page.data.title} (${page.url})
+  const description = page.data.description ? `\n> ${page.data.description}\n` : '';
 
-${processed}`;
+  return `# ${page.data.title}
+
+Source: ${siteUrl}${page.url}
+${description}
+${processed.trim()}
+`;
 }
