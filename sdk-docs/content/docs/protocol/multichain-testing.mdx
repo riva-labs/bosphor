@@ -110,7 +110,7 @@ npx jest src/pricing/fee-abstraction.spec.ts --verbose
 
 ### Cost per blob size
 
-`relayer/scripts/cost-curve.ts` prints the all-in escrow for a range of sizes using the real quote engine and WAL cost calculator. It runs offline with **simulated inputs**, not live prices: WAL $0.03, SUI $0.80, ETH $2,500, SOL $100 (override with `WAL_USD`, `SUI_USD`, `ETH_USD`, `SOL_USD`), a return-leg fee of 1.76 SUI, Sui gas of 0.01 SUI, 5 epochs, and a representative Walrus system state (1,000 shards). The live relayer quotes from live prices instead (see [Payment flow](/docs/guides/pay-for-storage)).
+`relayer/scripts/cost-curve.ts` prints the all-in escrow for a range of sizes using the real quote engine and WAL cost calculator. It runs offline with **simulated inputs**, not live prices: WAL $0.03, SUI $0.80, ETH $2,500, SOL $100 (override with `WAL_USD`, `SUI_USD`, `ETH_USD`, `SOL_USD`), a return-leg fee of 1.76 SUI, Sui gas of 0.01 SUI, 5 epochs, and a representative Walrus system state (1,000 shards). The live relayer quotes from live prices instead (see [Pay for storage](/docs/guides/pay-for-storage)).
 
 ```bash
 cd relayer
@@ -154,4 +154,4 @@ Results: live pass logs are not yet recorded on this page. Run both priced scrip
 
 - [Relayer benchmarks](/docs/protocol/benchmarks) for relayer latency, throughput, and fault tolerance
 - [Testing Guide](/docs/protocol/testing) for how to run each suite
-- [Payment flow](/docs/guides/pay-for-storage) for the escrow design both chains share
+- [Pay for storage](/docs/guides/pay-for-storage) for the escrow design both chains share

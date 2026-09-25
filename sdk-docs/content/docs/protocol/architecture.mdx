@@ -34,7 +34,7 @@ description: "How an intent travels from an EVM or Solana origin over LayerZero 
 
 The EVM adapter handles intent submission, fee quoting, and proof receipt. Key functions: `submitIntent`, `quote`, `_lzReceive` (proof path), and `confirmExecution` (trusted-relayer fallback). Intent IDs are derived as `keccak256(commitment(49) ++ sender(32) ++ nonce(u64))`; see [Commitment Format](/docs/contracts/commitment-format). On proof receipt the adapter asserts the returned blob id equals the committed one (`BlobIdMismatch` otherwise).
 
-For the complete interface reference, function signatures, events, errors, and code examples, see [Contract Interface](/docs/contracts/evm-adapter).
+For the complete interface reference, function signatures, events, errors, and code examples, see [EVM adapter](/docs/contracts/evm-adapter).
 
 ## Sui Walrus Executor
 

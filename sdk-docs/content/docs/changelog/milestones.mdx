@@ -15,13 +15,13 @@ proof.
   escrow vault escrow the user's payment at submit, release it to the relayer on
   a genuine proof, and refund the payer after a deadline. Both the EVM (Sepolia)
   and Solana (devnet) paths are live on testnet and verified end to end. See
-  [Payment flow](/docs/guides/pay-for-storage) and the
-  [contract interface](/docs/contracts/evm-adapter).
+  [Pay for storage](/docs/guides/pay-for-storage) and the
+  [EVM adapter](/docs/contracts/evm-adapter).
 
 - **Off-chain quoting**: a relayer `POST /quote` endpoint and the SDK
   `client.storePriced()` / `priceQuote()` surface a single all-in origin-native
   amount plus a USD breakdown, priced from a multi-source oracle (Pyth Hermes +
-  CoinGecko) with staleness and sanity bounds. See [Public API](/docs/api).
+  CoinGecko) with staleness and sanity bounds. See [Relayer HTTP API](/docs/api).
 
 - **Never lose money**: a relayer break-even guard recomputes cost at live prices
   before any WAL spend and skips unprofitable intents (which then refund), with a
@@ -61,7 +61,7 @@ Operational hardening of the cross-chain pipeline: live monitoring, continuous v
 
 - **Continuous canary**: A standalone service that runs real synthetic end-to-end round-trips on a fixed interval, submitting an intent on EVM and confirming the proof returns. It is the primary signal that the whole cross-chain path is healthy. See [Canary Monitoring](/docs/protocol/canary).
 
-- **Per-intent lifecycle store + public feed API**: The relayer records each intent's lifecycle and exposes a read-only `GET /public/intents` feed at api.bosphor.xyz. See [Public API](/docs/api).
+- **Per-intent lifecycle store + public feed API**: The relayer records each intent's lifecycle and exposes a read-only `GET /public/intents` feed at api.bosphor.xyz. See [Relayer HTTP API](/docs/api).
 
 - **Sentry error tracking**: The relayer and canary report runtime errors and failed probes to Sentry when `SENTRY_DSN` is configured.
 
@@ -91,7 +91,7 @@ The initial release establishing the complete cross-chain storage intent pipelin
 
 ### Added
 
-- **EVM Adapter** (`BosphorAdapter.sol`): Solidity contract on Sepolia for submitting storage intents via LayerZero v2. Includes fee quoting, deadline enforcement, nonce-based intent IDs, and owner-only emergency `confirmExecution`. See [Contract Interface](/docs/contracts/evm-adapter).
+- **EVM Adapter** (`BosphorAdapter.sol`): Solidity contract on Sepolia for submitting storage intents via LayerZero v2. Includes fee quoting, deadline enforcement, nonce-based intent IDs, and owner-only emergency `confirmExecution`. See [EVM adapter](/docs/contracts/evm-adapter).
 
 - **Sui Walrus Executor** (`lz_receiver`, `walrus_executor`, `ptb_builder`): Move package on Sui testnet that receives cross-chain intents, executes Walrus blob storage, and sends DVN-verified proofs back to EVM. See [Sui Executor](/docs/contracts/sui-executor).
 
