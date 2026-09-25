@@ -385,7 +385,7 @@ nothing is fabricated on failure.
 ## API reference
 
 The full docs, guides for the EVM and Solana paths, and the generated API
-reference live at **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
+reference live at **[docs.bosphor.xyz](https://docs.bosphor.xyz)**.
 
 Full type signatures also ship with the package as `.d.ts`, so your editor shows
 every parameter, return type, and doc comment inline.

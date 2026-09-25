@@ -26,9 +26,6 @@ relayer/node_modules/
 relayer/dist/
 
 # website
-website/node_modules/
-website/build/
-website/.docusaurus/
 
 # confidential
 AGREEMENT*.md
