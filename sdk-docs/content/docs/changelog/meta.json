@@ -1,7 +1,7 @@
 {
   "title": "Changelog",
   "description": "SDK releases and protocol milestones",
-  "icon": "History",
+  "icon": "ScrollText",
   "root": true,
   "pages": [
     "index",
