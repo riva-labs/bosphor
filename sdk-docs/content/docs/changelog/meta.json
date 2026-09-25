@@ -1,0 +1,10 @@
+{
+  "title": "Changelog",
+  "description": "SDK releases and protocol milestones",
+  "icon": "History",
+  "root": true,
+  "pages": [
+    "index",
+    "milestones"
+  ]
+}

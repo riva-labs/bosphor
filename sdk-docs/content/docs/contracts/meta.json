@@ -1,0 +1,13 @@
+{
+  "title": "Contracts",
+  "description": "EVM adapter, Solana program, Sui executor",
+  "icon": "FileCode",
+  "root": true,
+  "pages": [
+    "index",
+    "evm-adapter",
+    "solana-program",
+    "sui-executor",
+    "commitment-format"
+  ]
+}

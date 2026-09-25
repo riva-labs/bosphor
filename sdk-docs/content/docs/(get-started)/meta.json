@@ -1,0 +1,14 @@
+{
+  "title": "Get started",
+  "description": "Overview, quickstart, and core concepts",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "index",
+    "quickstart",
+    "how-it-works",
+    "---Reference---",
+    "[Testnet addresses](/docs/reference/testnet)",
+    "[Glossary](/docs/protocol/glossary)"
+  ]
+}

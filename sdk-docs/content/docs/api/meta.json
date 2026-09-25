@@ -1,0 +1,9 @@
+{
+  "title": "API reference",
+  "description": "The relayer HTTP API",
+  "icon": "Webhook",
+  "root": true,
+  "pages": [
+    "index"
+  ]
+}
