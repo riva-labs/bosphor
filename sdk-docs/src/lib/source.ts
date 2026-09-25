@@ -2,6 +2,7 @@ import { loader } from 'fumadocs-core/source';
 import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
+import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 
 const docs = defineDocs({
   dir: 'content/docs',
@@ -22,7 +23,8 @@ const docs = defineDocs({
 export const source = loader({
   baseUrl: docsRoute,
   source: docs.toFumadocsSource(),
-  plugins: [],
+  // Section icons from meta.json `icon` names (the sidebar tabs use them).
+  plugins: [lucideIconsPlugin()],
 });
 
 export function getPageImageUrl(page: (typeof source)['$inferPage']) {
