@@ -1680,6 +1680,7 @@ Milestone 2 built on Sepolia + Sui Testnet with a verified bidirectional E2E flo
 
 - [SDK docs (sdk.bosphor.xyz)](https://sdk.bosphor.xyz): integrate Bosphor from EVM or Solana with `@bosphor/sdk`.
 - [Quickstart](quickstart.md): store your first file from Sepolia or Solana devnet on the hosted testnet.
+- Starter repos: [EVM](https://github.com/riva-labs/bosphor-evm-starter) and [Solana](https://github.com/riva-labs/bosphor-solana-starter), clone and run.
 - [Self-hosting](self-hosting.md): deploy the contracts and relayer yourself.
 - [Architecture](architecture.md): Understand the system design and message flow.
 - [Security Model](security-model.md): Review trust assumptions before integrating.
@@ -2482,6 +2483,13 @@ import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import AgentPrompt from '@site/src/components/AgentPrompt';
 
+:::tip Prefer to start from working code?
+Clone a starter and run it in a few minutes:
+[bosphor-evm-starter](https://github.com/riva-labs/bosphor-evm-starter) (Sepolia) or
+[bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter) (Solana devnet). Each has a price quote, a paid
+store with live progress, and a refund script.
+:::
+
 :::tip Want to run the whole protocol yourself?
 This page is the integrator path against the hosted testnet. To deploy your own
 contracts and relayer, see [Self-hosting](self-hosting.md).
@@ -2692,6 +2700,8 @@ can be resumed. If no proof ever lands, refund the escrow after the deadline wit
 
 ## Next steps
 
+- Starter repos: [bosphor-evm-starter](https://github.com/riva-labs/bosphor-evm-starter) and
+  [bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter), ready-to-run projects built on this flow.
 - [Payment flow](payment-flow.md): how the escrow, release, and refund work.
 - [SDK documentation](https://sdk.bosphor.xyz): the full API for the EVM and Solana
   clients, including the lower-level steps.
