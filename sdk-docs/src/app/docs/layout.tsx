@@ -17,8 +17,8 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       tabMode="navbar"
     >
       {children}
-      {/* A full-width row under the sidebar, page and TOC columns. */}
-      <SiteFooter className="[grid-column:1/-1] mt-8" />
+      {/* Full width, and pinned to the last grid row so it never lands above the page on mobile. */}
+      <SiteFooter className="mt-8 [grid-column:1/-1] [grid-row:99]" />
     </DocsLayout>
   );
 }
