@@ -5,8 +5,9 @@
 # the retired-URL redirect map, and the redirect Worker tests. Pull requests run
 # the build as a gate; only pushes to main deploy.
 #
-# The API reference is generated from sdk/src with TypeDoc at build time, so the
-# site is rebuilt when either the docs or the SDK source changes.
+# The SDK reference is generated from sdk/src with TypeDoc at build time
+# (sdk-docs/scripts/gen-sdk-reference.mjs, run by `npm run build`), so the site
+# is rebuilt when either the docs or the SDK source changes.
 #
 # One-time setup (repo Settings -> Secrets and variables -> Actions):
 #   - CLOUDFLARE_API_TOKEN  (a token with Workers Scripts:Edit on the account)
@@ -23,12 +24,14 @@ on:
       - 'sdk/src/**'
       - 'sdk/package.json'
       - 'sdk/tsconfig.json'
+      - 'tsconfig.base.json'
   pull_request:
     paths:
       - 'sdk-docs/**'
       - 'sdk/src/**'
       - 'sdk/package.json'
       - 'sdk/tsconfig.json'
+      - 'tsconfig.base.json'
       - 'website/docs/**'
       - '.github/workflows/sdk-docs.yml'
   workflow_dispatch:
