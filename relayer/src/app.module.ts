@@ -10,6 +10,7 @@ import { SettlementModule } from './settlement/settlement.module';
 import { IntentModule } from './intent/intent.module';
 import { IngestModule } from './ingest/ingest.module';
 import { HealthModule } from './health/health.module';
+import { OpenApiModule } from './openapi/openapi.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { LifecycleModule } from './lifecycle/lifecycle.module';
 import { StagedModule } from './staged/staged.module';
@@ -36,6 +37,7 @@ import { WakerModule } from './common/waker.module';
     IngestModule,
     IntentModule,
     HealthModule,
+    OpenApiModule,
   ],
 })
 export class AppModule {}

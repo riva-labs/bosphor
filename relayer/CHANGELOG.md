@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0 (2026-09-25)
+
+### Features
+
+- feat(relayer): serve the OpenAPI spec at GET /openapi.json and /openapi.yaml
+
 ## 0.15.0 (2026-09-24)
 
 ### Features

@@ -9,7 +9,7 @@ const config: Config = {
     '^.+\\.m?js$': ['babel-jest', { plugins: ['@babel/plugin-transform-modules-commonjs'] }],
   },
   transformIgnorePatterns: [
-    '/node_modules/(?!(@mysten|@noble|@scure|valibot)/)',
+    '/node_modules/(?!(@mysten|@noble|@scure|valibot|@apidevtools)/)',
   ],
   collectCoverageFrom: ['src/**/*.ts'],
   coverageDirectory: './coverage',
