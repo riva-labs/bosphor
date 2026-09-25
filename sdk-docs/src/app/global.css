@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+@import 'fumadocs-openapi/css/preset.css';
 
 /*
  * Bosphor brand theme for Fumadocs.
@@ -17,6 +18,27 @@
   --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-display: 'Satoshi', var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
   --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+
+  /*
+   * API reference (fumadocs-openapi) colors its HTTP method badges and status
+   * dots with stock Tailwind hues (POST in bright blue). The portal uses no other
+   * Tailwind color utilities, so the hues are remapped onto the brand palette
+   * here: GET in the success green, POST in a quiet slate (blue stays for links),
+   * PUT/PATCH in amber, DELETE and errors in the semantic red. The -600 shades
+   * serve the light theme, the -400 shades the dark one.
+   */
+  --color-green-400: #5aae8a;
+  --color-green-500: #3d8b6b;
+  --color-green-600: #2f7659;
+  --color-blue-400: #93a8c2;
+  --color-blue-600: #4f6b8a;
+  --color-yellow-400: #c4a85e;
+  --color-yellow-600: #86702f;
+  --color-orange-400: #c4a85e;
+  --color-orange-600: #86702f;
+  --color-red-400: #c9706c;
+  --color-red-500: #a84d4a;
+  --color-red-600: #943f3c;
 }
 
 :root {

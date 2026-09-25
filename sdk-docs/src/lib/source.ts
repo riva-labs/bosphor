@@ -3,6 +3,9 @@ import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
+import { openapiPlugin } from 'fumadocs-openapi/server';
+import { relayerApiSource } from './api-source';
+import { operationToMarkdown } from './openapi-markdown';
 
 const docs = defineDocs({
   dir: 'content/docs',
@@ -22,12 +25,19 @@ const docs = defineDocs({
 // See https://fumadocs.dev/docs/headless/source-api for more info
 export const source = loader({
   baseUrl: docsRoute,
-  source: docs.toFumadocsSource(),
-  // Section icons from meta.json `icon` names (the sidebar tabs use them).
-  plugins: [lucideIconsPlugin()],
+  source: {
+    docs: docs.toFumadocsSource(),
+    // One virtual page per relayer operation, under /docs/api/<tag>/<operation>.
+    openapi: await relayerApiSource(),
+  },
+  // Section icons from meta.json `icon` names (the sidebar tabs use them), and
+  // HTTP method badges on the API reference entries.
+  plugins: [lucideIconsPlugin(), openapiPlugin()],
 });
 
-export function getPageImageUrl(page: (typeof source)['$inferPage']) {
+export type DocsPage = (typeof source)['$inferPage'];
+
+export function getPageImageUrl(page: DocsPage) {
   const segments = [...page.slugs, 'image.png'];
 
   return {
@@ -36,7 +46,7 @@ export function getPageImageUrl(page: (typeof source)['$inferPage']) {
   };
 }
 
-export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
+export function getPageMarkdownUrl(page: DocsPage) {
   const segments = [...page.slugs, 'content.md'];
 
   return {
@@ -45,8 +55,11 @@ export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
   };
 }
 
-export async function getLLMText(page: (typeof source)['$inferPage']) {
-  const processed = await page.data.getText('processed');
+export async function getLLMText(page: DocsPage) {
+  const processed =
+    page.type === 'openapi'
+      ? operationToMarkdown(page.data)
+      : await page.data.getText('processed');
 
   return `# ${page.data.title} (${page.url})
 
