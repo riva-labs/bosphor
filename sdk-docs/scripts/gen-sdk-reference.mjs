@@ -278,7 +278,8 @@ async function main() {
       entryPoints: AREAS.map((a) => path.join(sdkRoot, a.entry)),
       out: tmpDir,
       readme: 'none',
-      basePath: repoRoot,
+      // Source paths (shown and linked) are relative to the repo root.
+      displayBasePath: repoRoot,
       excludeInternal: true,
       excludePrivate: true,
       excludeProtected: true,
@@ -286,6 +287,8 @@ async function main() {
       disableSources: false,
       sourceLinkTemplate: 'https://github.com/riva-labs/bosphor/blob/main/{path}#L{line}',
       gitRevision: 'main',
+      // Links use displayBasePath, so no git lookup is needed (and worktrees work).
+      disableGit: true,
       // Markdown plugin: MDX output, one page per module and namespace.
       router: 'bosphor-reference',
       fileExtension: '.mdx',
