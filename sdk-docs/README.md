@@ -17,6 +17,9 @@ npm run preview    # serve out/ through the redirect Worker (wrangler dev)
 
 `npm run build` fails when:
 
+- a page has no markdown twin: after `next build`, `scripts/markdown-aliases.mjs`
+  writes every page to its URL plus `.md` (`/docs/quickstart.md`) for AI
+  assistants, and `llms.txt` links to those,
 - an internal link or `#anchor` on any page is broken (`scripts/check-links.mjs`),
 - a retired URL does not land on a real page (`scripts/check-redirects.mjs`),
 - the redirect Worker tests fail (`scripts/test-worker.mjs`).
@@ -25,9 +28,11 @@ npm run preview    # serve out/ through the redirect Worker (wrangler dev)
 
 | Path | What it holds |
 |------|---------------|
-| `content/docs/` | Pages (`.mdx`). Each top-level folder with `"root": true` in its `meta.json` is a section tab. `(get-started)` is a group folder, so its pages live at `/docs`, `/docs/quickstart`, `/docs/how-it-works`. |
+| `content/docs/` | Pages (`.mdx`). Each top-level folder with `"root": true` in its `meta.json` is a section tab in the top navbar (Fumadocs Notebook layout; pages must import from `fumadocs-ui/layouts/notebook/page`). `(get-started)` is a group folder, so its pages live at `/docs`, `/docs/quickstart`, `/docs/how-it-works`. |
 | `src/app/(home)` | The portal home page. |
-| `src/components/` | MDX components (`AgentPrompt`, `Mermaid`, type tables) and the search dialog. |
+| `src/components/` | MDX components (`AgentPrompt`, `ExamplesGallery`, `Mermaid`, type tables), page actions, footer, and the search dialog. |
+| `src/lib/examples.ts` | The Examples gallery entries (also rendered as markdown for `llms-full.txt`). |
+| `src/lib/llms.ts` | `llms.txt` and `llms-full.txt`, built from the page tree. |
 | `src/app/global.css` | The brand theme (Fumadocs color variables, fonts). |
 | `src/lib/shared.ts` | Site name, public URL (`siteUrl`), and external links. |
 | `redirects/map.mjs` | Every retired URL and its new page. |
