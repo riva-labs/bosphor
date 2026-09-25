@@ -117,9 +117,9 @@ class ReferenceRouter extends ModuleRouter {
 }
 
 const areaByModuleName = new Map();
-function areaOf(module) {
-  const area = areaByModuleName.get(module.name);
-  if (!area) throw new Error(`gen-sdk-reference: no area for module "${module.name}"`);
+function areaOf(mod) {
+  const area = areaByModuleName.get(mod.name);
+  if (!area) throw new Error(`gen-sdk-reference: no area for module "${mod.name}"`);
   return area;
 }
 
@@ -129,13 +129,13 @@ function areaOf(module) {
  */
 function prepare(context) {
   const project = context.project;
-  for (const module of project.getChildrenByKind(ReflectionKind.Module)) {
-    const rel = path.relative(sdkRoot, module.sources?.[0]?.fullFileName ?? '');
+  for (const mod of project.getChildrenByKind(ReflectionKind.Module)) {
+    const rel = path.relative(sdkRoot, mod.sources?.[0]?.fullFileName ?? '');
     const area = AREAS.find((a) => a.entry === rel);
-    if (!area) throw new Error(`gen-sdk-reference: unexpected module ${module.name} (${rel})`);
-    module.name = area.title;
-    areaByModuleName.set(module.name, area);
-    for (const child of module.children ?? []) {
+    if (!area) throw new Error(`gen-sdk-reference: unexpected module ${mod.name} (${rel})`);
+    mod.name = area.title;
+    areaByModuleName.set(mod.name, area);
+    for (const child of mod.children ?? []) {
       for (const member of [...(child.children ?? [])]) {
         if (isExternal(member)) project.removeReflection(member);
       }
@@ -183,11 +183,11 @@ function groupByKind(owner, children) {
 function regroup(context) {
   const project = context.project;
   const undocumented = [];
-  for (const module of project.getChildrenByKind(ReflectionKind.Module)) {
+  for (const mod of project.getChildrenByKind(ReflectionKind.Module)) {
     const buckets = new Map();
-    for (const child of [...(module.children ?? [])]) {
+    for (const child of [...(mod.children ?? [])]) {
       if (child.kindOf(ReflectionKind.Reference)) continue; // listed on the index page
-      if (!hasSummary(child)) undocumented.push(`${module.name}: ${child.name}`);
+      if (!hasSummary(child)) undocumented.push(`${mod.name}: ${child.name}`);
       const name = groupOf(child);
       if (!buckets.has(name)) buckets.set(name, []);
       buckets.get(name).push(child);
@@ -197,20 +197,20 @@ function regroup(context) {
     for (const group of GROUPS) {
       const members = buckets.get(group.name);
       if (!members?.length) continue;
-      const ns = new DeclarationReflection(group.name, ReflectionKind.Namespace, module);
+      const ns = new DeclarationReflection(group.name, ReflectionKind.Namespace, mod);
       project.registerReflection(ns, undefined, undefined);
       for (const member of members) {
-        module.removeChild(member);
+        mod.removeChild(member);
         member.parent = ns;
         ns.addChild(member);
       }
       ns.groups = groupByKind(ns, ns.children);
       namespaces.push(ns);
     }
-    const references = [...(module.children ?? [])];
-    for (const ns of namespaces) module.addChild(ns);
-    module.groups = groupByKind(module, [...namespaces, ...references]);
-    module.categories = undefined;
+    const references = [...(mod.children ?? [])];
+    for (const ns of namespaces) mod.addChild(ns);
+    mod.groups = groupByKind(mod, [...namespaces, ...references]);
+    mod.categories = undefined;
   }
   // Every public export needs a TSDoc summary, or its reference entry is empty.
   if (undocumented.length) {
@@ -240,7 +240,7 @@ const code = (name) => `\`${name}\``;
  * The area index page: the entry point overview from its TSDoc, one row per group
  * page with the exports it documents, and the exports documented elsewhere.
  */
-function moduleIndex(area, module, rendered, router) {
+function moduleIndex(area, mod, rendered, router) {
   // Keep the entry point's own TSDoc (rendered above the plugin's index tables).
   const intro = rendered.split(/^## /m)[0].trim();
   const out = [`Import from ${code(area.importPath)}. This reference is generated from the SDK source.`, ''];
@@ -248,14 +248,14 @@ function moduleIndex(area, module, rendered, router) {
   const url = (r) => siteUrl(router.getFullUrl(r));
   const byName = (x, y) => x.name.localeCompare(y.name, 'en', { sensitivity: 'base' });
 
-  const namespaces = (module.children ?? []).filter((c) => c.kindOf(ReflectionKind.Namespace));
+  const namespaces = (mod.children ?? []).filter((c) => c.kindOf(ReflectionKind.Namespace));
   out.push('## Pages', '', '| Page | Exports |', '| :-- | :-- |');
   for (const ns of namespaces) {
     const names = [...(ns.children ?? [])].sort(byName).map((c) => `[${code(c.name)}](${url(c)})`);
     out.push(`| [${ns.name}](${url(ns)}) | ${names.join(', ')} |`);
   }
 
-  const refs = (module.children ?? []).filter((c) => c.kindOf(ReflectionKind.Reference));
+  const refs = (mod.children ?? []).filter((c) => c.kindOf(ReflectionKind.Reference));
   if (refs.length) {
     out.push(
       '',
