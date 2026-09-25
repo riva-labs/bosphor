@@ -1,5 +1,6 @@
 import { loader } from 'fumadocs-core/source';
 import { docsContentRoute, docsImageRoute, docsRoute, siteUrl } from './shared';
+import { examplesMarkdown } from './examples';
 import { defineDocs } from 'fumadocs-mdx/macro';
 import { metaSchema, pageSchema } from 'fumadocs-core/source/schema';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
@@ -46,7 +47,12 @@ export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
 }
 
 export async function getLLMText(page: (typeof source)['$inferPage']) {
-  const processed = await page.data.getText('processed');
+  // Components that render data (not prose) get a markdown stand-in, so the
+  // markdown twin and llms-full.txt carry the same content as the page.
+  const processed = (await page.data.getText('processed')).replace(
+    /<ExamplesGallery\s*\/>/g,
+    () => examplesMarkdown(siteUrl),
+  );
 
   const description = page.data.description ? `\n> ${page.data.description}\n` : '';
 
