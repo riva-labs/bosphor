@@ -1,0 +1,938 @@
+openapi: 3.1.0
+info:
+  title: Bosphor Relayer API
+  version: 0.1.0
+  summary: Public HTTP API of the Bosphor relayer.
+  description: |
+    Bosphor routes a storage intent from an origin chain (EVM or Solana) to
+    Walrus on Sui and brings a storage proof back. The relayer is the off-chain
+    party that prices the store, receives the file bytes out-of-band, stores them
+    on Walrus and reports progress.
+
+    A typical integration calls, in order:
+
+    1. `POST /quote` to price the store in the origin chain's native token.
+    2. `POST /blob/encode` (optional) to derive the Walrus blob id to commit to.
+    3. `submitIntent` on the origin chain adapter (not part of this API).
+    4. `POST /blob/{intentId}` to upload the exact bytes you committed to.
+    5. `GET /public/intents` to follow the intent across its hops.
+
+    The `@bosphor/sdk` package wraps all of this. Use this reference when you
+    call the relayer directly or build your own client.
+
+    **Amounts.** Native token amounts are decimal strings in the smallest unit
+    (wei for ETH, lamports for SOL) so no precision is lost in JSON. USD values
+    in a quote breakdown are plain JSON numbers.
+
+    **Errors.** Every error response is JSON of the shape
+    `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`.
+
+    **CORS.** The hosted relayers accept browser requests from any origin. No
+    credentials or cookies are used. Browser code can read the `Retry-After`,
+    `X-RateLimit-Limit` and `X-RateLimit-Remaining` headers.
+
+    **Rate limits.** `POST /quote`, `POST /blob/encode` and `POST /blob/{intentId}`
+    share a per-IP budget (default 120 requests per minute). `POST /blob/encode`
+    has an extra, tighter per-IP budget (default 30 per minute) because encoding
+    is CPU heavy. An operator may also enable a per-app budget keyed on
+    `X-Bosphor-App`. Over the limit the relayer answers `429` with `Retry-After`.
+    `GET` routes are not rate limited.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    name: Bosphor
+    url: https://bosphor.xyz
+servers:
+  - url: https://api.bosphor.xyz/testnet
+    description: Hosted testnet
+  - url: http://localhost:3000
+    description: Self-hosted
+tags:
+  - name: Health
+    description: Liveness and chain connectivity of the relayer.
+  - name: Pricing
+    description: Price a store before submitting an intent.
+  - name: Ingest
+    description: Derive blob ids and upload the file bytes for an intent.
+  - name: Status
+    description: Read-only feed of intents and their cross-chain progress.
+  - name: Meta
+    description: This API description, served by the relayer itself.
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Relayer health
+      description: |
+        Reports whether the relayer can reach its origin chain RPC and Sui. The
+        endpoint always answers `200`; check `status` to tell a fully connected
+        relayer (`ok`) from one with a chain connection down (`degraded`).
+      responses:
+        '200':
+          description: Current health.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              examples:
+                ok:
+                  summary: Both chains connected (hosted testnet)
+                  value:
+                    status: ok
+                    evm:
+                      connected: true
+                      blockNumber: 11779811
+                    sui:
+                      connected: true
+                      checkpoint: '387649007'
+                    uptime: 70611
+                degraded:
+                  summary: Sui unreachable
+                  value:
+                    status: degraded
+                    evm:
+                      connected: true
+                      blockNumber: 11779811
+                    sui:
+                      connected: false
+                    uptime: 12
+
+  /quote:
+    post:
+      tags: [Pricing]
+      operationId: createQuote
+      summary: Price a store
+      description: |
+        Returns the amount to send as `msg.value` (or the Solana equivalent) when
+        you submit the intent. The quote uses live Walrus storage prices and live
+        USD prices from several sources. If every price source fails, or a price
+        is stale or implausible, the request fails rather than returning a made up
+        number.
+
+        `totalNative` is what you pay at submit and always equals
+        `escrowNative + forwardNative`. `escrowNative` is held in escrow and
+        released to the relayer only once the storage proof lands; it covers the
+        Walrus storage cost, Sui gas and the proof's return trip, plus a service
+        margin, with a minimum charge. `forwardNative` passes through the fees you
+        supplied (`forwardLzFeeNative` + `originGasNative`) unchanged, or `0` when
+        you supplied neither.
+
+        Pass the same `epochs` you will commit in the intent: the blob is stored
+        for exactly the committed number of epochs and the quote is priced on it.
+      parameters:
+        - $ref: '#/components/parameters/AppId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuoteRequest'
+            examples:
+              minimal:
+                summary: 1 KiB for 5 epochs, paid in ETH
+                value:
+                  sizeBytes: 1024
+                  epochs: 5
+                  originToken: ETH
+              withForwardFee:
+                summary: 1 MiB, including the LayerZero fee from the adapter quote
+                value:
+                  sizeBytes: 1048576
+                  originToken: ETH
+                  forwardLzFeeNative: '1211000000000000'
+      responses:
+        '201':
+          description: The quote.
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteResponse'
+              examples:
+                eth1KiB:
+                  summary: 1 KiB for 5 epochs in ETH (hosted testnet)
+                  value:
+                    originToken: ETH
+                    escrowNative: '1072019000000000'
+                    forwardNative: '0'
+                    totalNative: '1072019000000000'
+                    breakdown:
+                      walCostUsd: 0.00004568328938376
+                      returnLzUsd: 1.9536000000000002
+                      suiGasUsd: 0.0333
+                      forwardLzUsd: 0
+                      originGasUsd: 0
+                      bufferedEscrowUsd: 2.5035442516183224
+                      serviceMarginUsd: 0.37553163774274834
+                      escrowUsd: 2.879075889361071
+                      forwardUsd: 0
+                      totalUsd: 2.879075889361071
+                      floorApplied: false
+                    prices:
+                      WAL:
+                        token: WAL
+                        usd: 0.03581958
+                        publishTimeMs: 1790346350000
+                        source: coingecko
+                      SUI:
+                        token: SUI
+                        usd: 1.11
+                        publishTimeMs: 1790346320000
+                        source: coingecko
+                      ETH:
+                        token: ETH
+                        usd: 2685.66
+                        publishTimeMs: 1790346330000
+                        source: coingecko
+                      SOL:
+                        token: SOL
+                        usd: 119.78
+                        publishTimeMs: 1790346330000
+                        source: coingecko
+        '400':
+          description: |
+            `epochs` is outside the range the relayer stores, or `X-Bosphor-App`
+            is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                epochsOutOfRange:
+                  summary: epochs above the relayer maximum (hosted testnet)
+                  value:
+                    message: epochs must be an integer between 0 and 53 (got 500)
+                    error: Bad Request
+                    statusCode: 400
+                badAppId:
+                  $ref: '#/components/examples/BadAppId'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /blob/encode:
+    post:
+      tags: [Ingest]
+      operationId: encodeBlob
+      summary: Derive a Walrus blob id
+      description: |
+        Send raw bytes, get back the Walrus blob id you must commit to in
+        `submitIntent`. Nothing is stored and no WAL is spent. This lets a browser
+        dApp derive the blob id without bundling the Walrus SDK or depending on a
+        public Walrus publisher.
+
+        This route has its own, tighter per-IP rate limit because encoding is CPU
+        heavy.
+      parameters:
+        - $ref: '#/components/parameters/AppId'
+      requestBody:
+        $ref: '#/components/requestBodies/RawBlob'
+      responses:
+        '201':
+          description: The derived blob id.
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncodeResponse'
+              examples:
+                encoded:
+                  summary: A 35 byte blob
+                  value:
+                    blobId: mLzOEj8l3vxE6CbAvIvtNMeDxOD5DQmvK08kSpFGLp0
+                    size: 35
+        '400':
+          $ref: '#/components/responses/BadRawBody'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /blob/{intentId}:
+    post:
+      tags: [Ingest]
+      operationId: ingestBlob
+      summary: Upload the bytes for an intent
+      description: |
+        Upload the file bytes for an intent you have already submitted on the
+        origin chain. The relayer recomputes the Walrus blob id and size from the
+        body and accepts the upload only if they match the commitment recorded on
+        chain for `intentId`. Accepted bytes are queued durably and stored on
+        Walrus once the intent reaches Sui.
+
+        Send the raw bytes as the body: not base64, not multipart, not JSON.
+
+        A `404` right after submitting is usually a timing race: the relayer has
+        not observed the intent yet. Retry with backoff. A `422` means the bytes
+        are not the ones you committed to.
+      parameters:
+        - name: intentId
+          in: path
+          required: true
+          description: The intent id returned by `submitIntent`, a 0x-prefixed 32-byte hex string.
+          schema:
+            type: string
+          example: '0x8d5172b628ac339fdd78c0cd899275cb4c6ae5698bb905f74f51890afaf08b25'
+        - $ref: '#/components/parameters/AppId'
+      requestBody:
+        $ref: '#/components/requestBodies/RawBlob'
+      responses:
+        '201':
+          description: The bytes match the commitment and are queued for storage.
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestAck'
+              examples:
+                accepted:
+                  summary: A 35 byte blob accepted
+                  value:
+                    intentId: '0x8d5172b628ac339fdd78c0cd899275cb4c6ae5698bb905f74f51890afaf08b25'
+                    blobId: mLzOEj8l3vxE6CbAvIvtNMeDxOD5DQmvK08kSpFGLp0
+                    size: 35
+        '400':
+          $ref: '#/components/responses/BadRawBody'
+        '404':
+          description: No pending intent with this id, or the relayer has not observed it yet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 404
+                message: no pending intent for this id
+                error: Not Found
+        '409':
+          description: The intent has already been executed. There is nothing left to upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 409
+                message: intent already executed
+                error: Conflict
+        '410':
+          description: The intent deadline has passed. It will be refunded on the origin chain instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 410
+                message: intent deadline has passed
+                error: Gone
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          description: |
+            The size or the recomputed blob id of the body does not match the
+            commitment. Recompute the blob id from the same bytes you upload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                wrongSize:
+                  summary: Size mismatch
+                  value:
+                    statusCode: 422
+                    message: blob size 34 does not match committed size 35
+                    error: Unprocessable Entity
+                wrongBlobId:
+                  summary: Blob id mismatch
+                  value:
+                    statusCode: 422
+                    message: recomputed blob id Ab3... does not match committed 0x9d2e...
+                    error: Unprocessable Entity
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: |
+            The relayer's storage queue is full. This is temporary: wait for the
+            number of seconds in `Retry-After` and upload again.
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/Retry-After'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 503
+                message: staged bytes 524288000 + 1024 exceed MAX_STAGED_BYTES 524288000
+                error: Service Unavailable
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /public/intents:
+    get:
+      tags: [Status]
+      operationId: listIntents
+      summary: Recent intents
+      description: |
+        Returns the most recent intents the relayer has seen, newest first, with
+        every hop observed so far. This feed powers the public status page. It
+        serves real data only: when the backing store is unavailable it answers
+        `503` instead of a stale or empty feed.
+
+        An intent moves through six hops: `submitted` (on the origin chain),
+        `received` (delivered to Sui), `stored_walrus`, `recorded_sui`,
+        `proof_sent` (proof sent back) and `confirmed` (proof landed on the
+        origin chain). `status` is the furthest hop reached.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: |
+            Maximum number of intents to return. Values are clamped to 1..200; a
+            missing or non-numeric value means 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: The feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentFeed'
+              examples:
+                feed:
+                  summary: Two intents, one in flight and one proven (hosted testnet)
+                  value:
+                    intents:
+                      - intentId: '0x5793a0e1daaa14793c511f8540cd332aebf5d61d0d0370bb5f7f7b2c82a4ef7e'
+                        status: submitted
+                        hops:
+                          - hop: submitted
+                            txHash: 2o3oqkC5SWQH14YtsvvjehKhA6Cir22TGkDMkV7sq8tpWtvQ4kLHcVTb2hYMTofKKDALTGLBLfZBEH78bjCyB2Zu
+                            timestamp: 1790346429933
+                        sender: '0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366'
+                        committedBlobId: '0xd9eb839f5cdb250d94635c398a003990b6598d3093e5d806e77f6adbbed2a5f6'
+                        size: 35
+                        deadline: 1790350028000
+                        createdAt: 1790346429933
+                        updatedAt: 1790346429933
+                      - intentId: '0x8d5172b628ac339fdd78c0cd899275cb4c6ae5698bb905f74f51890afaf08b25'
+                        status: proof_sent
+                        hops:
+                          - hop: submitted
+                            txHash: 4aGVkrZncH79PbNrGUYZGcKH4dphPShqnw5HsyWNUB1cVESCmWyARJYgcYw6J1A322YfJGYuJHRDEyJbN9AAMTGk
+                            timestamp: 1790346134158
+                          - hop: received
+                            txHash: 8uvpmuKb3WJVVUc62G9s6y4mJEaifrunSCbocuAgjGGD
+                            timestamp: 1790346157123
+                          - hop: stored_walrus
+                            timestamp: 1790346167410
+                          - hop: recorded_sui
+                            txHash: 4be2q74tBsstCLFqywcVC1dAagg6YeMkxHYyxHZj24Nh
+                            timestamp: 1790346168749
+                          - hop: proof_sent
+                            txHash: F4FAGCnviAfXmTtcE7dybQhb9iyPUyNz7i172qHenCxH
+                            timestamp: 1790346169702
+                        sender: '0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366'
+                        blobId: mLzOEj8l3vxE6CbAvIvtNMeDxOD5DQmvK08kSpFGLp0
+                        suiObjectId: '0x1f4c2ade8e9b1eb96b0ba4f864cad07eb3295c2a40952c0e491926598e53aead'
+                        endEpoch: 536
+                        committedBlobId: '0x9d2e46914a244f2baf090df9e0c483c734ed8bbcc026e844fcde253f12cebc98'
+                        size: 35
+                        deadline: 1790349728000
+                        createdAt: 1790346134158
+                        updatedAt: 1790346169702
+                    count: 2
+        '503':
+          description: The feed store is unavailable. Show an explicit "feed unavailable" state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                statusCode: 503
+                message: intent feed temporarily unavailable
+                error: Service Unavailable
+
+  /openapi.json:
+    get:
+      tags: [Meta]
+      operationId: getOpenApiJson
+      summary: This API description (JSON)
+      description: The OpenAPI 3.1 document for this relayer, as JSON.
+      responses:
+        '200':
+          description: The OpenAPI document.
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /openapi.yaml:
+    get:
+      tags: [Meta]
+      operationId: getOpenApiYaml
+      summary: This API description (YAML)
+      description: The OpenAPI 3.1 document for this relayer, as YAML.
+      responses:
+        '200':
+          description: The OpenAPI document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+components:
+  parameters:
+    AppId:
+      name: X-Bosphor-App
+      in: header
+      required: false
+      description: |
+        Optional short name for your application, for example `my-dapp`. It is
+        recorded with your intents so usage from your app is counted separately,
+        and it can get its own rate-limit budget. It is attribution only, not
+        authentication: anyone can send any value and it grants nothing. Ids are
+        case-insensitive. A malformed value is rejected with `400`.
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9][a-zA-Z0-9\-_.]{0,63}$'
+        maxLength: 64
+      example: my-dapp
+
+  headers:
+    Retry-After:
+      description: Seconds to wait before retrying.
+      schema:
+        type: integer
+        minimum: 1
+      example: 42
+    X-RateLimit-Limit:
+      description: Requests allowed in the current window for the tightest budget that applies.
+      schema:
+        type: integer
+      example: 120
+    X-RateLimit-Remaining:
+      description: Requests left in the current window for the tightest budget that applies.
+      schema:
+        type: integer
+      example: 119
+
+  requestBodies:
+    RawBlob:
+      required: true
+      description: |
+        The raw blob bytes. The relayer accepts up to 10 MiB (10485760 bytes) per
+        blob by default; an operator can change this with `MAX_INGEST_BLOB_BYTES`.
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            contentMediaType: application/octet-stream
+            maxLength: 10485760
+
+  responses:
+    BadRawBody:
+      description: The body is empty, or `X-Bosphor-App` is malformed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            emptyBody:
+              summary: No bytes in the body
+              value:
+                statusCode: 400
+                message: request body must be the raw blob bytes
+                error: Bad Request
+            badAppId:
+              $ref: '#/components/examples/BadAppId'
+    PayloadTooLarge:
+      description: |
+        The body is larger than the relayer's ingest cap (default 10 MiB). A body
+        far above the cap may be refused before it is read, in which case the
+        response body may not be JSON.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 413
+            message: blob exceeds MAX_INGEST_BLOB_BYTES (10485761 > 10485760)
+            error: Payload Too Large
+    TooManyRequests:
+      description: |
+        A rate-limit budget is exhausted. Wait for the number of seconds in
+        `Retry-After` and try again. The message names the budget that tripped:
+        `ip`, `encode` or `app`.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/Retry-After'
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          description: Always `0` on a rate-limited response.
+          schema:
+            type: integer
+            const: 0
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 429
+            error: Too Many Requests
+            message: rate limit exceeded (ip); retry after 42s
+    InternalError:
+      description: |
+        Unexpected failure, for example no usable price source for a quote or an
+        unsupported `originToken`. The body carries no `error` field.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            statusCode: 500
+            message: Internal server error
+
+  examples:
+    BadAppId:
+      summary: Malformed X-Bosphor-App header (hosted testnet)
+      value:
+        message: 'invalid X-Bosphor-App header: expected a slug matching /^[a-z0-9][a-z0-9\-_.]{0,63}$/i'
+        error: Bad Request
+        statusCode: 400
+
+  schemas:
+    Error:
+      type: object
+      description: Error body returned by every failing request.
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+          description: The HTTP status code, repeated in the body.
+        message:
+          description: Human-readable detail. Do not parse it; branch on `statusCode`.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        error:
+          type: string
+          description: The HTTP status text, for example `Bad Request`. Absent on `500`.
+
+    NativeAmount:
+      type: string
+      pattern: '^[0-9]+$'
+      description: Non-negative integer in the origin token's smallest unit (wei, lamports), as a decimal string.
+
+    OriginToken:
+      type: string
+      enum: [ETH, SOL]
+      description: Native token of the origin chain you pay on.
+
+    PriceToken:
+      type: string
+      enum: [WAL, SUI, ETH, SOL]
+
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status, evm, sui, uptime]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+          description: '`ok` when both the origin chain and Sui are reachable, `degraded` otherwise.'
+        evm:
+          type: object
+          additionalProperties: false
+          required: [connected]
+          properties:
+            connected:
+              type: boolean
+            blockNumber:
+              type: integer
+              description: Latest origin chain block number. Absent when not connected.
+        sui:
+          type: object
+          additionalProperties: false
+          required: [connected]
+          properties:
+            connected:
+              type: boolean
+            checkpoint:
+              type: string
+              description: Latest Sui checkpoint sequence number, as a decimal string. Absent when not connected.
+        uptime:
+          type: integer
+          minimum: 0
+          description: Seconds since the relayer process started.
+
+    QuoteRequest:
+      type: object
+      required: [sizeBytes, originToken]
+      properties:
+        sizeBytes:
+          type: integer
+          minimum: 0
+          description: Size of the blob in bytes.
+        epochs:
+          type: integer
+          minimum: 0
+          description: |
+            Walrus storage epochs you will commit in the intent. `0` is priced as
+            one epoch, the Walrus minimum. The upper bound is the relayer's
+            maximum (53 on the hosted testnet); a larger value is rejected with
+            `400`. When omitted, the relayer's default duration (5 epochs on the
+            hosted testnet) is used.
+        originToken:
+          $ref: '#/components/schemas/OriginToken'
+        forwardLzFeeNative:
+          $ref: '#/components/schemas/NativeAmount'
+          description: |
+            LayerZero fee for the forward message, from the origin adapter's own
+            quote. Passed through into `forwardNative` so the quote total is your
+            full `msg.value`.
+        originGasNative:
+          $ref: '#/components/schemas/NativeAmount'
+          description: Origin transaction gas you want included in the total. Passed through into `forwardNative`.
+
+    QuoteResponse:
+      type: object
+      additionalProperties: false
+      required: [originToken, escrowNative, forwardNative, totalNative, breakdown, prices]
+      properties:
+        originToken:
+          $ref: '#/components/schemas/OriginToken'
+        escrowNative:
+          $ref: '#/components/schemas/NativeAmount'
+          description: Amount held in escrow and released to the relayer once the storage proof lands.
+        forwardNative:
+          $ref: '#/components/schemas/NativeAmount'
+          description: '`forwardLzFeeNative + originGasNative` from the request, passed through unchanged.'
+        totalNative:
+          $ref: '#/components/schemas/NativeAmount'
+          description: '`escrowNative + forwardNative`. Send this as the value of your submit transaction.'
+        breakdown:
+          $ref: '#/components/schemas/QuoteBreakdown'
+        prices:
+          $ref: '#/components/schemas/PriceSet'
+
+    QuoteBreakdown:
+      type: object
+      additionalProperties: false
+      description: How the quote was built, in USD. Informational; pay `totalNative`.
+      required:
+        - walCostUsd
+        - returnLzUsd
+        - suiGasUsd
+        - forwardLzUsd
+        - originGasUsd
+        - bufferedEscrowUsd
+        - serviceMarginUsd
+        - escrowUsd
+        - forwardUsd
+        - totalUsd
+        - floorApplied
+      properties:
+        walCostUsd:
+          type: number
+          description: Walrus storage cost for this size and duration.
+        returnLzUsd:
+          type: number
+          description: Estimated LayerZero fee to carry the storage proof back to the origin chain.
+        suiGasUsd:
+          type: number
+          description: Estimated Sui gas to store and record the blob.
+        forwardLzUsd:
+          type: number
+          description: The `forwardLzFeeNative` you supplied, in USD.
+        originGasUsd:
+          type: number
+          description: The `originGasNative` you supplied, in USD.
+        bufferedEscrowUsd:
+          type: number
+          description: Storage, Sui gas and return fee with price-movement buffers, after the minimum charge, before the margin.
+        serviceMarginUsd:
+          type: number
+          description: Relayer service margin.
+        escrowUsd:
+          type: number
+          description: '`bufferedEscrowUsd + serviceMarginUsd`, the USD value of `escrowNative`.'
+        forwardUsd:
+          type: number
+          description: '`forwardLzUsd + originGasUsd`, the USD value of `forwardNative`.'
+        totalUsd:
+          type: number
+          description: '`escrowUsd + forwardUsd`.'
+        floorApplied:
+          type: boolean
+          description: True when the minimum charge was applied because the buffered cost was below it.
+
+    PricePoint:
+      type: object
+      additionalProperties: false
+      required: [token, usd, publishTimeMs, source]
+      properties:
+        token:
+          $ref: '#/components/schemas/PriceToken'
+        usd:
+          type: number
+          exclusiveMinimum: 0
+          description: USD price used for this quote.
+        publishTimeMs:
+          type: integer
+          description: When the price was published, in epoch milliseconds.
+        source:
+          type: string
+          description: Price source that produced it, for example `pyth` or `coingecko`.
+
+    PriceSet:
+      type: object
+      additionalProperties: false
+      description: USD prices the quote was computed with.
+      required: [WAL, SUI, ETH, SOL]
+      properties:
+        WAL:
+          $ref: '#/components/schemas/PricePoint'
+        SUI:
+          $ref: '#/components/schemas/PricePoint'
+        ETH:
+          $ref: '#/components/schemas/PricePoint'
+        SOL:
+          $ref: '#/components/schemas/PricePoint'
+
+    BlobId:
+      type: string
+      description: Walrus blob id, base64url without padding (as shown on Walruscan).
+      examples: [mLzOEj8l3vxE6CbAvIvtNMeDxOD5DQmvK08kSpFGLp0]
+
+    EncodeResponse:
+      type: object
+      additionalProperties: false
+      required: [blobId, size]
+      properties:
+        blobId:
+          $ref: '#/components/schemas/BlobId'
+        size:
+          type: integer
+          minimum: 1
+          description: Byte length of the body.
+
+    IngestAck:
+      type: object
+      additionalProperties: false
+      required: [intentId, blobId, size]
+      properties:
+        intentId:
+          type: string
+          description: The intent id from the path.
+        blobId:
+          $ref: '#/components/schemas/BlobId'
+        size:
+          type: integer
+          minimum: 1
+          description: Byte length of the accepted blob.
+
+    IntentHop:
+      type: string
+      enum: [submitted, received, stored_walrus, recorded_sui, proof_sent, confirmed]
+      description: A step of the cross-chain round trip, in order.
+
+    IntentHopRecord:
+      type: object
+      additionalProperties: false
+      required: [hop, timestamp]
+      properties:
+        hop:
+          $ref: '#/components/schemas/IntentHop'
+        timestamp:
+          type: integer
+          description: When the hop was observed, in epoch milliseconds.
+        txHash:
+          type: string
+          description: Transaction hash or digest that produced the hop (EVM hash, Sui digest or Solana signature), when known.
+
+    IntentRecord:
+      type: object
+      additionalProperties: false
+      required: [intentId, status, hops, createdAt, updatedAt]
+      properties:
+        intentId:
+          type: string
+          description: The intent id, a 0x-prefixed 32-byte hex string.
+        status:
+          $ref: '#/components/schemas/IntentHop'
+        hops:
+          type: array
+          description: Hops observed so far, oldest first.
+          items:
+            $ref: '#/components/schemas/IntentHopRecord'
+        sender:
+          type: string
+          description: Address that submitted the intent on the origin chain.
+        blobId:
+          $ref: '#/components/schemas/BlobId'
+          description: Walrus blob id, set once the blob is stored.
+        suiObjectId:
+          type: string
+          description: Sui object id of the stored Walrus blob, set once stored.
+        endEpoch:
+          type: integer
+          description: Walrus epoch at which the storage expires, set once stored.
+        committedBlobId:
+          type: string
+          description: Blob id committed on the origin chain, as 0x-prefixed 32-byte hex.
+        size:
+          type: integer
+          description: Committed blob size in bytes.
+        deadline:
+          type: integer
+          description: Intent deadline in epoch milliseconds. After it, the upload is refused and the intent is refundable.
+        walCostMist:
+          type: string
+          pattern: '^[0-9]+$'
+          description: WAL spent to store the blob, in its smallest unit, as a decimal string.
+        createdAt:
+          type: integer
+          description: First observation, in epoch milliseconds.
+        updatedAt:
+          type: integer
+          description: Latest update, in epoch milliseconds.
+
+    IntentFeed:
+      type: object
+      additionalProperties: false
+      required: [intents, count]
+      properties:
+        intents:
+          type: array
+          description: Intents, newest first.
+          items:
+            $ref: '#/components/schemas/IntentRecord'
+        count:
+          type: integer
+          minimum: 0
+          description: Number of intents in `intents`.
