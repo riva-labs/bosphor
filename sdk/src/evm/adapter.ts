@@ -63,6 +63,7 @@ export interface EthersContractLike {
   getAddress?(): Promise<string>;
 }
 
+/** Options for {@link fromEthersContract}. */
 export interface FromEthersContractOptions {
   /**
    * How many blocks back `queryProof` scans for the `IntentExecuted` event when

@@ -35,6 +35,7 @@ export interface EthersModuleLike {
   Contract: new (address: string, abi: readonly string[], runner?: never) => object;
 }
 
+/** Options for {@link connectAdapter}. */
 export interface ConnectAdapterOptions extends FromEthersContractOptions {
   /** Network preset; defaults to {@link TESTNET}. */
   network?: BosphorNetwork;
@@ -44,6 +45,10 @@ export interface ConnectAdapterOptions extends FromEthersContractOptions {
   ethers?: EthersModuleLike;
 }
 
+/**
+ * Options for {@link createBosphorClientFromSigner}: the adapter binding plus any
+ * client option to override the network preset's value.
+ */
 export interface CreateClientFromSignerOptions
   extends ConnectAdapterOptions,
     Partial<Omit<BosphorEvmClientOptions, "adapter" | "network">> {}

@@ -35,16 +35,23 @@ import {
 
 /** Minimal structural view of the fields we read off an ethers `TransactionReceipt`. */
 export interface EvmLog {
+  /** The indexed event topics. */
   topics: readonly string[];
+  /** The ABI-encoded non-indexed event data. */
   data: string;
 }
 
+/** Minimal structural view of an ethers `TransactionReceipt`: only its logs are read. */
 export interface EvmTransactionReceipt {
+  /** The logs the transaction emitted. */
   logs: readonly EvmLog[];
 }
 
+/** Minimal structural view of an ethers `ContractTransactionResponse`. */
 export interface EvmContractTransaction {
+  /** The transaction hash. */
   hash: string;
+  /** Resolves with the receipt once the transaction is mined. */
   wait(): Promise<EvmTransactionReceipt | null>;
 }
 
@@ -109,10 +116,15 @@ export interface AdapterContract {
 
 /** The escrow record as the adapter's `getEscrow` returns it (ethers `Result` fields). */
 export interface RawEscrowRecord {
+  /** The address that paid. */
   payer: string;
+  /** The escrowed token, the zero address for native ETH. */
   token: string;
+  /** Escrowed amount in the token's smallest unit. */
   amount: bigint;
+  /** Unix seconds after which `refund` is allowed. */
   deadline: bigint;
+  /** An `EscrowStatus` value, as a `bigint` or `number` depending on the ABI decoder. */
   status: bigint | number;
 }
 
@@ -132,10 +144,17 @@ export interface EscrowRecord {
 
 /** The LayerZero messaging fee, as returned by `quote`. */
 export interface MessagingFee {
+  /** The fee in the chain's native token (wei). */
   nativeFee: bigint;
+  /** The fee in the LayerZero token. Bosphor does not use it, so it is `0n`. */
   lzTokenFee: bigint;
 }
 
+/**
+ * Options for `new BosphorEvmClient(opts)` and {@link createBosphorClient}. Most
+ * integrators use `createBosphorClientFromSigner`, which fills these from a
+ * network preset.
+ */
 export interface BosphorEvmClientOptions {
   /** An `ethers.Contract` bound to the deployed BosphorAdapter, with a signer. */
   adapter: AdapterContract;
