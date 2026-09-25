@@ -126,7 +126,10 @@ export const TESTNET: BosphorNetwork = {
 };
 
 /** All presets by name. */
-export const networks: { readonly testnet: BosphorNetwork } = { testnet: TESTNET };
+export const networks: {
+  /** The hosted public testnet, the same object as {@link TESTNET}. */
+  readonly testnet: BosphorNetwork;
+} = { testnet: TESTNET };
 
 /**
  * Walrus aggregator URL that serves a stored blob, given the 0x-hex blob id the
