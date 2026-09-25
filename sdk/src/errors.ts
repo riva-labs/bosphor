@@ -13,7 +13,11 @@
 
 import type { Hex } from "./types.js";
 
-/** Construction options shared by every {@link BosphorError}. */
+/**
+ * Construction options shared by every {@link BosphorError}.
+ *
+ * @inline
+ */
 export interface BosphorErrorOptions {
   /** Stable machine-readable code. Part of the SemVer-protected API. */
   code?: string;
@@ -52,7 +56,9 @@ export class BosphorError extends Error {
  * @property code `"PROOF_TIMEOUT"`
  */
 export class ProofTimeoutError extends BosphorError {
+  /** The intent that did not execute in time. */
   readonly intentId: Hex;
+  /** The timeout that elapsed, in milliseconds. */
   readonly timeoutMs: number;
   constructor(intentId: Hex, timeoutMs: number) {
     super(`intent ${intentId} did not execute within ${timeoutMs}ms`, {
@@ -77,8 +83,11 @@ export class ProofTimeoutError extends BosphorError {
  * @property code `"RELAYER_UPLOAD_FAILED"`
  */
 export class RelayerUploadError extends BosphorError {
+  /** The HTTP status the relayer answered with. */
   readonly status: number;
+  /** The intent whose bytes were rejected. */
   readonly intentId: Hex;
+  /** The relayer's own error message, for example `"no pending intent"`. */
   readonly reason: string;
   constructor(intentId: Hex, status: number, reason: string) {
     super(`relayer rejected blob for intent ${intentId} (HTTP ${status}): ${reason}`, {

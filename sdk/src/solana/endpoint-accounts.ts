@@ -91,6 +91,7 @@ export interface LzSolanaSdkLike {
   UlnProgram: { Uln: new (programId: never) => unknown };
 }
 
+/** Options for {@link resolveEndpointAccounts}. */
 export interface ResolveEndpointAccountsOptions {
   /** A `@solana/web3.js` `Connection`. */
   connection: object;
@@ -155,6 +156,10 @@ export async function resolveEndpointAccounts(
   }));
 }
 
+/**
+ * Options for {@link createBosphorSolanaClientFromKeypair}: a connection, a funded
+ * wallet, and any client option to override the network preset's value.
+ */
 export interface CreateSolanaClientFromKeypairOptions
   extends Partial<Omit<BosphorSolanaClientOptions, "chain" | "network">> {
   /** A `@solana/web3.js` `Connection` to the network's cluster. */

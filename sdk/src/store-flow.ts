@@ -56,6 +56,7 @@ export function relayerHeaders(contentType: string, appId?: string): Record<stri
   return headers;
 }
 
+/** Storage terms for `encode()`, and for the one-call `store()` / `storePriced()`. */
 export interface EncodeOptions {
   /** Storage duration in Walrus epochs. Defaults to the client default (5). */
   epochs?: number;
@@ -63,6 +64,7 @@ export interface EncodeOptions {
   deadline?: bigint;
 }
 
+/** Polling controls for `awaitProof()`, and for the proof wait inside `store()`. */
 export interface AwaitProofOptions {
   /** Give up after this many milliseconds. Defaults to 5 minutes. */
   timeoutMs?: number;

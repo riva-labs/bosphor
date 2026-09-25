@@ -4,14 +4,15 @@
   "private": true,
   "description": "Bosphor developer portal (docs, guides, SDK and API reference), built with Fumadocs.",
   "scripts": {
-    "build": "next build && npm run check",
+    "gen:sdk-ref": "node scripts/gen-sdk-reference.mjs",
+    "build": "npm run gen:sdk-ref && next build && npm run check",
     "check": "node scripts/check-links.mjs && node scripts/check-redirects.mjs && npm run test:worker",
     "test:worker": "node --test scripts/test-worker.mjs",
-    "dev": "next dev",
+    "dev": "npm run gen:sdk-ref && next dev",
     "start": "serve out",
     "preview": "wrangler dev",
     "deploy": "npm run build && wrangler deploy",
-    "types:check": "next typegen && tsc --noEmit",
+    "types:check": "npm run gen:sdk-ref && next typegen && tsc --noEmit",
     "lint": "oxlint"
   },
   "dependencies": {
@@ -35,11 +36,12 @@
     "@types/node": "^26.3.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
-    "fumadocs-typescript": "^5.3.0",
     "oxlint": "^1.80.0",
     "postcss": "^8.5.26",
     "serve": "^14.2.6",
     "tailwindcss": "^4.3.3",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.13.1",
     "typescript": "~5.8",
     "wrangler": "^4.127.0"
   }

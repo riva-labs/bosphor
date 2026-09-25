@@ -9,7 +9,6 @@
     "---Modules---",
     "core",
     "evm",
-    "solana",
-    "codec"
+    "solana"
   ]
 }

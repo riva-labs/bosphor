@@ -48,10 +48,13 @@ const ESCROW_SEED = "escrow";
 export interface SolanaAccountMetaInput {
   /** A `@solana/web3.js` `PublicKey` or a base58 address string. */
   pubkey: unknown;
+  /** Whether the account signs the transaction. */
   isSigner: boolean;
+  /** Whether the instruction writes to the account. */
   isWritable: boolean;
 }
 
+/** Options for {@link createDefaultSolanaChain}. */
 export interface DefaultSolanaChainOptions {
   /** A `@solana/web3.js` `Connection` (any commitment). */
   connection: unknown;

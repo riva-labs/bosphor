@@ -12,6 +12,11 @@ import { fetchQuote, resolveStoreSize, type PricedQuote, type StoreSize } from "
 import { DEFAULT_DEADLINE_SECONDS, DEFAULT_EPOCHS, type FetchLike } from "../store-flow.js";
 import type { Hex } from "../types.js";
 
+/**
+ * Options shared by the wallet-free quote helpers.
+ *
+ * @inline
+ */
 interface QuoteStoreCommon {
   /** Storage duration in Walrus epochs; defaults to 5. */
   epochs?: number;
@@ -25,6 +30,7 @@ interface QuoteStoreCommon {
   appId?: string;
 }
 
+/** Options for {@link quoteEvmStore}: the file (bytes or size), a provider, and the storage terms. */
 export type QuoteEvmStoreOptions = StoreSize &
   QuoteStoreCommon & {
     /** A read-only `ethers` v6 Provider (a Signer works too) on the origin chain. */

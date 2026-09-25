@@ -35,6 +35,7 @@ export class LzSolanaSdkMissingError extends Error {
   }
 }
 
+/** Options for {@link quoteSolanaLzFee}. */
 export interface QuoteSolanaLzFeeOptions {
   /** A `@solana/web3.js` `Connection` to the network's cluster. */
   connection: object;

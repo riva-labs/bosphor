@@ -25,6 +25,7 @@ on:
       - 'sdk/src/**'
       - 'sdk/package.json'
       - 'sdk/tsconfig.json'
+      - 'tsconfig.base.json'
       - 'relayer/openapi/**'
   pull_request:
     paths:
@@ -32,6 +33,7 @@ on:
       - 'sdk/src/**'
       - 'sdk/package.json'
       - 'sdk/tsconfig.json'
+      - 'tsconfig.base.json'
       - 'relayer/openapi/**'
       - 'website/docs/**'
       - '.github/workflows/sdk-docs.yml'

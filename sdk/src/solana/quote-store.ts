@@ -10,6 +10,7 @@ import { TESTNET, type BosphorNetwork } from "../networks.js";
 import { fetchQuote, resolveStoreSize, type PricedQuote, type StoreSize } from "../quote.js";
 import { DEFAULT_EPOCHS, type FetchLike } from "../store-flow.js";
 
+/** Options for {@link quoteSolanaStore}: the file (bytes or size), a connection, and the storage terms. */
 export type QuoteSolanaStoreOptions = StoreSize & {
   /** A `@solana/web3.js` `Connection` to the network's cluster. */
   connection: object;

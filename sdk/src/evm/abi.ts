@@ -52,8 +52,12 @@ export const ADAPTER_ABI: readonly string[] = [
 
 /** Escrow status as returned in `getEscrow(...).status`. */
 export const EscrowStatus: {
+  /** No escrow exists for the intent. */
   readonly None: 0;
+  /** Funds are escrowed and waiting for the proof or the deadline. */
   readonly Pending: 1;
+  /** The proof arrived and the escrow was released to the relayer. */
   readonly Released: 2;
+  /** The deadline passed without a proof and the escrow was refunded to the payer. */
   readonly Refunded: 3;
 } = { None: 0, Pending: 1, Released: 2, Refunded: 3 };

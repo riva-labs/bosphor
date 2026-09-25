@@ -4,6 +4,8 @@
  * Re-exports the core codec and shared types too, so an EVM consumer needs only
  * this one import. `ethers` is an optional peer dependency: the consumer passes an
  * `ethers.Contract`, but this module never imports `ethers` directly.
+ *
+ * @module
  */
 
 export { BosphorEvmClient, createBosphorClient, decodeProofEndEpoch } from "./client.js";
