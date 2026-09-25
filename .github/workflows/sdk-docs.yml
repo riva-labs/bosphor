@@ -1,4 +1,9 @@
-# Builds and deploys the SDK docs site (sdk.bosphor.xyz) to Cloudflare Workers.
+# Builds and deploys the developer portal (sdk-docs/, served at sdk.bosphor.xyz
+# until the docs.bosphor.xyz cutover) to Cloudflare Workers.
+#
+# `npm run build` also runs the post-build checks: internal links and anchors,
+# the retired-URL redirect map, and the redirect Worker tests. Pull requests run
+# the build as a gate; only pushes to main deploy.
 #
 # The API reference is generated from sdk/src with TypeDoc at build time, so the
 # site is rebuilt when either the docs or the SDK source changes.
@@ -18,11 +23,19 @@ on:
       - 'sdk/src/**'
       - 'sdk/package.json'
       - 'sdk/tsconfig.json'
+  pull_request:
+    paths:
+      - 'sdk-docs/**'
+      - 'sdk/src/**'
+      - 'sdk/package.json'
+      - 'sdk/tsconfig.json'
+      - 'website/docs/**'
+      - '.github/workflows/sdk-docs.yml'
   workflow_dispatch:
 
 jobs:
   deploy:
-    name: Build and deploy sdk.bosphor.xyz
+    name: Build and deploy the developer portal
     runs-on: ubuntu-latest
     env:
       # Lifted to env so the deploy step can be skipped (not failed) until the
@@ -35,13 +48,13 @@ jobs:
           node-version: 22
       - name: Install SDK deps (TypeDoc resolves sdk/src imports)
         run: cd sdk && npm ci
-      - name: Install and build docs
+      - name: Install, build and check the portal
         run: |
           cd sdk-docs
           npm ci
           npm run build
       - name: Deploy to Cloudflare
-        if: env.CF_TOKEN != ''
+        if: github.event_name != 'pull_request' && env.CF_TOKEN != ''
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

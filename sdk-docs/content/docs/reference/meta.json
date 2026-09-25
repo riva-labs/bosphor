@@ -1,4 +1,15 @@
 {
-  "title": "API reference",
-  "pages": ["testnet", "core", "evm", "solana", "codec"]
+  "title": "SDK reference",
+  "description": "@bosphor/sdk types and functions",
+  "icon": "Braces",
+  "root": true,
+  "pages": [
+    "index",
+    "testnet",
+    "---Modules---",
+    "core",
+    "evm",
+    "solana",
+    "codec"
+  ]
 }

@@ -1,18 +1,23 @@
 ---
-title: Changelog
+title: SDK releases
 description: Notable changes to @bosphor/sdk, newest first.
 ---
 
-The latest published release is **`@bosphor/sdk` 0.11.0**. The full, authoritative
+The latest published release is **`@bosphor/sdk` 0.13.1**. The full, authoritative
 changelog lives in the repo:
 [CHANGELOG.md](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md),
 and each release is tagged
-[`sdk-v*`](https://github.com/riva-labs/bosphor/tags). Highlights below.
+[`sdk-v*`](https://github.com/riva-labs/bosphor/tags). Highlights below. Protocol-level releases (contracts, relayer, infrastructure) are on
+[Protocol milestones](/docs/changelog/milestones).
 
 <Callout type="info" title="Pre-1.0">
 The SDK is pre-1.0. `feat` bumps the minor version and `fix` bumps the patch;
 breaking changes bump the minor while pre-1.0. Pin a version in production.
 </Callout>
+
+## 0.13.1
+
+- **fix:** `awaitProof` keeps polling through transient RPC errors instead of failing the store.
 
 ## 0.13.0
 
@@ -32,7 +37,7 @@ breaking changes bump the minor while pre-1.0. Pin a version in production.
 
 ## 0.11.0
 
-- **feat:** paid storage: `storePriced()`, `priceQuote()`, and `submitPaid()` on the EVM and Solana clients, and `fetchQuote()` in the core. See [Pay for storage](/docs/pay-for-storage).
+- **feat:** paid storage: `storePriced()`, `priceQuote()`, and `submitPaid()` on the EVM and Solana clients, and `fetchQuote()` in the core. See [Pay for storage](/docs/guides/pay-for-storage).
 
 ## 0.10.0
 

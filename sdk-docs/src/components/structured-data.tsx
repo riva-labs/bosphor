@@ -2,7 +2,9 @@
 // engines use it to ground and attribute answers (GEO). Rendered as a plain
 // <script type="application/ld+json"> so it works in the static export.
 
-const BASE = 'https://sdk.bosphor.xyz';
+import { appName, siteDescription, siteUrl } from '@/lib/shared';
+
+const BASE = siteUrl;
 
 function JsonLd({ data }: { data: Record<string, unknown> }) {
   return (
@@ -23,10 +25,9 @@ export function SiteStructuredData() {
           '@context': 'https://schema.org',
           '@type': 'WebSite',
           '@id': `${BASE}/#website`,
-          name: 'Bosphor SDK',
+          name: appName,
           url: BASE,
-          description:
-            'TypeScript SDK for Bosphor: store a file on Walrus from an EVM or Solana wallet, over LayerZero, with a verifiable proof back on the origin chain.',
+          description: siteDescription,
           inLanguage: 'en',
           publisher: { '@id': `${BASE}/#org` },
         }}

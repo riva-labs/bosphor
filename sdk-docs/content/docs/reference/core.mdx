@@ -46,7 +46,7 @@ fetchQuote(relayerUrl: string, request: QuoteRequest, opts?: FetchQuoteOptions):
 Calls the relayer `POST /quote` endpoint and returns a typed quote. Amounts cross
 the wire as decimal strings and come back as `bigint`. Throws `BosphorError` on a
 non-2xx response or an unparseable body, never a fabricated price. The chain
-clients wrap it as `priceQuote()`. See [Pay for storage](/docs/pay-for-storage).
+clients wrap it as `priceQuote()`. See [Pay for storage](/docs/guides/pay-for-storage).
 
 ## StoreProgress
 
@@ -92,7 +92,7 @@ hosted testnet. The values are listed on the [Testnet reference](/docs/reference
 
 ## Errors
 
-Every failure extends `BosphorError`. See [Handle errors](/docs/errors) for the
+Every failure extends `BosphorError`. See [Errors and troubleshooting](/docs/guides/errors) for the
 catch-and-narrow pattern.
 
 | Error | Fields | Meaning |

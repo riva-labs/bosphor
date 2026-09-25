@@ -1,0 +1,282 @@
+---
+title: Pay for storage
+description: Quote, pay, and store with storePriced(), how the escrow is released on proof or refunded after the deadline, and what the relayer charges for.
+---
+
+Storing through Bosphor is paid in your origin chain's native token: ETH on EVM,
+SOL on Solana. You pay one all-in amount when you submit. The storage part is held
+in **escrow** on your chain and released to the relayer only when the proof of
+storage arrives back. If no proof arrives before the intent deadline, the escrow
+can be refunded to you. The price is quoted off chain; the contracts hold no oracle.
+
+<Callout type="info" title="Live on the hosted testnet">
+The payment flow is live and verified end to end on both origins:
+
+- **Ethereum Sepolia**: the escrow adapter `0x3296686Fc61076d27488278c1da5468E1e0A7156`,
+  including the proof-gated release and the deadline refund.
+- **Solana devnet**: the Bosphor program `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF`,
+  where the escrow is held in a per-intent vault account and released on the proof.
+
+All testnet addresses are on the [testnet reference](/docs/reference/testnet)
+and in the SDK `TESTNET` preset.
+</Callout>
+
+## How it works
+
+```
+submit (pay escrow + LZ fee)  ->  LZ  ->  Sui lz_receive  ->  relayer stores on Walrus
+      |                                                              |
+   escrow held on origin                                     lz_send_proof
+      |                                                              |
+      +<----------------- proof releases escrow to relayer <---------+
+
+no proof by deadline  ->  anyone calls refund(intentId)  ->  payer credited
+```
+
+1. **Quote (off chain).** The relayer prices the full cost stack, the Walrus
+   storage, the Sui gas, and the LayerZero return leg, into a single origin-native
+   amount with buffers and a service margin.
+2. **Submit and pay.** You send the forward LayerZero fee plus the escrow. The
+   adapter forwards only the LayerZero fee to the endpoint and escrows the rest,
+   keyed by the intent id.
+3. **Release on proof.** When the genuine Sui-originated proof arrives and the
+   returned blob id matches your commitment, the escrow is released to the relayer
+   (on EVM as a pull payment: the relayer later calls `withdraw`).
+4. **Refund on timeout.** If no proof lands by the deadline, anyone can trigger a
+   refund and the recorded payer is credited. The relayer only ever earns on a
+   completed store.
+
+The forward LayerZero fee and origin gas are paid by you directly (spent by the
+send and the transaction itself); LayerZero refunds any surplus. Only the escrow
+bucket, the relayer-fronted cost, is custodied.
+
+## The one-call path
+
+```ts
+const { intentId, blobId, endEpoch, txHash, quote } = await client.storePriced(bytes, {
+  epochs: 5,
+  // Optional: called after each step (encoded, quoted, submitted with the tx hash, uploaded, proven).
+  onProgress: (e) => console.log(e.step),
+});
+```
+
+`storePriced()` works the same on the EVM and Solana clients:
+
+```
+encode -> priceQuote -> submitPaid -> upload -> awaitProof
+```
+
+The returned `quote` is the exact quote that was paid, so you can record or show
+it after the fact. Each step is also callable on its own. The SDK examples
+[`store-file-priced.evm.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file-priced.evm.ts)
+and [`store-file-priced.solana.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file-priced.solana.ts)
+run the whole flow.
+
+## Show the price before the user signs
+
+Split the flow to put the price in front of the user first:
+
+```ts
+const encoded = await client.encode(bytes, { epochs: 5 });
+const quote = await client.priceQuote(encoded);
+
+// e.g. "0.00128 ETH ($3.42)"
+showPrice(quote.totalNative, quote.breakdown.totalUsd);
+
+// Later, on the user's confirm click (wallet signs here):
+const { intentId } = await client.submitPaid(encoded, quote);
+await client.upload(intentId, bytes);
+const { blobId, endEpoch } = await client.awaitProof(intentId);
+```
+
+A quote reflects live prices, so fetch a fresh one if the user waits long before
+confirming.
+
+## What the quote contains
+
+`priceQuote()` returns a [`PricedQuote`](/docs/reference/core#pricedquote):
+
+| Field | Meaning |
+|-------|---------|
+| `escrowNative` | Storage cost: Walrus storage, Sui gas, and the LayerZero return leg, with a buffer and margin. Held in escrow. |
+| `forwardNative` | The LayerZero fee for sending your intent to Sui. Paid directly, not escrowed. |
+| `totalNative` | `escrowNative + forwardNative`: what you pay at submit. |
+| `forwardIsUpperBound` | `true` when `forwardNative` is a fee cap, not the live fee (see below). |
+| `breakdown` | Every component in USD, plus `totalUsd`. |
+
+Amounts are `bigint`s in the chain's smallest unit (wei or lamports). As a guide,
+a 1 KB file for 5 epochs on testnet costs about 0.0013 ETH or 0.028 SOL today
+(plus about 0.003 SOL of account rent on Solana).
+
+On Solana the LayerZero fee is read with a read-only simulation of the LayerZero
+endpoint, which needs the optional peer `@layerzerolabs/lz-solana-sdk-v2`. Without
+it, `forwardNative` is the preset's fee cap (0.01 SOL) and `forwardIsUpperBound`
+is `true`: the endpoint charges only the live fee, so the actual cost is lower
+than `totalNative`. Install the peer to show users an exact price.
+Most of the cost is the LayerZero return leg, so the price grows slowly with size.
+
+## Where the money goes
+
+- **On proof**: when the storage proof arrives and its blob id matches your
+  commitment, the escrow is released to the relayer. The relayer cannot collect
+  without a valid proof.
+- **On timeout**: if no proof lands by the intent deadline, anyone can trigger a
+  refund and the escrow goes back to the payer. The SDK sets the deadline one
+  hour after submit by default; change it with the `deadline` option on
+  `encode`/`storePriced` or `deadlineSeconds` on the client.
+- **Owner fallback**: the owner-only `confirmExecution` fallback marks an intent
+  executed for observability but never moves escrowed funds. Only a genuine proof
+  can release the escrow.
+
+## Refund an escrow
+
+<Tabs groupId="chain" persist items={['EVM', 'Solana']}>
+
+<Tab value="EVM">
+```ts
+import { EscrowStatus } from '@bosphor/sdk/evm';
+
+const escrow = await client.getEscrow(intentId);
+if (escrow.status === EscrowStatus.Pending && BigInt(Math.floor(Date.now() / 1000)) > escrow.deadline) {
+  await client.refund(intentId); // credits the payer
+  await client.withdraw();       // pays it out; call from the payer's wallet
+}
+```
+
+The adapter uses pull payments: `refund` credits the payer's balance and
+`withdraw` sends it.
+</Tab>
+
+<Tab value="Solana">
+```ts
+const escrow = await client.getEscrow(intentId); // status: 0 Pending, 1 Released, 2 Refunded
+if (escrow && escrow.status === 0 && BigInt(Math.floor(Date.now() / 1000)) > escrow.deadline) {
+  await client.refundEscrow(intentId); // closes the vault back to the payer
+}
+```
+
+`refundEscrow` sends the program's `refund_escrow` instruction. It returns the
+escrow and the vault's rent to the recorded payer in one step, after which
+`getEscrow` returns `null`.
+</Tab>
+
+</Tabs>
+
+## Quote without a wallet
+
+Show a price before any wallet is connected. These return the same
+`PricedQuote` as `priceQuote()`, and need only a read-only provider or connection:
+
+<Tabs groupId="chain" persist items={['EVM', 'Solana']}>
+
+<Tab value="EVM">
+```ts
+import { JsonRpcProvider } from 'ethers';
+import { TESTNET, quoteEvmStore } from '@bosphor/sdk/evm';
+
+const quote = await quoteEvmStore({
+  provider: new JsonRpcProvider(TESTNET.evm.rpcUrl),
+  sizeBytes: file.size, // or: data: bytes
+  epochs: 5,
+});
+```
+</Tab>
+
+<Tab value="Solana">
+```ts
+import { Connection } from '@solana/web3.js';
+import { TESTNET, quoteSolanaStore } from '@bosphor/sdk/solana';
+
+const quote = await quoteSolanaStore({
+  connection: new Connection(TESTNET.solana.rpcUrl, 'confirmed'),
+  sizeBytes: file.size, // or: data: bytes
+  epochs: 5,
+});
+```
+</Tab>
+
+</Tabs>
+
+For the storage part alone, `fetchQuote` calls the relayer quote endpoint
+directly:
+
+```ts
+import { TESTNET, fetchQuote } from '@bosphor/sdk';
+
+const quote = await fetchQuote(TESTNET.relayerUrl, {
+  sizeBytes: file.size,
+  epochs: 5,
+  originToken: 'ETH', // or 'SOL'
+});
+```
+
+Without `forwardLzFeeNative` the result covers only the storage (escrow) part.
+
+## The quote endpoint
+
+The relayer exposes the pricing as `POST /quote` (see the
+[API reference](/docs/api#quote-pricing)). Bigint amounts are decimal strings so
+no precision is lost.
+
+```bash
+curl -s -X POST https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1024,"epochs":5,"originToken":"ETH","forwardLzFeeNative":"299467979879960"}'
+```
+
+```json
+{
+  "originToken": "ETH",
+  "escrowNative": "977017000000000",
+  "forwardNative": "299467979879960",
+  "totalNative": "1276484979879960",
+  "breakdown": { "escrowUsd": 2.62, "totalUsd": 3.42, "floorApplied": false, "...": "..." }
+}
+```
+
+These are real testnet numbers for a 1 KB file: about 0.001 ETH of escrow plus
+about 0.0003 ETH of LayerZero fee. Send `"originToken":"SOL"` for a Solana quote
+in lamports.
+
+- `escrowNative`, the relayer-fronted bucket you escrow.
+- `forwardNative`, the forward LayerZero fee (and origin gas) you pay directly.
+- `totalNative = escrowNative + forwardNative`, your `msg.value` at submit.
+
+Prices come from a multi-source oracle (Pyth Hermes primary, CoinGecko fallback)
+with staleness and sanity bounds; a spend or refund decision never rides on a
+single or fabricated feed.
+
+## Never lose money, by construction
+
+Before spending any WAL, the relayer runs a break-even guard: it recomputes the
+actual cost at live prices and only proceeds if the escrow covers cost plus a
+minimum margin. Otherwise it skips, spends nothing, and the intent refunds on its
+deadline. Every completed store is profitable by construction, and every skipped
+one costs nothing. A per-intent profit-and-loss ledger and a negative-margin
+alert make the invariant observable.
+
+## Escrow contract surface
+
+The escrow adapter adds these to the [EVM adapter](/docs/contracts/evm-adapter#bosphorescrowadaptersol-evm-milestone-4):
+
+- `submitIntent{value: fee + escrow}(...)`, escrows the surplus above the LayerZero fee.
+- `getEscrow(intentId) -> (payer, token, amount, deadline, status)`, the record.
+- `refund(intentId)`, permissionless after the deadline; pays the payer.
+- `withdraw()` / `withdrawToken(token)`, pull-payment for released or refunded funds.
+
+The full ABI ships in the SDK as `ADAPTER_ABI` (from `@bosphor/sdk/evm`), with
+`EscrowStatus` for decoding `getEscrow(...).status` (`0` none, `1` pending, `2`
+released, `3` refunded).
+
+On Solana, the escrow lives in a vault account derived from the intent id
+(`[b"escrow", intentId]`), and the `refund_escrow` instruction returns it to the
+payer after the deadline. See the [Solana program](/docs/contracts/solana-program).
+
+Payment is native (ETH or SOL) today. A USDC path (Permit2 witness deposit plus
+CCTP settlement) is scaffolded behind mocks as a fast-follow.
+
+## Free stores on testnet
+
+`store()` runs the same flow but pays only the LayerZero fee, with no escrow. The
+hosted testnet relayer accepts these today so you can experiment cheaply. Use
+`storePriced()` for anything you build on.

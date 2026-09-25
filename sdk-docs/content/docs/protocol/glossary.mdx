@@ -1,0 +1,90 @@
+---
+title: Glossary
+description: Key terms used throughout the Bosphor documentation.
+---
+
+Key terms used throughout the Bosphor documentation.
+
+## Blob
+
+A unit of data stored on Walrus. Bosphor stores intent payloads as deletable blobs.
+
+## Blob id
+
+The Walrus identifier of a blob, a deterministic function of its bytes. The SDK
+computes it locally, and the origin chain later checks the returned blob id
+against the one it committed.
+
+## Commitment
+
+The fixed 49-byte value an intent carries instead of the file: blob id, size,
+encoding, storage epochs, and deadline. See [Commitment format](/docs/contracts/commitment-format).
+
+## Cross-chain message
+
+A message sent between chains via LayerZero v2.
+
+## DVN
+
+Also: *Decentralized Verifier Network*.
+
+A set of independent verifiers in LayerZero v2 that validate cross-chain messages before delivery.
+
+## EID
+
+Also: *Endpoint ID*.
+
+A numeric identifier for a chain in LayerZero v2. Sepolia is `40161`, Solana devnet `40168`, Sui testnet `40378`.
+
+## Epoch
+
+A time period in Walrus that determines how long a blob is stored. One Walrus testnet epoch is one day.
+
+## Escrow
+
+The storage part of a paid store, held on the origin chain from submit until the
+proof releases it to the relayer, or until the deadline lets the payer refund it.
+See [Pay for storage](/docs/guides/pay-for-storage).
+
+## Intent
+
+A storage request submitted on an origin chain (EVM or Solana): a commitment to a
+Walrus blob and its storage terms, a deadline, and the destination chain EID.
+
+## Intent id
+
+The canonical id of an intent: a keccak digest of the commitment, the sender, and
+a per-sender nonce. It is the same value on EVM, Solana, and Sui.
+
+## LayerZero v2
+
+Also: *LayerZero*, *LZ*.
+
+The cross-chain messaging protocol Bosphor uses for both directions of the message flow.
+
+## OApp
+
+Also: *Omnichain Application*.
+
+A LayerZero v2 application contract that can send and receive cross-chain messages.
+
+## Out-of-band upload
+
+The file bytes go from the client to the relayer over HTTPS, never across the
+bridge. Only the commitment crosses LayerZero, which keeps the cross-chain fee flat.
+
+## Peer
+
+A cross-chain OApp counterpart configured via setPeer (EVM) or set_peer (Sui).
+
+## Proof
+
+An execution receipt (intent id, blob id, end epoch) sent from Sui back to the
+origin chain after a storage intent is fulfilled. It marks the intent executed and
+releases the escrow.
+
+## Relayer
+
+The off-chain service that processes intents: watches for delivered intents,
+accepts the bytes, stores them on Walrus, records the store on Sui, and sends the
+proof back to the origin chain.

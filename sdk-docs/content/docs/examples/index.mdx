@@ -1,0 +1,46 @@
+---
+title: Examples
+description: Starter repos you can clone and run, and single-file SDK scripts for the EVM and Solana paths.
+---
+
+Every example runs against the hosted testnet, so there is nothing to deploy.
+Bring a funded Sepolia or Solana devnet wallet (see
+[Fund your wallet](/docs/quickstart#fund-your-wallet)).
+
+## Starter repos
+
+Standalone projects with a price quote, a paid store with live progress, and a
+refund script. Clone one, run `npm install`, fill in `.env`, then
+`npm run store:paid`.
+
+<Cards>
+  <Card title="bosphor-evm-starter" href="https://github.com/riva-labs/bosphor-evm-starter">
+    Store a file from an Ethereum Sepolia wallet with ethers v6 and `@bosphor/sdk/evm`.
+  </Card>
+  <Card title="bosphor-solana-starter" href="https://github.com/riva-labs/bosphor-solana-starter">
+    Store a file from a Solana devnet keypair with `@solana/web3.js` and `@bosphor/sdk/solana`.
+  </Card>
+</Cards>
+
+## SDK example scripts
+
+Single-file scripts in the SDK repo. Run them from `sdk/` with
+`node --import tsx examples/<script>`.
+
+| Script | Chain | What it shows |
+|--------|-------|---------------|
+| [`store-file-priced.evm.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file-priced.evm.ts) | EVM (Sepolia) | The paid flow: quote, escrow, store, and verified proof with `storePriced()` |
+| [`store-file-priced.solana.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file-priced.solana.ts) | Solana (devnet) | The same paid flow from a Solana keypair |
+| [`store-file.evm.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file.evm.ts) | EVM (Sepolia) | The free testnet flow with `store()`, paying only the LayerZero fee |
+| [`store-file.solana.ts`](https://github.com/riva-labs/bosphor/blob/main/sdk/examples/store-file.solana.ts) | Solana (devnet) | The free testnet flow from a Solana keypair |
+
+## Reference dApp
+
+[demo.bosphor.xyz](https://demo.bosphor.xyz) is a full browser app on the same
+SDK: sign in, pick a file, and watch a real EVM or Solana round-trip complete.
+The [dApp tutorial](/docs/guides/dapp-tutorial) walks through the same
+integration in your own frontend.
+
+<Callout type="info" title="More examples coming">
+A searchable gallery of examples and reference integrations is on the way.
+</Callout>

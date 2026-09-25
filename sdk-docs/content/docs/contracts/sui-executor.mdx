@@ -1,0 +1,371 @@
+---
+title: "Sui executor"
+description: "The Sui side of Bosphor: the lz_receiver OApp that records intents and sends proofs, and the walrus_executor that verifies and records each Walrus store."
+---
+
+The walrus executor module (`contracts/sui/executor/sources/walrus_executor.move`) handles the final step of a storage intent: verifying that data was stored on Walrus and recording the execution on-chain.
+
+## Overview
+
+After the relayer uploads a user's payload to Walrus and receives a certified blob, it calls `execute_store` on this module. The executor verifies the blob is certified, checks the deadline, prevents double-execution, and transfers both the blob and a `StorageReceipt` to the original sender.
+
+## Module structure
+
+```
+contracts/sui/executor/
+  Move.toml          # Package manifest (depends on Walrus)
+  sources/
+    walrus_executor.move   # Core executor logic
+  tests/
+    walrus_executor_tests.move
+```
+
+## ExecutorConfig
+
+A shared object created at module initialization. Holds the authorized relayer address and a deduplication table.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `relayer` | `address` | The only address allowed to call `execute_store` |
+| `executed_intents` | `Table<vector<u8>, bool>` | Tracks which intent IDs have been executed |
+
+The deployer is set as the initial relayer. Two functions can change it:
+
+- `update_relayer(config, new_relayer)`: callable by the current relayer only.
+- `set_relayer(config, admin_cap, oapp, new_relayer)`: callable by the OApp admin, proven by the `AdminCap` from the Bosphor LayerZero OApp. This is the recovery path for rotating a lost or compromised relayer key without republishing the package. The new relayer must not be the zero address. Emits a `RelayerChanged` event.
+
+## execute_store flow
+
+```
+Relayer calls execute_store(config, lz_config, system, intent_id, blob, clock, original_sender)
+  1. Assert caller == config.relayer
+  2. Assert blob.certified_epoch().is_some()   (Walrus certification check)
+  3. Assert intent_id not in executed_intents   (deduplication)
+  4. Read the committed deadline from lz_config and assert
+     clock.timestamp_ms() <= committed_deadline * 1000   (deadline enforcement)
+  5. Assert the blob id and storage epochs match the committed reference
+  6. Record intent_id in executed_intents
+  7. Emit StorageExecuted event
+  8. Create StorageReceipt
+  9. Transfer blob and receipt to original_sender
+```
+
+## Deadline enforcement
+
+The deadline the user committed when submitting the intent is stored on Sui by `lz_receive`, and `execute_store` reads it back from `LzReceiverConfig`. The relayer does not pass a deadline, so it cannot extend or shorten it. The committed deadline is a unix timestamp in seconds, and the executor compares it against the Sui clock in milliseconds. Executing at exactly the deadline is allowed; one millisecond later aborts with `EDeadlineExpired`. An intent that was never received aborts with `EIntentNotReceived` from the receiver module.
+
+Packages deployed before this change took a relayer-supplied `deadline_ms` argument between `blob` and `clock`. The relayer detects which signature the configured package has and builds the matching transaction.
+
+## Blob verification
+
+The executor does not trust the relayer's claim that data was stored. It checks `blob.certified_epoch().is_some()`, which is only true after Walrus storage nodes have certified the blob. A blob that has been uploaded but not yet certified will be rejected.
+
+All blobs are stored as deletable (enforced at upload time in the relayer, not in the executor).
+
+## StorageReceipt
+
+An on-chain object transferred to the original sender as proof of execution.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `intent_id` | `vector<u8>` | The 32-byte intent identifier |
+| `walrus_blob_id` | `u256` | Content-addressed hash of the stored data |
+| `end_epoch` | `u32` | Walrus epoch when the blob expires |
+| `sender` | `address` | The original intent sender (mapped from EVM) |
+
+## Events
+
+**StorageExecuted**: Emitted on every successful execution. Contains `intent_id`, `walrus_blob_id`, `end_epoch`, and `executor` address.
+
+**ConfigCreated**: Emitted once at module initialization with the config object ID and initial relayer address.
+
+**RelayerChanged**: Emitted when the authorized relayer changes via `set_relayer`. Contains `old_relayer` and `new_relayer`.
+
+## Error codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | `ENotRelayer` | Caller is not the authorized relayer |
+| 1 | `EBlobNotCertified` | Blob has not been certified by Walrus |
+| 2 | `EIntentAlreadyExecuted` | This intent ID was already executed |
+| 3 | `EDeadlineExpired` | Current time exceeds the intent deadline |
+| 4 | `EBlobIdMismatch` | Certified blob id does not match the committed reference |
+| 5 | `EInsufficientStorageEpochs` | Blob does not cover the committed storage epochs |
+| 6 | `EZeroAddress` | New relayer address must not be the zero address |
+
+## Trust assumptions
+
+- The relayer is a trusted operator. Only the configured relayer address can call `execute_store`.
+- Blob certification is verified on-chain. The executor does not blindly trust the relayer's claim.
+- The `original_sender` address is provided by the relayer. In production, this comes from the ABI-decoded intent message received via LayerZero.
+- Deadline enforcement uses the deadline the user committed and Sui's on-chain clock, never a relayer-supplied value or the relayer's local time.
+
+## Module reference
+
+The Move entry points the LayerZero executor and the relayer call, with their events and abort codes.
+
+### Usage examples (@mysten/sui)
+
+#### Call execute_store
+
+The relayer calls `execute_store` after uploading the bytes to Walrus and receiving a certified blob. The executor reads the committed blob id, storage epochs, and deadline back from `LzReceiverConfig` and asserts the certified blob and the current time match; relayer arguments are never trusted for the commitment.
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+const keypair = Ed25519Keypair.fromSecretKey(RELAYER_SECRET_KEY);
+
+const tx = new Transaction();
+
+tx.moveCall({
+  target: `${PACKAGE_ID}::walrus_executor::execute_store`,
+  arguments: [
+    tx.object(EXECUTOR_CONFIG_ID),         // ExecutorConfig (relayer auth + dedup)
+    tx.object(LZ_RECEIVER_CONFIG_ID),      // LzReceiverConfig (holds the committed reference)
+    tx.object(WALRUS_SYSTEM_ID),           // Walrus System object (current epoch)
+    tx.pure.vector("u8", intentIdBytes),   // 32-byte intent ID
+    tx.object(certifiedBlobId),            // Walrus Blob object
+    tx.object("0x6"),                      // Sui Clock object
+    tx.pure.address(senderAddress),        // original sender
+  ],
+});
+
+const result = await client.signAndExecuteTransaction({
+  transaction: tx,
+  signer: keypair,
+});
+console.log("execute_store tx:", result.digest);
+```
+
+#### Query intent status
+
+```typescript
+import { SuiClient } from "@mysten/sui/client";
+
+const client = new SuiClient({ url: "https://fullnode.testnet.sui.io:443" });
+
+// Query IntentReceived events
+const events = await client.queryEvents({
+  query: {
+    MoveEventType: `${PACKAGE_ID}::lz_receiver::IntentReceived`,
+  },
+  limit: 10,
+  order: "descending",
+});
+
+for (const event of events.data) {
+  const { intent_id, committed_blob_id, size, storage_epochs, src_eid, nonce } =
+    event.parsedJson as {
+      intent_id: number[];
+      committed_blob_id: string;
+      size: number;
+      storage_epochs: number;
+      src_eid: number;
+      nonce: string;
+    };
+  console.log("Intent:", Buffer.from(intent_id).toString("hex"));
+  console.log("Committed blob id:", committed_blob_id, "size:", size);
+  console.log("Source EID:", src_eid, "Nonce:", nonce);
+}
+```
+
+### lz_receiver
+
+Receives cross-chain intent messages from EVM and sends execution proofs back.
+
+#### lz_receive
+
+Called by the LZ executor via PTB. Consumes the hot-potato `Call`, validates the message through the OApp (peer + endpoint checks), extracts the intent ID, records the intent, and emits `IntentReceived`.
+
+```move
+public fun lz_receive(
+    config: &mut LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<LzReceiveParam, Void>,
+    ctx: &mut TxContext,
+)
+```
+
+Message format from EVM (M3 reference commitment, big-endian, exactly 81 bytes):
+
+| Offset | Length | Field |
+|--------|--------|-------|
+| 0:32 | 32 | intentId (bytes32) |
+| 32:81 | 49 | commitment: `blobId(32) ++ size(u32) ++ encodingType(u8) ++ storageEpochs(u32) ++ deadline(u64)` |
+
+The commitment is decoded into the `IntentRecord`, which stores the committed blob id and storage epochs for `execute_store` to verify against. No raw blob bytes are on the wire. See [Commitment Format](/docs/contracts/commitment-format).
+
+**Aborts**: `EInvalidMessageLength` (1) if the message is not exactly 81 bytes, `EIntentAlreadyReceived` (0) if duplicate.
+
+#### lz_send_proof
+
+Initiates an LZ send of the execution proof back to EVM. Builds the type-1 proof message and calls `oapp::lz_send()`. Returns a hot-potato `Call` that must be routed through the LZ endpoint in the same PTB, then finalized via `confirm_lz_send_proof`.
+
+```move
+public fun lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    intent_id: vector<u8>,    // 32 bytes
+    blob_id: vector<u8>,      // 32 bytes
+    end_epoch: u64,
+    dst_eid: u32,             // e.g. 40161 for Sepolia
+    options: vector<u8>,
+    native_fee: Coin<SUI>,
+    ctx: &mut TxContext,
+): Call<SendParam, MessagingReceipt>
+```
+
+**Aborts**: `EUnauthorizedRelayer` (2) if caller is not the relayer, `EIntentNotReceived` (4) if intent not recorded.
+
+#### confirm_lz_send_proof
+
+Finalizes the LZ send and handles coin refunds. Must be called after the `Call` from `lz_send_proof` has been executed by the LZ endpoint. Emits `ProofSent`.
+
+```move
+public fun confirm_lz_send_proof(
+    config: &LzReceiverConfig,
+    oapp: &mut OApp,
+    call: Call<SendParam, MessagingReceipt>,
+    ctx: &mut TxContext,
+)
+```
+
+#### quote_proof
+
+Estimates the LZ fee for sending a proof message. Returns a hot-potato `Call` that must be routed through the endpoint, then finalized via `confirm_quote_proof`.
+
+```move
+public fun quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    intent_id: vector<u8>,
+    blob_id: vector<u8>,
+    end_epoch: u64,
+    dst_eid: u32,
+    options: vector<u8>,
+    ctx: &mut TxContext,
+): Call<QuoteParam, MessagingFee>
+```
+
+#### confirm_quote_proof
+
+Finalizes a quote and returns the estimated messaging fee.
+
+```move
+public fun confirm_quote_proof(
+    config: &LzReceiverConfig,
+    oapp: &OApp,
+    call: Call<QuoteParam, MessagingFee>,
+): MessagingFee
+```
+
+#### set_relayer
+
+Updates the authorized relayer address. Admin-only (requires `AdminCap`).
+
+```move
+entry fun set_relayer(
+    config: &mut LzReceiverConfig,
+    admin_cap: &AdminCap,
+    oapp: &OApp,
+    new_relayer: address,
+)
+```
+
+**Aborts**: `EZeroAddress` (3) if `new_relayer` is `@0x0`.
+
+#### is_received
+
+Returns `true` if an intent with the given ID has been received.
+
+```move
+public fun is_received(config: &LzReceiverConfig, intent_id: vector<u8>): bool
+```
+
+### lz_receiver Events
+
+#### IntentReceived
+
+Emitted when `lz_receive` processes an incoming LZ message.
+
+```move
+public struct IntentReceived has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes, matches EVM intentId
+    committed_blob_id: u256, // committed Walrus blob id (big-endian u256)
+    size: u32,               // committed blob size in bytes
+    encoding_type: u8,       // committed Walrus encoding type
+    storage_epochs: u32,     // committed storage duration in epochs
+    deadline: u64,           // committed deadline (unix timestamp)
+    src_eid: u32,            // Source chain EID (40161 for Sepolia)
+    nonce: u64,              // LZ message nonce
+    guid: Bytes32,           // LZ message GUID
+}
+```
+
+#### ProofSent
+
+Emitted when `confirm_lz_send_proof` completes a proof send back to EVM.
+
+```move
+public struct ProofSent has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes
+    blob_id: vector<u8>,     // 32 bytes
+    end_epoch: u64,          // Walrus blob expiry epoch
+    dst_eid: u32,            // Destination EID (40161 for Sepolia)
+    nonce: u64,              // LZ message nonce
+    guid: Bytes32,           // LZ message GUID
+}
+```
+
+### lz_receiver Errors
+
+| Code | Name | Description |
+|------|------|-------------|
+| 0 | `EIntentAlreadyReceived` | Intent with this ID was already received |
+| 1 | `EInvalidMessageLength` | Message is not exactly 81 bytes (intentId(32) ++ commitment(49)) |
+| 2 | `EUnauthorizedRelayer` | Caller is not the authorized relayer |
+| 3 | `EZeroAddress` | Relayer address must not be zero |
+| 4 | `EIntentNotReceived` | Intent must exist before sending proof |
+
+### walrus_executor
+
+#### execute_store
+
+Accepts a certified Walrus `Blob` object, verifies certification, enforces the committed deadline, asserts the certified blob matches the committed reference recorded by `lz_receive` (deadline, blob id, and storage epochs are all read from `LzReceiverConfig`, not from relayer arguments), records execution, emits `StorageExecuted`, and transfers blob and receipt to the original sender. Relayer-only.
+
+```move
+public fun execute_store(
+    config: &mut ExecutorConfig,
+    lz_config: &LzReceiverConfig,
+    system: &System,
+    intent_id: vector<u8>,
+    blob: Blob,
+    clock: &Clock,
+    original_sender: address,
+    ctx: &mut TxContext,
+)
+```
+
+**Aborts**: `ENotRelayer` (0), `EBlobNotCertified` (1), `EIntentAlreadyExecuted` (2), `EDeadlineExpired` (3) if the Sui clock is past the committed deadline (unix seconds), `EBlobIdMismatch` (4) if the certified blob id differs from the commitment, `EInsufficientStorageEpochs` (5) if the blob does not cover the committed epochs, `lz_receiver::EIntentNotReceived` (4) if the intent was never received.
+
+#### StorageExecuted
+
+Emitted when `execute_store` records a Walrus blob.
+
+```move
+public struct StorageExecuted has copy, drop {
+    intent_id: vector<u8>,   // 32 bytes
+    walrus_blob_id: u256,    // Walrus blob identifier
+    end_epoch: u32,          // Blob expiry epoch
+    executor: address,       // Relayer address
+}
+```
+
+## Related
+
+- [Architecture](/docs/protocol/architecture) for where the executor fits in the overall flow
+- [EVM adapter](/docs/contracts/evm-adapter) for the EVM side of the protocol
+- [LayerZero Verification Flow](/docs/protocol/lz-verification-flow) for the cross-chain message path

@@ -13,10 +13,19 @@
   "observability": {
     "enabled": true
   },
+  // A tiny Worker answers retired URLs (redirects/map.mjs) with a 301 and hands
+  // every other request to the static assets. Set the CANONICAL_ORIGIN var at
+  // the docs.bosphor.xyz cutover to move other hosts there (see worker/index.mjs).
+  "main": "worker/index.mjs",
   // Next.js static export (`next build` with output: 'export') emits to `out/`.
   "assets": {
     "directory": "out",
-    "not_found_handling": "404-page"
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    // Page requests reach the Worker first so the redirect map (and the later
+    // host move) also covers paths that exist as assets. Hashed build files
+    // skip the Worker.
+    "run_worker_first": ["/*", "!/_next/*"]
   },
   "compatibility_flags": ["nodejs_compat"]
 }

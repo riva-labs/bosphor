@@ -1,5 +1,5 @@
 ---
-title: Troubleshooting & FAQ
+title: FAQ
 description: The failures you will actually hit with the Bosphor SDK, and how to resolve each one.
 ---
 
@@ -17,8 +17,8 @@ description: The failures you will actually hit with the Bosphor SDK, and how to
 />
 
 The failures you will actually hit, and what to do about each. See
-[Handle errors](/docs/errors) for the typed-error model and
-[Resume after a crash](/docs/resume) for recovery.
+[Errors and troubleshooting](/docs/guides/errors) for the typed-error model and
+[Resume after a crash](/docs/guides/resume) for recovery.
 
 ## `upload` fails with a 404 right after `submit`
 
@@ -52,14 +52,14 @@ bytes and the same `computeBlob` end to end.
 
 Not yet. There is no mainnet deployment. The default `computeBlob` is fixed to
 testnet Walrus parameters; for mainnet, inject your own `computeBlob` and point
-the client at your own adapter. See [Store from EVM](/docs/evm#blob-id-computation).
+the client at your own adapter. See [Store from EVM](/docs/guides/evm#blob-id-computation).
 
 ## How much does a store cost on testnet?
 
 At current prices, a paid store of a 1 KB file for 5 epochs costs about 0.0015 ETH
 on Sepolia, or about 0.03 SOL on Solana devnet including account rent. Prices
 follow live token prices, so ask for a live number with `client.priceQuote(encoded)`.
-See [Pay for storage](/docs/pay-for-storage).
+See [Pay for storage](/docs/guides/pay-for-storage).
 
 ## `quote` or `submitIntent` reverts on EVM
 

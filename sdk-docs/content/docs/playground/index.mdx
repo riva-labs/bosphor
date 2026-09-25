@@ -1,0 +1,44 @@
+---
+title: Playground
+description: Price a store and run a real round-trip on the hosted testnet from your browser.
+---
+
+The playground will let you try Bosphor without writing code: get a live price for
+any file size with no wallet, then connect a Sepolia or Solana devnet wallet and
+run a real store on the hosted testnet.
+
+<Callout type="info" title="Coming soon">
+The interactive playground is being built. Until it lands, you can do the same
+things below.
+</Callout>
+
+## Get a live price now
+
+The relayer quotes any store with no wallet. `sizeBytes` is your file size and
+`originToken` is `ETH` or `SOL`:
+
+```bash
+curl -s -X POST https://api.bosphor.xyz/testnet/quote \
+  -H 'content-type: application/json' \
+  -d '{"sizeBytes":1024,"epochs":5,"originToken":"ETH"}'
+```
+
+From code, `quoteEvmStore` and `quoteSolanaStore` return the all-in price
+including the LayerZero fee. See
+[Quote without a wallet](/docs/guides/pay-for-storage#quote-without-a-wallet).
+
+## Run a store now
+
+- [demo.bosphor.xyz](https://demo.bosphor.xyz): the reference dApp, a real
+  round-trip from a browser wallet.
+- [Quickstart](/docs/quickstart): the same round-trip from a Node.js script in
+  about 15 minutes.
+- [Examples](/docs/examples): starter repos you can clone and run.
+
+## Watch live traffic
+
+The public intent feed shows every hop of recent intents on the hosted testnet:
+
+```bash
+curl -s "https://api.bosphor.xyz/testnet/public/intents?limit=5"
+```

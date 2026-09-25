@@ -1,0 +1,9 @@
+{
+  "title": "Playground",
+  "description": "Try Bosphor in the browser",
+  "icon": "Play",
+  "root": true,
+  "pages": [
+    "index"
+  ]
+}

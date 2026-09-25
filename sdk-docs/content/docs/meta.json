@@ -1,19 +1,13 @@
 {
   "pages": [
-    "---Start here---",
-    "index",
-    "quickstart",
-    "---Guides---",
-    "pay-for-storage",
-    "evm",
-    "solana",
-    "errors",
-    "resume",
-    "faq",
-    "---Concepts---",
-    "how-it-works",
-    "---Reference---",
+    "(get-started)",
+    "guides",
     "reference",
+    "api",
+    "contracts",
+    "examples",
+    "playground",
+    "protocol",
     "changelog"
   ]
 }

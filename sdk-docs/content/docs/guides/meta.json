@@ -1,0 +1,19 @@
+{
+  "title": "Guides",
+  "description": "Pay, store, and ship from EVM or Solana",
+  "icon": "BookOpen",
+  "root": true,
+  "pages": [
+    "---Store---",
+    "pay-for-storage",
+    "evm",
+    "solana",
+    "---Build---",
+    "dapp-tutorial",
+    "integration-checklist",
+    "---When things go wrong---",
+    "errors",
+    "resume",
+    "faq"
+  ]
+}

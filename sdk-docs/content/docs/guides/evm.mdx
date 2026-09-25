@@ -21,7 +21,7 @@ const { intentId, blobId, endEpoch, txHash } = await client.storePriced(fileByte
 `ADAPTER_ABI`, wires the `queryProof` reader used to resolve `endEpoch`, and fills
 the adapter address, relayer URL, Sui endpoint id, and LayerZero options from the
 `TESTNET` preset. Override any of them in the second argument, for example
-`{ network: myPreset }` or `{ relayerUrl }`. See [Pay for storage](/docs/pay-for-storage)
+`{ network: myPreset }` or `{ relayerUrl }`. See [Pay for storage](/docs/guides/pay-for-storage)
 for what `storePriced()` charges.
 
 ## Wire it by hand
@@ -84,7 +84,7 @@ await client.storePriced(fileBytes, {
 
 If no proof lands before the deadline, `client.refund(intentId)` credits the
 escrow back to the payer and `client.withdraw()` pays it out; `client.getEscrow(intentId)`
-reads its status. See [Pay for storage](/docs/pay-for-storage#refund-an-escrow).
+reads its status. See [Pay for storage](/docs/guides/pay-for-storage#refund-an-escrow).
 
 ## Blob-id computation
 
@@ -122,7 +122,7 @@ setTimeout(() => ac.abort(new Error('took too long')), 30_000);
 await client.store(fileBytes, { epochs: 5, signal: ac.signal });
 ```
 
-The on-chain intent is not rolled back. See [Resume after a crash](/docs/resume).
+The on-chain intent is not rolled back. See [Resume after a crash](/docs/guides/resume).
 
 Runnable end-to-end scripts live at `sdk/examples/store-file-priced.evm.ts` and
 `sdk/examples/store-file.evm.ts`.

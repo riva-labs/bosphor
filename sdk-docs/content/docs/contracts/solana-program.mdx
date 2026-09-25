@@ -1,0 +1,125 @@
+---
+title: Solana program
+description: "The Bosphor Anchor program on Solana, a LayerZero v2 OApp. Its instructions, accounts, events, errors, and wire formats."
+---
+
+<Callout type="info" title="Recommended path">
+Most integrators should use `@bosphor/sdk/solana`, which builds every instruction
+and resolves the LayerZero accounts for you. See the
+[Solana guide](/docs/guides/solana). Use this page when you read program state
+directly, call the program from another program, or audit it.
+</Callout>
+
+The Bosphor Solana adapter is an Anchor program and a LayerZero v2 OApp. It sends
+storage intents to Sui over LayerZero, receives the execution proof back through
+the endpoint, and custodies each intent's payment in an escrow vault until the
+proof releases it or the deadline lets the payer refund it.
+
+| | |
+|---|---|
+| Program id (devnet) | `7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF` |
+| Solana devnet EID | `40168` |
+| Destination (Sui testnet) EID | `40378` |
+| Source | [`contracts/solana/programs/bosphor-adapter`](https://github.com/riva-labs/bosphor/tree/main/contracts/solana/programs/bosphor-adapter) |
+
+## Message flow
+
+- **Forward leg (Solana to Sui).** `submit_intent` records an `IntentState`,
+  escrows the payment, and calls the endpoint `send` with the 81-byte message
+  `intentId(32) ++ commitment(49)`, exactly what the Sui `lz_receive` parses.
+- **Return leg (Sui to Solana).** The endpoint invokes `lz_receive` with the
+  97-byte type-1 proof `[0x01] ++ intentId(32) ++ blobId(32) ++ endEpoch(u256)`.
+  The program checks the sender against the configured peer, clears the message
+  for replay protection, verifies the returned blob id matches the commitment,
+  marks the intent executed, and releases the escrow to the relayer.
+
+Intent ids come from the shared commitment codec, so a Solana intent has the
+**same id** as it would on EVM, Sui, and in TypeScript. See
+[Commitment format](/docs/contracts/commitment-format).
+
+## Instructions
+
+| Instruction | Who calls it | What it does |
+|-------------|--------------|--------------|
+| `init_store(params)` | Admin, once | Creates the `Store` OApp PDA and registers it with the LayerZero endpoint. |
+| `set_peer(params)` | Admin | Records the 32-byte remote OApp address for an endpoint id (the Sui receiver for EID 40378). |
+| `submit_intent(blob_id, size, encoding_type, storage_epochs, deadline, dst_eid, options, native_fee, escrow_amount)` | Anyone | Records the intent, escrows `escrow_amount` lamports, and sends the forward message. The endpoint `send` accounts are passed as remaining accounts. |
+| `lz_receive(params)` | LayerZero executor | Receives the return proof, verifies peer and blob id, marks the intent executed, releases the escrow. |
+| `lz_receive_types(params)` | LayerZero executor | Returns the account metas the executor must pass to `lz_receive`. |
+| `confirm_execution(intent_id, returned_blob_id, end_epoch)` | Admin only | Fallback that records a result when the LayerZero return path is unavailable. It still asserts the blob id matches the commitment, and never moves escrowed funds. |
+| `refund_escrow(intent_id)` | Anyone, after the deadline | Returns the escrow and the vault's rent to the recorded payer, then closes the vault. Funds only ever go to the payer. |
+
+## Accounts
+
+All state lives in PDAs of the program:
+
+| Account | Seeds | Holds |
+|---------|-------|-------|
+| `Store` | `[b"store"]` | The OApp identity: admin, endpoint program, bump. It signs every endpoint CPI. |
+| `Peer` | `[b"peer", store, eid]` | The remote OApp address for one endpoint id. |
+| `SenderNonce` | `[b"nonce", sender]` | The next per-sender nonce, used in the intent id. |
+| `IntentState` | `[b"intent", intentId]` | Committed blob id, size, storage epochs, deadline, sender, nonce, `executed`, and `end_epoch`. |
+| `EscrowVault` | `[b"escrow", intentId]` | Payer, beneficiary, amount, deadline, and status (`0` pending, `1` released, `2` refunded). |
+| `LzReceiveTypesAccounts` | `[b"LzReceiveTypes", store]` | The account list the executor reads to build `lz_receive`. |
+
+The `IntentState` PDA is the on-chain proof of record. Read it with the SDK:
+
+```ts
+import { readSolanaProof } from '@bosphor/sdk/solana';
+
+const info = await connection.getAccountInfo(intentPda);
+const { executed, blobId, endEpoch } = readSolanaProof(info!.data);
+```
+
+## Events
+
+```rust
+pub struct IntentSubmitted {
+    pub intent_id: [u8; 32],   // canonical, chain-agnostic intent id
+    pub sender: Pubkey,
+    pub nonce: u64,
+    pub blob_id: [u8; 32],
+    pub size: u32,
+    pub encoding_type: u8,
+    pub storage_epochs: u32,
+    pub deadline: u64,         // unix seconds
+    pub dst_eid: u32,          // e.g. Sui testnet 40378
+    pub guid: [u8; 32],        // LayerZero message GUID of the forward leg
+    pub lz_nonce: u64,         // LayerZero nonce of the forward leg
+}
+
+pub struct IntentExecuted {
+    pub intent_id: [u8; 32],
+    pub returned_blob_id: [u8; 32], // equals the committed blob id
+    pub end_epoch: u64,
+    pub src_eid: u32,
+}
+
+pub struct EscrowRefunded {
+    pub intent_id: [u8; 32],
+    pub payer: Pubkey,
+    pub amount: u64,           // lamports returned, excluding the vault rent
+}
+```
+
+## Errors
+
+| Error | Meaning |
+|-------|---------|
+| `Unauthorized` | Signer is not the store admin |
+| `AlreadyExecuted` | Intent has already been executed |
+| `BlobIdMismatch` | Returned blob id does not match the committed blob id |
+| `IntentIdMismatch` | Provided intent id does not match the stored intent state |
+| `NonceOverflow` | Per-sender nonce overflowed |
+| `InvalidPeer` | Return proof sender is not the configured peer for this endpoint |
+| `InvalidProof` | Return proof has an invalid length or type byte |
+| `EscrowNotPending` | Escrow is not in the pending state |
+| `DeadlineNotReached` | Escrow deadline has not been reached yet |
+| `InsufficientFunds` | Escrow vault has insufficient lamports for the transfer |
+| `InvalidBeneficiary` | Escrow beneficiary account does not match the recorded beneficiary |
+
+## Related
+
+- [Solana guide](/docs/guides/solana) for the SDK path, including the LayerZero send accounts
+- [Pay for storage](/docs/guides/pay-for-storage) for the escrow and refund model
+- [Multi-chain testing](/docs/protocol/multichain-testing) for how the Solana origin is tested end to end

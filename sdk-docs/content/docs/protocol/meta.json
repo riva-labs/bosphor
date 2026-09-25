@@ -1,0 +1,26 @@
+{
+  "title": "Protocol",
+  "description": "Architecture, security, and operations",
+  "icon": "Network",
+  "root": true,
+  "pages": [
+    "index",
+    "---Design---",
+    "architecture",
+    "security-model",
+    "lz-verification-flow",
+    "known-limitations",
+    "glossary",
+    "---Operate---",
+    "relayer",
+    "self-hosting",
+    "deployment",
+    "troubleshooting",
+    "---Evidence and testing---",
+    "canary",
+    "chaos-harness",
+    "benchmarks",
+    "multichain-testing",
+    "testing"
+  ]
+}

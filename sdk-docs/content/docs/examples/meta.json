@@ -1,0 +1,9 @@
+{
+  "title": "Examples",
+  "description": "Starter repos and runnable scripts",
+  "icon": "LayoutGrid",
+  "root": true,
+  "pages": [
+    "index"
+  ]
+}

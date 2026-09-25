@@ -1,0 +1,67 @@
+---
+title: Protocol
+description: How Bosphor is built, what it trusts, how it is operated, and the evidence that it works.
+---
+
+This section is for protocol reviewers, auditors, and operators. You do not need
+it to integrate: the [Quickstart](/docs/quickstart) and [Guides](/docs/guides/pay-for-storage)
+cover that path.
+
+## Design
+
+<Cards>
+  <Card title="Architecture" href="/docs/protocol/architecture">
+    The components, the message flow, and how the round-trip fits together.
+  </Card>
+  <Card title="Security model" href="/docs/protocol/security-model">
+    What is trusted, what is verified, and why the relayer cannot forge a proof.
+  </Card>
+  <Card title="LayerZero verification flow" href="/docs/protocol/lz-verification-flow">
+    Both legs, their encodings, and their trust boundaries.
+  </Card>
+  <Card title="Known limitations" href="/docs/protocol/known-limitations">
+    Current constraints and what lifts them.
+  </Card>
+</Cards>
+
+## Operate
+
+<Cards>
+  <Card title="Relayer" href="/docs/protocol/relayer">
+    Configure and run the relayer, its metrics, and its durable queue.
+  </Card>
+  <Card title="Self-hosting" href="/docs/protocol/self-hosting">
+    Your own adapter, Sui package, and relayer on testnet.
+  </Card>
+  <Card title="Deployment" href="/docs/protocol/deployment">
+    Deploy and wire the contracts, then verify the round-trip.
+  </Card>
+  <Card title="Troubleshooting" href="/docs/protocol/troubleshooting">
+    Setup, deployment, relayer, and cross-chain issues.
+  </Card>
+</Cards>
+
+## Evidence and testing
+
+<Cards>
+  <Card title="Canary" href="/docs/protocol/canary">
+    A real round-trip on a fixed interval, the primary health signal.
+  </Card>
+  <Card title="Chaos harness" href="/docs/protocol/chaos-harness">
+    Failure injection against the live testnet, with recovery reports.
+  </Card>
+  <Card title="Benchmarks" href="/docs/protocol/benchmarks">
+    Relayer processing latency and behaviour under load.
+  </Card>
+  <Card title="Multi-chain testing" href="/docs/protocol/multichain-testing">
+    How the EVM and Solana origins are tested end to end.
+  </Card>
+  <Card title="Testing guide" href="/docs/protocol/testing">
+    The four test layers and how to run each one.
+  </Card>
+  <Card title="Glossary" href="/docs/protocol/glossary">
+    The terms used across these docs.
+  </Card>
+</Cards>
+
+Live health of the hosted testnet is on [status.bosphor.xyz](https://status.bosphor.xyz).
