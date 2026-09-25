@@ -105,6 +105,8 @@ const { intentId, blobId, endEpoch } = await client.storePriced(bytes, { epochs:
 ```
 
 Start with the [Quickstart](https://docs.bosphor.xyz/quickstart) (EVM and Solana).
+Or clone a runnable starter: [bosphor-evm-starter](https://github.com/riva-labs/bosphor-evm-starter)
+(Sepolia) and [bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter) (Solana devnet).
 
 Full guides, the Solana path, and the API reference are at
 **[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.

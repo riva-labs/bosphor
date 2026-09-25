@@ -16,6 +16,13 @@ import AgentPrompt from '@site/src/components/AgentPrompt';
 
 <AgentPrompt prompt="Create a new Node.js 22 TypeScript project that stores a file on Walrus through the hosted Bosphor testnet. Install @bosphor/sdk with ethers, @mysten/walrus and @mysten/sui. Build the client with createBosphorClientFromSigner(signer) from @bosphor/sdk/evm (it defaults to the TESTNET preset), print the priced quote with client.priceQuote, then call client.storePriced(bytes, { epochs: 5 }) and print the intentId, blobId, endEpoch, the Sepolia Etherscan link for txHash, and walrusBlobUrl(blobId). Read the Sepolia RPC URL and private key from environment variables." />
 
+:::tip Prefer to start from working code?
+Clone a starter and run it in a few minutes:
+[bosphor-evm-starter](https://github.com/riva-labs/bosphor-evm-starter) (Sepolia) or
+[bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter) (Solana devnet). Each has a price quote, a paid
+store with live progress, and a refund script.
+:::
+
 :::tip Want to run the whole protocol yourself?
 This page is the integrator path against the hosted testnet. To deploy your own
 contracts and relayer, see [Self-hosting](self-hosting.md).
@@ -253,6 +260,8 @@ can be resumed. If no proof ever lands, refund the escrow after the deadline wit
 
 ## Next steps
 
+- Starter repos: [bosphor-evm-starter](https://github.com/riva-labs/bosphor-evm-starter) and
+  [bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter), ready-to-run projects built on this flow.
 - [Payment flow](payment-flow.md): how the escrow, release, and refund work.
 - [SDK documentation](https://sdk.bosphor.xyz): the full API for the EVM and Solana
   clients, including the lower-level steps.
