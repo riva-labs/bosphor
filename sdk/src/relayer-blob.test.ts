@@ -35,7 +35,7 @@ function recordedFetch(): { fetch: FetchLike; seen: Array<{ url: string; headers
   );
   const fetchFn: FetchLike = async (url, init) => {
     seen.push({ url, headers: init.headers });
-    const hit = byLength.get(init.body.length);
+    const hit = byLength.get(init.body!.length);
     return hit ? jsonResponse(201, hit) : jsonResponse(500, "unexpected body");
   };
   return { fetch: fetchFn, seen };

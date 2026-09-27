@@ -122,12 +122,17 @@ export interface EncodedIntent extends BlobEncoding {
 /**
  * A `fetch`-shaped function, injectable so tests never hit the network and so a
  * consumer can supply a custom agent (proxy, retries, auth).
+ *
+ * Every SDK request is a `POST` with a body, except `GET /lz-fee/solana` (the
+ * relayer's live Solana LayerZero fee), which has no body: forward `init.body`
+ * as is (a `fetch` accepts `undefined`) rather than assuming it is set.
  */
 export type FetchLike = (
   url: string,
   init: {
     method: string;
-    body: Uint8Array;
+    /** The request body; `undefined` on a `GET`. */
+    body?: Uint8Array | undefined;
     headers: Record<string, string>;
     /** Optional cancellation signal, forwarded to the underlying `fetch`. */
     signal?: AbortSignal | undefined;
@@ -195,11 +200,11 @@ export function resolveFetch(injected?: FetchLike): FetchLike {
     return (url, init) => {
       const requestInit: RequestInit = {
         method: init.method,
-        body: init.body,
         headers: init.headers,
       };
-      // Only set signal when present: exactOptionalPropertyTypes rejects an
-      // explicit `undefined` for an optional property.
+      // Only set body and signal when present: a GET must not carry a body, and
+      // exactOptionalPropertyTypes rejects an explicit `undefined`.
+      if (init.body) requestInit.body = init.body;
       if (init.signal) requestInit.signal = init.signal;
       return globalThis.fetch(url, requestInit);
     };

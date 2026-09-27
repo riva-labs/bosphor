@@ -73,6 +73,9 @@ export type { QuoteSolanaStoreOptions } from "./quote-store.js";
 // Read-only LayerZero fee quote (simulated endpoint `quote`).
 export { quoteSolanaLzFee, LzSolanaSdkMissingError, FORWARD_MESSAGE_LEN } from "./lz-fee.js";
 export type { QuoteSolanaLzFeeOptions } from "./lz-fee.js";
+// The live LayerZero fee computed by the relayer (no LZ SDK needed; for browsers).
+export { fetchSolanaLzFee } from "./relayer-lz-fee.js";
+export type { FetchSolanaLzFeeOptions } from "./relayer-lz-fee.js";
 
 // LayerZero send accounts + one-call client from a Keypair.
 export {

@@ -178,7 +178,7 @@ test('computeBlob: "relayer" derives the blob id through the client relayer /blo
       ok: true,
       status: 201,
       text: async () =>
-        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body.length }),
+        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body!.length }),
     };
   };
   const client = new BosphorEvmClient({

@@ -49,6 +49,7 @@ test("solana entry exports the preset, quote client, and send-account helpers", 
     "quoteSolanaStore",
     "quoteSolanaLzFee",
     "LzSolanaSdkMissingError",
+    "fetchSolanaLzFee",
   ]) {
     assert.ok(name in solana, `@bosphor/sdk/solana is missing ${name}`);
   }

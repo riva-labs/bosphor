@@ -23,7 +23,7 @@ import {
   type SolanaChain,
 } from "./client.js";
 import { TESTNET, type BosphorNetwork } from "../networks.js";
-import { LzSolanaSdkMissingError, quoteSolanaLzFee, type QuoteSolanaLzFeeOptions } from "./lz-fee.js";
+import { resolveSolanaLzFee } from "./relayer-lz-fee.js";
 import type { SolanaSigner } from "./backend.js";
 
 /** Placeholder in {@link TESTNET_SEND_ACCOUNTS} for the paying wallet. */
@@ -193,12 +193,18 @@ export interface CreateSolanaClientFromKeypairOptions
   /** Use a custom chain backend instead of the default web3.js one. */
   chain?: SolanaChain;
   /**
-   * Quote the live LayerZero fee in `priceQuote()` with `quoteSolanaLzFee`
-   * (read-only simulation). Defaults to true. If the optional peer
-   * `@layerzerolabs/lz-solana-sdk-v2` is not installed, quotes fall back to the
-   * `nativeFee` cap and are flagged `forwardIsUpperBound: true`.
+   * Quote the live LayerZero fee in `priceQuote()`. Defaults to true: simulated
+   * locally with `quoteSolanaLzFee` when the optional peer
+   * `@layerzerolabs/lz-solana-sdk-v2` is installed, else read from the relayer
+   * (`GET /lz-fee/solana`). `false` always prices the `nativeFee` cap, flagged
+   * `forwardIsUpperBound: true`.
    */
   liveLzFee?: boolean;
+  /**
+   * Allow the relayer fallback for the live fee (see `liveLzFee`). Defaults to
+   * true; `false` keeps the local-or-cap behavior of earlier versions.
+   */
+  relayerLzFee?: boolean;
 }
 
 /**
@@ -256,20 +262,21 @@ export async function createBosphorSolanaClientFromKeypair(
   if (opts.quoteLzFee !== undefined) {
     clientOpts.quoteLzFee = opts.quoteLzFee;
   } else if (opts.liveLzFee !== false) {
-    const connection = opts.connection;
-    clientOpts.quoteLzFee = async () => {
-      try {
-        const feeOpts: QuoteSolanaLzFeeOptions = { connection, network };
-        if (opts.web3) feeOpts.web3 = opts.web3;
-        if (opts.lzSdk) feeOpts.lzSdk = opts.lzSdk;
-        return await quoteSolanaLzFee(feeOpts);
-      } catch (err) {
-        // Missing optional peer: fall back to the flagged cap. Any other failure
-        // (RPC, program) is surfaced, never replaced by a made-up fee.
-        if (err instanceof LzSolanaSdkMissingError) return null;
-        throw err;
-      }
-    };
+    const relayerUrl = clientOpts.relayerUrl;
+    // Local LZ SDK first, then the relayer's live fee, then (only when the relayer
+    // has no such endpoint) the flagged cap. Any other failure is surfaced, never
+    // replaced by a made up fee.
+    clientOpts.quoteLzFee = () =>
+      resolveSolanaLzFee({
+        network,
+        connection: opts.connection,
+        lzSdk: opts.lzSdk,
+        web3: opts.web3,
+        relayer:
+          opts.relayerLzFee === false
+            ? false
+            : { url: relayerUrl, fetch: opts.fetch, appId: opts.appId },
+      });
   }
   if (opts.defaultEpochs !== undefined) clientOpts.defaultEpochs = opts.defaultEpochs;
   if (opts.deadlineSeconds !== undefined) clientOpts.deadlineSeconds = opts.deadlineSeconds;
