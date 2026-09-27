@@ -4,28 +4,27 @@ description: Serve live EVM and Solana storage prices from a server route with q
 ---
 
 Show a price on a pricing page, in a checkout summary, or before a user connects
-a wallet. `quoteEvmStore()` and `quoteSolanaStore()` need only a read-only RPC
-connection: they read the live LayerZero fee on-chain and ask the relayer for the
-storage price. The result is the same `PricedQuote` that `client.priceQuote()`
+a wallet. `quoteEvmStore()` needs only a read-only RPC provider (it reads the
+live LayerZero fee from the adapter), and `quoteSolanaStore()` needs nothing at
+all: the relayer simulates the live Solana LayerZero fee for it. Both ask the
+relayer for the storage price. The result is the same `PricedQuote` that `client.priceQuote()`
 returns, so what you show matches what the user pays.
 
 ## Install
 
 ```bash
-npm install @bosphor/sdk ethers @solana/web3.js
+npm install @bosphor/sdk ethers
 ```
 
 ## The route
 
 ```ts title="app/api/quote/route.ts"
 import { JsonRpcProvider } from "ethers";
-import { Connection } from "@solana/web3.js";
-import { TESTNET, quoteEvmStore, type PricedQuote } from "@bosphor/sdk/evm";
+import { RelayerRequestError, TESTNET, quoteEvmStore, type PricedQuote } from "@bosphor/sdk/evm";
 import { quoteSolanaStore } from "@bosphor/sdk/solana";
 
-// Created once and reused across requests. Bring your own RPC URLs in production.
+// Created once and reused across requests. Bring your own RPC URL in production.
 const provider = new JsonRpcProvider(process.env.SEPOLIA_RPC_URL ?? TESTNET.evm.rpcUrl);
-const connection = new Connection(process.env.SOLANA_RPC_URL ?? TESTNET.solana.rpcUrl, "confirmed");
 
 /** bigint amounts do not survive JSON.stringify: send them as decimal strings. */
 function toJson(quote: PricedQuote) {
@@ -53,10 +52,23 @@ export async function GET(request: Request): Promise<Response> {
     return Response.json({ error: "size must be a positive integer" }, { status: 400 });
   }
 
-  const quote =
-    chain === "solana"
-      ? await quoteSolanaStore({ connection, sizeBytes, epochs, appId: "my-dapp" })
-      : await quoteEvmStore({ provider, sizeBytes, epochs, appId: "my-dapp" });
+  let quote: PricedQuote;
+  try {
+    quote =
+      chain === "solana"
+        ? await quoteSolanaStore({ sizeBytes, epochs, appId: "my-dapp" })
+        : await quoteEvmStore({ provider, sizeBytes, epochs, appId: "my-dapp" });
+  } catch (err) {
+    // Rate limited or busy relayer: pass its Retry-After on to your client.
+    if (err instanceof RelayerRequestError && err.retryable) {
+      const seconds = Math.ceil((err.retryAfterMs ?? 5_000) / 1000);
+      return Response.json(
+        { error: "the relayer is busy, try again shortly" },
+        { status: 503, headers: { "retry-after": String(seconds) } },
+      );
+    }
+    throw err;
+  }
 
   return Response.json(toJson(quote), {
     // Prices move with gas and token prices: cache briefly, not for long.
@@ -85,9 +97,11 @@ Call it with `GET /api/quote?chain=evm&size=1048576`. The response looks like:
 - **Amounts are strings.** Amounts are in the smallest unit (wei or lamports).
   Format them in the client with `formatEther` or by dividing by
   `LAMPORTS_PER_SOL`.
-- **Solana fee cap.** Without the optional `@layerzerolabs/lz-solana-sdk-v2`
-  package, the Solana LayerZero fee falls back to a cap and
-  `forwardIsUpperBound` is `true`. Show that total as "up to".
+- **Exact Solana fee.** From `@bosphor/sdk` 0.14.0 the Solana LayerZero fee
+  comes from the relayer (`GET /lz-fee/solana`) when the optional
+  `@layerzerolabs/lz-solana-sdk-v2` is not installed, so `forwardIsUpperBound`
+  is `false`. It is `true` only against a relayer without that endpoint; show
+  that total as "up to".
 - **Rate limits.** The relayer limits `/quote` per IP. Cache briefly on your
   server rather than quoting on every keystroke. See
   [Rate limits](/docs/api#rate-limits).
