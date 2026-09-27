@@ -103,6 +103,8 @@
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.2",
+    "@mysten/sui": "^2.33.1",
+    "@mysten/walrus": "^1.2.31",
     "@types/node": "^26.1.2",
     "publint": "^0.3.14",
     "tsx": "^4.23.1",

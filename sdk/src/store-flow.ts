@@ -63,6 +63,8 @@ export interface EncodeOptions {
   epochs?: number;
   /** Absolute deadline as unix seconds. Overrides the derived default when set. */
   deadline?: bigint;
+  /** Cancel blob-id derivation (matters for the networked `"relayer"` encoder). */
+  signal?: AbortSignal | undefined;
 }
 
 /** Polling controls for `awaitProof()`, and for the proof wait inside `store()`. */
@@ -225,7 +227,10 @@ export async function encodeIntent(
 ): Promise<EncodedIntent> {
   if (data.length === 0) throw new Error("cannot store empty data");
 
-  const { blobId, size, encodingType } = await computeBlob(data);
+  const { blobId, size, encodingType } = await computeBlob(
+    data,
+    opts.signal ? { signal: opts.signal } : undefined,
+  );
   if (size !== data.length) {
     throw new Error(`computeBlob reported size ${size} but data is ${data.length} bytes`);
   }

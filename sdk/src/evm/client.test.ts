@@ -168,6 +168,33 @@ test("store() surfaces a relayer non-2xx as a RelayerUploadError with the reason
   );
 });
 
+test('computeBlob: "relayer" derives the blob id through the client relayer /blob/encode', async () => {
+  const { adapter } = makeFakeAdapter();
+  const urls: string[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    urls.push(url);
+    assert.equal(init.headers["X-Bosphor-App"], "my-dapp");
+    return {
+      ok: true,
+      status: 201,
+      text: async () =>
+        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body.length }),
+    };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: "relayer",
+    fetch,
+    appId: "my-dapp",
+  });
+  const encoded = await client.encode(new TextEncoder().encode("hello"));
+  assert.equal(urls[0], "https://relayer.test/blob/encode");
+  assert.equal(encoded.blobId, "0x1e22bae5f11b1257cefe82ebdb3c3c130e237d733702604105b5477453dd2154");
+  assert.equal(encoded.size, 5);
+});
+
 test("store() retries the relayer's watch-lag 404 on upload, then completes", async () => {
   const { adapter } = makeFakeAdapter();
   const statuses = [404, 404, 200];
