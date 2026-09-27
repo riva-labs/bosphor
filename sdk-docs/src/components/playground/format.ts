@@ -21,6 +21,11 @@ export const CHAINS: Record<Chain, { label: string; network: string; symbol: str
   solana: { label: 'Solana', network: 'Solana devnet', symbol: 'SOL', decimals: 9 },
 };
 
+/** Solscan link for a Solana devnet transaction or account. */
+export function solscanUrl(kind: 'tx' | 'account', id: string): string {
+  return `https://solscan.io/${kind}/${id}?cluster=devnet`;
+}
+
 export const SIZE_PRESETS: { label: string; bytes: number }[] = [
   { label: '1 KB', bytes: 1024 },
   { label: '100 KB', bytes: 100 * 1024 },
