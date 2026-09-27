@@ -8,14 +8,15 @@ import { Playground } from '@/components/playground';
 
 Try Bosphor without writing code. Price any file on the hosted testnet with no wallet,
 see the SDK call that does the same thing, then optionally connect a Sepolia wallet
-and run a real store: pay once, watch LayerZero carry the intent to Sui, the relayer
+or Phantom on Solana devnet and run a real store: pay once, watch LayerZero carry the intent to Sui, the relayer
 store the file on Walrus, and the proof come back.
 
 <Playground />
 
 <Callout type="warn" title="Testnet only">
 Everything here runs against the hosted testnet (Ethereum Sepolia, Solana devnet,
-Sui testnet, Walrus testnet). Prices use live token rates, but you pay in test ETH.
+Sui testnet, Walrus testnet). Prices use live token rates, but you pay in test ETH
+or devnet SOL.
 Requests from this page are attributed to the app id `bosphor-playground`.
 </Callout>
 
@@ -29,10 +30,20 @@ The quote is one amount in the origin chain's native token. It has two parts:
   the deadline if it never does.
 - **LayerZero forward fee**: paid to LayerZero at submit to carry the intent to Sui.
 
-On Solana, this page prices the forward fee at the preset cap, because the live fee
-needs the optional `@layerzerolabs/lz-solana-sdk-v2` package. The amount actually
-charged is lower. See [What the quote contains](/docs/guides/pay-for-storage#what-the-quote-contains) for the full
+Both chains show the exact live forward fee. On Solana the relayer simulates the
+LayerZero quote for the page, so no LayerZero SDK is loaded in your browser. See
+[What the quote contains](/docs/guides/pay-for-storage#what-the-quote-contains) for the full
 pricing model.
+
+## Storing from Solana
+
+The Solana store uses Phantom (`window.phantom.solana`) and
+`createBosphorSolanaClientFromWallet`: the SDK builds each transaction, Phantom asks
+you to approve it, and the SDK sends it to devnet. Turn on Testnet Mode in Phantom
+(Settings, Developer Settings) and pick Solana Devnet so the wallet shows your
+devnet balance. Get devnet SOL from the [Solana faucet](https://faucet.solana.com).
+Besides the quote, a store needs about 0.003 SOL of account rent and the
+transaction fee.
 
 ## Keep going
 
