@@ -79,13 +79,21 @@ const result = await client.store(data);
 
 // Escape hatch: upload the bytes for an intent you submitted yourself.
 await client.upload(intentId, data);`,
-  encodeBlob: `import { defaultComputeBlob } from '@bosphor/sdk/evm';
+  encodeBlob: `import { TESTNET, relayerComputeBlob } from '@bosphor/sdk';
 
-// The SDK derives the same blob id locally (needs @mysten/walrus),
-// so it does not call POST /blob/encode. client.encode(data) uses it.
-// blobId is 0x hex here, ready for submitIntent; the relayer returns the
-// same id base64url-encoded.
-const { blobId, size } = await defaultComputeBlob(data);`,
+// POST /blob/encode, no Walrus WASM (SDK 0.14.0+). Clients take the
+// shortcut computeBlob: 'relayer'. blobId is 0x hex here, ready for
+// submitIntent; the relayer returns the same id base64url-encoded.
+const computeBlob = relayerComputeBlob(TESTNET.relayerUrl, { appId: 'my-dapp' });
+const { blobId, size } = await computeBlob(data);`,
+  getSolanaLzFee: `import { TESTNET, fetchSolanaLzFee, quoteSolanaStore } from '@bosphor/sdk/solana';
+
+// GET /lz-fee/solana (SDK 0.14.0+): the live fee in lamports, as a bigint.
+const lamports = await fetchSolanaLzFee(TESTNET.relayerUrl);
+
+// quoteSolanaStore() calls it for you when the LayerZero Solana SDK
+// is not installed, so a browser quote is exact.
+const quote = await quoteSolanaStore({ sizeBytes: 1024 });`,
 };
 
 type Notice = { type: 'info' | 'warn'; title: string; body: ReactNode };
@@ -100,6 +108,11 @@ const notices: Record<string, Notice> = {
     type: 'info',
     title: 'Try it works out of the box',
     body: 'The body is prefilled with an example. Pick another example above the code samples, or change the size and epochs, and send it to get a live testnet quote.',
+  },
+  getSolanaLzFee: {
+    type: 'info',
+    title: 'Needs relayer 0.17.0 or later',
+    body: 'Send the request to get the live Solana devnet to Sui testnet LayerZero fee from the hosted testnet relayer; a relayer that predates the endpoint answers 404. One simulation is reused for 30 seconds.',
   },
   ingestBlob: {
     type: 'warn',
