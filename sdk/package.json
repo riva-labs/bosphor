@@ -105,6 +105,7 @@
     "@arethetypeswrong/cli": "^0.18.2",
     "@mysten/sui": "^2.33.1",
     "@mysten/walrus": "^1.2.31",
+    "@solana/wallet-adapter-base": "^0.9.28",
     "@solana/web3.js": "^1.99.0",
     "@types/node": "^26.1.2",
     "esbuild": "^0.28.2",

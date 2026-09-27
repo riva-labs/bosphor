@@ -74,10 +74,12 @@ export interface SolanaWalletSigner {
   /**
    * Sign a legacy `Transaction` and resolve with the signed transaction. Typed
    * loosely so any wallet's generic `signTransaction<T>` fits without a cast.
+   * `undefined` is accepted because `useWallet()` exposes it that way when the
+   * selected wallet cannot sign; the SDK then throws a clear error.
    */
-  signTransaction(transaction: never): Promise<unknown>;
+  signTransaction: ((transaction: never) => Promise<unknown>) | undefined;
   /** Optional batch signing. Accepted for wallet-adapter parity; not needed today. */
-  signAllTransactions?(transactions: never): Promise<unknown>;
+  signAllTransactions?: ((transactions: never) => Promise<unknown>) | undefined;
 }
 
 /** Who signs and pays Solana transactions: a {@link SolanaKeypairLike} or a {@link SolanaWalletSigner}. */
@@ -161,16 +163,23 @@ export async function createDefaultSolanaChain(
   opts: DefaultSolanaChainOptions,
 ): Promise<SolanaChain> {
   const payer = opts.wallet;
+  if (!payer?.publicKey) {
+    throw new Error("the Solana wallet is not connected (publicKey is null); connect it first");
+  }
   const walletSigner = isWalletSigner(payer);
   if (!walletSigner && !isKeypair(payer)) {
+    if ("signTransaction" in payer) {
+      throw new Error(
+        "the connected Solana wallet cannot sign transactions (signTransaction is " +
+          "undefined); pick a wallet that supports signTransaction",
+      );
+    }
     throw new Error(
       "createDefaultSolanaChain needs a wallet: a Keypair, or a wallet signer with " +
         "{ publicKey, signTransaction } (Phantom, @solana/wallet-adapter)",
     );
   }
-  if (!payer.publicKey) {
-    throw new Error("the Solana wallet is not connected (publicKey is null); connect it first");
-  }
+  const publicKey = payer.publicKey;
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
   let web3: any = opts.web3;
@@ -200,7 +209,7 @@ export async function createDefaultSolanaChain(
   const connection: any = opts.connection;
   // Normalized to this web3.js copy's PublicKey: a wallet may hand over a key
   // built by another copy of the library, and mixing classes breaks encoding.
-  const payerKey: any = new PublicKey(payer.publicKey.toBase58());
+  const payerKey: any = new PublicKey(publicKey.toBase58());
   const enc = new TextEncoder();
 
   /**
@@ -216,7 +225,7 @@ export async function createDefaultSolanaChain(
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
     tx.feePayer = payerKey;
     tx.recentBlockhash = blockhash;
-    const signed: any = await (payer as SolanaWalletSigner).signTransaction(tx as never);
+    const signed: any = await (payer as SolanaWalletSigner).signTransaction!(tx as never);
     const signature: string = await connection.sendRawTransaction(signed.serialize());
     const result = await connection.confirmTransaction(
       { signature, blockhash, lastValidBlockHeight },
