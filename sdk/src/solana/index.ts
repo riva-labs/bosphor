@@ -58,7 +58,13 @@ export {
 export type { DecodedIntentState } from "./proof.js";
 
 export { createDefaultSolanaChain, BOSPHOR_PROGRAM_ID } from "./backend.js";
-export type { DefaultSolanaChainOptions, SolanaAccountMetaInput } from "./backend.js";
+export type {
+  DefaultSolanaChainOptions,
+  SolanaAccountMetaInput,
+  SolanaSigner,
+  SolanaWalletSigner,
+  SolanaKeypairLike,
+} from "./backend.js";
 
 // Wallet-free store quote.
 export { quoteSolanaStore } from "./quote-store.js";
@@ -75,6 +81,7 @@ export {
   testnetEndpointAccounts,
   resolveEndpointAccounts,
   createBosphorSolanaClientFromKeypair,
+  createBosphorSolanaClientFromWallet,
 } from "./endpoint-accounts.js";
 export type {
   PublicKeyLike,
