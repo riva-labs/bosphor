@@ -5,6 +5,8 @@ import { PriceOracle } from './price-oracle';
 import { PriceOracleConfig, SanityBounds } from './price-oracle.types';
 import { QuoteService } from './quote.service';
 import { QuoteController } from './quote.controller';
+import { LzFeeController } from './lz-fee.controller';
+import { SolanaLzFeeService } from './solana-lz-fee.service';
 import { PRICE_ORACLE } from './pricing.tokens';
 
 // Re-exported for back-compat; consumers should import from './pricing.tokens'
@@ -42,9 +44,10 @@ const DEFAULT_SANITY_BOUNDS: SanityBounds = {
  */
 @Module({
   imports: [ConfigModule, WalrusModule],
-  controllers: [QuoteController],
+  controllers: [QuoteController, LzFeeController],
   providers: [
     QuoteService,
+    SolanaLzFeeService,
     {
       provide: PRICE_ORACLE,
       inject: [ConfigService],

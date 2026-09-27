@@ -26,7 +26,12 @@ export type { Commitment } from "./commitment-codec.js";
 export type { BlobEncoding, ComputeBlob, Hex, StoreResult } from "./types.js";
 
 // Typed error hierarchy: catch `BosphorError` once, narrow on the subclass.
-export { BosphorError, ProofTimeoutError, RelayerUploadError } from "./errors.js";
+export {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerUploadError,
+  RelayerRequestError,
+} from "./errors.js";
 
 // Shared store-flow vocabulary (identical on every chain subpath).
 export type {
@@ -34,11 +39,18 @@ export type {
   AwaitProofOptions,
   EncodedIntent,
   FetchLike,
+  FetchLikeResponse,
+  UploadRetryOptions,
   StoreProgress,
   ProgressOptions,
 } from "./store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
-export { APP_ID_HEADER } from "./store-flow.js";
+export { APP_ID_HEADER, DEFAULT_UPLOAD_RETRY } from "./store-flow.js";
+export { parseRetryAfter } from "./relayer-http.js";
+// Blob-id derivation through the relayer (no Walrus WASM; for browsers).
+export { relayerComputeBlob, MAX_RELAYER_ENCODE_BYTES } from "./relayer-blob.js";
+export type { RelayerComputeBlobOptions, ComputeBlobOption } from "./relayer-blob.js";
+export type { RetryPolicy } from "./relayer-http.js";
 
 // Off-chain priced quoting via the relayer (the single pricing source of truth).
 export { fetchQuote } from "./quote.js";

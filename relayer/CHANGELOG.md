@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.0 (2026-09-27)
+
+### Features
+
+- feat(relayer): add GET /lz-fee/solana for browser Solana quotes
+- feat(relayer): quote the live Solana LayerZero fee server-side
+
+### Bug Fixes
+
+- fix(relayer): answer POST /quote with 200 instead of 201
+- fix(relayer): rate limit GET /lz-fee like the POST integrator routes
+- fix(relayer): remember a failed Solana fee simulation for Retry-After
+
 ## 0.16.0 (2026-09-25)
 
 ### Features

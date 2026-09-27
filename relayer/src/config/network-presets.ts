@@ -24,6 +24,13 @@ export const TESTNET_PRESET = {
   EVM_CHAIN_ID: 11155111,
   /** Solana devnet LayerZero endpoint id. */
   SOLANA_SRC_EID: 40168,
+  /** Sui testnet LayerZero endpoint id. */
+  SUI_EID: 40378,
+  /**
+   * The Sui OApp peer the testnet Solana adapter sends to (the original Bosphor
+   * Sui package id, not a later upgrade id), for the live LayerZero fee quote.
+   */
+  SOLANA_LZ_SUI_PEER: '0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5',
   SUI_NETWORK: 'testnet',
   SUI_GRPC_URL: 'https://sui-testnet.mystenlabs.com',
   /** Sui -> origin return-leg LayerZero fee estimate, calibrated on testnet. */
@@ -38,6 +45,8 @@ export const TESTNET_PRESET = {
 export const MAINNET_PRESET = {
   /** Solana mainnet LayerZero endpoint id (canonical). */
   SOLANA_SRC_EID: 30168,
+  /** Sui mainnet LayerZero endpoint id (canonical). */
+  SUI_EID: 30378,
   SUI_NETWORK: 'mainnet',
   /** The never-lose-money gate is on by default with real funds at stake. */
   BREAK_EVEN_GUARD_ENABLED: 'true',

@@ -11,6 +11,7 @@
 import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
 import type { PricedQuote } from "./quote.js";
 import { RelayerUploadError } from "./errors.js";
+import { readRetryAfterMs, sleep, withRelayerRetry, type RetryPolicy } from "./relayer-http.js";
 
 /** Default committed storage duration, in Walrus epochs. */
 export const DEFAULT_EPOCHS = 5;
@@ -62,6 +63,8 @@ export interface EncodeOptions {
   epochs?: number;
   /** Absolute deadline as unix seconds. Overrides the derived default when set. */
   deadline?: bigint;
+  /** Cancel blob-id derivation (matters for the networked `"relayer"` encoder). */
+  signal?: AbortSignal | undefined;
 }
 
 /** Polling controls for `awaitProof()`, and for the proof wait inside `store()`. */
@@ -119,23 +122,35 @@ export interface EncodedIntent extends BlobEncoding {
 /**
  * A `fetch`-shaped function, injectable so tests never hit the network and so a
  * consumer can supply a custom agent (proxy, retries, auth).
+ *
+ * Every SDK request is a `POST` with a body, except `GET /lz-fee/solana` (the
+ * relayer's live Solana LayerZero fee), which has no body: forward `init.body`
+ * as is (a `fetch` accepts `undefined`) rather than assuming it is set.
  */
 export type FetchLike = (
   url: string,
   init: {
     method: string;
-    body: Uint8Array;
+    /** The request body; `undefined` on a `GET`. */
+    body?: Uint8Array | undefined;
     headers: Record<string, string>;
     /** Optional cancellation signal, forwarded to the underlying `fetch`. */
     signal?: AbortSignal | undefined;
   },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+) => Promise<FetchLikeResponse>;
 
 /**
- * Sleep for `ms`, rejecting early with the signal's reason if it aborts mid-wait.
- * Used by the poll loops so a cancellation is honored without waiting out the
- * current interval.
+ * The response surface the SDK reads. `headers` is optional so a minimal custom
+ * fetch keeps working; when present, the SDK reads `Retry-After` from it (see
+ * `BosphorError.retryAfterMs`). A standard `fetch` `Response` satisfies it.
  */
+export interface FetchLikeResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  headers?: { get(name: string): string | null } | undefined;
+}
+
 /**
  * Whether an RPC/network failure is worth retrying: connection resets and
  * timeouts, rate limiting, and 5xx responses. Public RPCs drop connections
@@ -171,22 +186,9 @@ const TRANSIENT_CODES = new Set([
 ]);
 
 const TRANSIENT_MESSAGE =
-  /socket (hang up|disconnected)|network socket|fetch failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
+  /socket (hang up|disconnected)|network socket|fetch failed|failed to fetch|networkerror|load failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
 
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason);
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal!.reason);
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
+export { sleep };
 
 /**
  * Resolve the fetch implementation: the injected one if given, else the global
@@ -198,11 +200,11 @@ export function resolveFetch(injected?: FetchLike): FetchLike {
     return (url, init) => {
       const requestInit: RequestInit = {
         method: init.method,
-        body: init.body,
         headers: init.headers,
       };
-      // Only set signal when present: exactOptionalPropertyTypes rejects an
-      // explicit `undefined` for an optional property.
+      // Only set body and signal when present: a GET must not carry a body, and
+      // exactOptionalPropertyTypes rejects an explicit `undefined`.
+      if (init.body) requestInit.body = init.body;
       if (init.signal) requestInit.signal = init.signal;
       return globalThis.fetch(url, requestInit);
     };
@@ -230,7 +232,10 @@ export async function encodeIntent(
 ): Promise<EncodedIntent> {
   if (data.length === 0) throw new Error("cannot store empty data");
 
-  const { blobId, size, encodingType } = await computeBlob(data);
+  const { blobId, size, encodingType } = await computeBlob(
+    data,
+    opts.signal ? { signal: opts.signal } : undefined,
+  );
   if (size !== data.length) {
     throw new Error(`computeBlob reported size ${size} but data is ${data.length} bytes`);
   }
@@ -243,34 +248,80 @@ export async function encodeIntent(
 }
 
 /**
+ * Default retry bounds of the blob upload. Right after a submit the relayer may
+ * answer 404 "no pending intent" for a few seconds (it has not observed the
+ * intent yet), and a busy relayer answers 429 or 503 with `Retry-After`. Two
+ * minutes covers the watch lag of both origin chains with room to spare.
+ */
+export const DEFAULT_UPLOAD_RETRY: Readonly<Required<RetryPolicy>> = {
+  maxAttempts: 12,
+  maxElapsedMs: 120_000,
+  baseDelayMs: 1_000,
+  maxDelayMs: 10_000,
+};
+
+/**
+ * Retry bounds for the blob upload, or `false` to make exactly one attempt.
+ * Unset fields take {@link DEFAULT_UPLOAD_RETRY}.
+ */
+export type UploadRetryOptions = RetryPolicy | false;
+
+/** Options of {@link uploadBlob}. */
+export interface UploadBlobOptions {
+  /** Cancel the upload, including the wait between attempts. */
+  signal?: AbortSignal | undefined;
+  /** Integrator app id, sent as `X-Bosphor-App`. */
+  appId?: string | undefined;
+  /** Retry bounds, or `false` for a single attempt. */
+  retry?: UploadRetryOptions | undefined;
+}
+
+/**
  * Upload the raw blob bytes out-of-band to the relayer:
  * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body, plus the
- * `X-Bosphor-App` header when an app id is configured. Throws a
- * {@link RelayerUploadError} carrying the relayer's reason on any non-2xx. Shared
- * by every chain client.
+ * `X-Bosphor-App` header when an app id is configured. Shared by every chain
+ * client.
+ *
+ * Transient failures are retried with bounded exponential backoff, honoring
+ * `Retry-After`: the watch-lag 404 ("no pending intent"), 408, 429, 5xx and
+ * network errors. Once the bounds run out, or on a terminal rejection (409, 410,
+ * 413, 422), it throws a {@link RelayerUploadError} carrying the relayer's reason.
+ * A 409 to a retry counts as success: an earlier attempt was ingested.
  */
 export async function uploadBlob(
   fetchFn: FetchLike,
   relayerUrl: string,
   intentId: Hex,
   data: Uint8Array,
-  signal?: AbortSignal,
-  appId?: string,
+  opts: UploadBlobOptions = {},
 ): Promise<void> {
-  const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
-    method: "POST",
-    body: data,
-    headers: relayerHeaders("application/octet-stream", appId),
-    signal,
-  });
-
-  if (!res.ok) {
+  const attempt = async (n: number): Promise<void> => {
+    const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
+      method: "POST",
+      body: data,
+      headers: relayerHeaders("application/octet-stream", opts.appId),
+      signal: opts.signal,
+    });
+    if (res.ok) return;
+    // A 409 ("already executed") on a retry means an earlier attempt reached the
+    // relayer and was ingested (only its answer was lost), and the intent moved
+    // on: the upload succeeded. On the first attempt it stays a real rejection.
+    if (res.status === 409 && n >= 2) return;
     let reason: string;
     try {
       reason = await res.text();
     } catch {
       reason = "(no response body)";
     }
-    throw new RelayerUploadError(intentId, res.status, reason);
-  }
+    throw new RelayerUploadError(intentId, res.status, reason, readRetryAfterMs(res));
+  };
+
+  if (opts.retry === false) return attempt(1);
+  await withRelayerRetry(attempt, {
+    ...DEFAULT_UPLOAD_RETRY,
+    ...(opts.retry ?? {}),
+    signal: opts.signal,
+    shouldRetry: (err) =>
+      err instanceof RelayerUploadError ? err.retryable : isTransientRpcError(err),
+  });
 }

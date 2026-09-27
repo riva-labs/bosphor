@@ -168,6 +168,55 @@ test("store() surfaces a relayer non-2xx as a RelayerUploadError with the reason
   );
 });
 
+test('computeBlob: "relayer" derives the blob id through the client relayer /blob/encode', async () => {
+  const { adapter } = makeFakeAdapter();
+  const urls: string[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    urls.push(url);
+    assert.equal(init.headers["X-Bosphor-App"], "my-dapp");
+    return {
+      ok: true,
+      status: 201,
+      text: async () =>
+        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body!.length }),
+    };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: "relayer",
+    fetch,
+    appId: "my-dapp",
+  });
+  const encoded = await client.encode(new TextEncoder().encode("hello"));
+  assert.equal(urls[0], "https://relayer.test/blob/encode");
+  assert.equal(encoded.blobId, "0x1e22bae5f11b1257cefe82ebdb3c3c130e237d733702604105b5477453dd2154");
+  assert.equal(encoded.size, 5);
+});
+
+test("store() retries the relayer's watch-lag 404 on upload, then completes", async () => {
+  const { adapter } = makeFakeAdapter();
+  const statuses = [404, 404, 200];
+  const seen: number[] = [];
+  const fetch: FetchLike = async () => {
+    const status = statuses.shift() ?? 200;
+    seen.push(status);
+    return { ok: status === 200, status, text: async () => (status === 404 ? "no pending intent" : "{}") };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    uploadRetry: { baseDelayMs: 1, maxDelayMs: 1 },
+  });
+  const result = await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+  assert.equal(result.intentId, INTENT_ID);
+  assert.deepEqual(seen, [404, 404, 200]);
+});
+
 test("awaitProof throws a typed ProofTimeoutError when the intent never executes", async () => {
   const { adapter } = makeFakeAdapter({ neverExecutes: true });
   const { fetch } = makeFetch(200);

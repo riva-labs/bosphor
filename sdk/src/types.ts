@@ -23,11 +23,16 @@ export interface BlobEncoding {
 }
 
 /**
- * Injectable blob-id computation seam. The real implementation wraps
- * `@mysten/walrus` `encodeBlob`; tests inject a deterministic stub so unit tests
- * never load the Walrus SDK or contact a Sui RPC.
+ * Injectable blob-id computation seam. The default implementation wraps
+ * `@mysten/walrus` `encodeBlob` (local WASM); `relayerComputeBlob` asks the
+ * relayer's `POST /blob/encode` instead (no WASM, for browsers). Tests inject a
+ * deterministic stub. The optional `signal` cancels a networked implementation;
+ * a local one may ignore it.
  */
-export type ComputeBlob = (data: Uint8Array) => Promise<BlobEncoding>;
+export type ComputeBlob = (
+  data: Uint8Array,
+  opts?: { signal?: AbortSignal | undefined },
+) => Promise<BlobEncoding>;
 
 /**
  * The outcome of a completed `store()`: the intent id, the committed blob id, and
@@ -41,6 +46,9 @@ export interface StoreResult {
   blobId: Hex;
   /** Walrus epoch at which the stored blob expires. */
   endEpoch: bigint;
-  /** Origin-chain transaction hash (EVM) or signature (Solana) of the submit. */
-  txHash?: string;
+  /**
+   * Origin-chain transaction hash (EVM) or signature (Solana) of the submit.
+   * Always set by `store()` and `storePriced()` on both chains.
+   */
+  txHash: string;
 }

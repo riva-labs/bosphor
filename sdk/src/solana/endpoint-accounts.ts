@@ -23,7 +23,8 @@ import {
   type SolanaChain,
 } from "./client.js";
 import { TESTNET, type BosphorNetwork } from "../networks.js";
-import { LzSolanaSdkMissingError, quoteSolanaLzFee } from "./lz-fee.js";
+import { resolveSolanaLzFee } from "./relayer-lz-fee.js";
+import type { SolanaSigner } from "./backend.js";
 
 /** Placeholder in {@link TESTNET_SEND_ACCOUNTS} for the paying wallet. */
 export const PAYER_PLACEHOLDER = "__PAYER__";
@@ -122,8 +123,8 @@ export async function resolveEndpointAccounts(
   try {
     const lzSpec = "@layerzerolabs/lz-solana-sdk-v2";
     const web3Spec = "@solana/web3.js";
-    lz ??= await import(lzSpec);
-    web3 ??= await import(web3Spec);
+    lz ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ lzSpec);
+    web3 ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ web3Spec);
   } catch (err) {
     throw new Error(
       "resolveEndpointAccounts requires the optional peers '@layerzerolabs/lz-solana-sdk-v2' " +
@@ -164,8 +165,20 @@ export interface CreateSolanaClientFromKeypairOptions
   extends Partial<Omit<BosphorSolanaClientOptions, "chain" | "network">> {
   /** A `@solana/web3.js` `Connection` to the network's cluster. */
   connection: object;
-  /** A funded `@solana/web3.js` `Keypair` (payer and submitter). */
-  wallet: { publicKey: PublicKeyLike };
+  /**
+   * The payer and submitter: a funded `@solana/web3.js` `Keypair`, or a browser
+   * wallet signer (`{ publicKey, signTransaction }`, as Phantom and
+   * `@solana/wallet-adapter` expose). Only its `publicKey` is read when a custom
+   * `chain` is passed.
+   */
+  wallet: SolanaSigner | { publicKey: PublicKeyLike };
+  /**
+   * Inject the `@solana/web3.js` module (needed in browser bundles, where the
+   * SDK's lazy import of the optional peer cannot be resolved).
+   */
+  web3?: object;
+  /** Inject `@layerzerolabs/lz-solana-sdk-v2` for the local live fee quote. */
+  lzSdk?: object;
   /** Network preset; defaults to {@link TESTNET}. */
   network?: BosphorNetwork;
   /**
@@ -180,12 +193,18 @@ export interface CreateSolanaClientFromKeypairOptions
   /** Use a custom chain backend instead of the default web3.js one. */
   chain?: SolanaChain;
   /**
-   * Quote the live LayerZero fee in `priceQuote()` with `quoteSolanaLzFee`
-   * (read-only simulation). Defaults to true. If the optional peer
-   * `@layerzerolabs/lz-solana-sdk-v2` is not installed, quotes fall back to the
-   * `nativeFee` cap and are flagged `forwardIsUpperBound: true`.
+   * Quote the live LayerZero fee in `priceQuote()`. Defaults to true: simulated
+   * locally with `quoteSolanaLzFee` when the optional peer
+   * `@layerzerolabs/lz-solana-sdk-v2` is installed, else read from the relayer
+   * (`GET /lz-fee/solana`). `false` always prices the `nativeFee` cap, flagged
+   * `forwardIsUpperBound: true`.
    */
   liveLzFee?: boolean;
+  /**
+   * Allow the relayer fallback for the live fee (see `liveLzFee`). Defaults to
+   * true; `false` keeps the local-or-cap behavior of earlier versions.
+   */
+  relayerLzFee?: boolean;
 }
 
 /**
@@ -208,15 +227,19 @@ export async function createBosphorSolanaClientFromKeypair(
   opts: CreateSolanaClientFromKeypairOptions,
 ): Promise<BosphorSolanaClient> {
   const network = opts.network ?? TESTNET;
-  if (!opts.wallet?.publicKey) {
-    throw new Error("createBosphorSolanaClientFromKeypair requires a wallet Keypair");
+  if (!opts.wallet) {
+    throw new Error("a Solana client needs a wallet: a Keypair or a wallet signer");
+  }
+  if (!opts.wallet.publicKey) {
+    throw new Error("the Solana wallet is not connected (publicKey is null); connect it first");
   }
 
   let chain = opts.chain;
   if (!chain) {
     const chainOpts: Parameters<typeof createDefaultSolanaChain>[0] = {
       connection: opts.connection,
-      wallet: opts.wallet,
+      // Validated by createDefaultSolanaChain: a Keypair or a wallet signer.
+      wallet: opts.wallet as SolanaSigner,
       programId: network.solana.programId,
       endpointAccounts: opts.endpointAccounts ?? testnetEndpointAccounts(opts.wallet.publicKey),
       computeUnitLimit: opts.computeUnitLimit ?? network.solana.computeUnitLimit,
@@ -224,6 +247,7 @@ export async function createBosphorSolanaClientFromKeypair(
     if (opts.priorityMicroLamports !== undefined) {
       chainOpts.priorityMicroLamports = opts.priorityMicroLamports;
     }
+    if (opts.web3 !== undefined) chainOpts.web3 = opts.web3;
     chain = await createDefaultSolanaChain(chainOpts);
   }
 
@@ -238,23 +262,61 @@ export async function createBosphorSolanaClientFromKeypair(
   if (opts.quoteLzFee !== undefined) {
     clientOpts.quoteLzFee = opts.quoteLzFee;
   } else if (opts.liveLzFee !== false) {
-    const connection = opts.connection;
-    clientOpts.quoteLzFee = async () => {
-      try {
-        return await quoteSolanaLzFee({ connection, network });
-      } catch (err) {
-        // Missing optional peer: fall back to the flagged cap. Any other failure
-        // (RPC, program) is surfaced, never replaced by a made-up fee.
-        if (err instanceof LzSolanaSdkMissingError) return null;
-        throw err;
-      }
-    };
+    const relayerUrl = clientOpts.relayerUrl;
+    // Local LZ SDK first, then the relayer's live fee, then (only when the relayer
+    // has no such endpoint) the flagged cap. Any other failure is surfaced, never
+    // replaced by a made up fee.
+    clientOpts.quoteLzFee = () =>
+      resolveSolanaLzFee({
+        network,
+        connection: opts.connection,
+        lzSdk: opts.lzSdk,
+        web3: opts.web3,
+        relayer:
+          opts.relayerLzFee === false
+            ? false
+            : { url: relayerUrl, fetch: opts.fetch, appId: opts.appId },
+      });
   }
   if (opts.defaultEpochs !== undefined) clientOpts.defaultEpochs = opts.defaultEpochs;
   if (opts.deadlineSeconds !== undefined) clientOpts.deadlineSeconds = opts.deadlineSeconds;
   if (opts.computeBlob !== undefined) clientOpts.computeBlob = opts.computeBlob;
   if (opts.fetch !== undefined) clientOpts.fetch = opts.fetch;
   if (opts.appId !== undefined) clientOpts.appId = opts.appId;
+  if (opts.uploadRetry !== undefined) clientOpts.uploadRetry = opts.uploadRetry;
 
   return new BosphorSolanaClient(clientOpts);
+}
+
+/**
+ * Create a {@link BosphorSolanaClient} signed by a browser wallet (Phantom,
+ * Solflare, `@solana/wallet-adapter`): the same client and options as
+ * {@link createBosphorSolanaClientFromKeypair}, named for the wallet case. The
+ * wallet approves each transaction; the SDK sends and confirms it.
+ *
+ * In a browser bundle pass `web3` (the `@solana/web3.js` module) and use
+ * `computeBlob: "relayer"`, so no optional peer has to be lazy-loaded.
+ *
+ * @example
+ * ```ts
+ * import * as web3 from "@solana/web3.js";
+ * import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+ * import { createBosphorSolanaClientFromWallet } from "@bosphor/sdk/solana";
+ *
+ * const { connection } = useConnection();
+ * const wallet = useWallet(); // { publicKey, signTransaction, ... }
+ * const client = await createBosphorSolanaClientFromWallet({
+ *   connection,
+ *   wallet,
+ *   web3,
+ *   computeBlob: "relayer",
+ *   appId: "my-dapp",
+ * });
+ * const { intentId, txHash } = await client.storePriced(bytes);
+ * ```
+ */
+export async function createBosphorSolanaClientFromWallet(
+  opts: CreateSolanaClientFromKeypairOptions,
+): Promise<BosphorSolanaClient> {
+  return createBosphorSolanaClientFromKeypair(opts);
 }

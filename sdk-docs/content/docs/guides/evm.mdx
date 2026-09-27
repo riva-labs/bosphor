@@ -112,6 +112,32 @@ const custom = createBosphorClient({
 The injected function must return the same id the relayer computes for the same
 bytes, or the on-chain reference check rejects the intent.
 
+### In a browser
+
+A browser dApp does not need `@mysten/walrus` (and its WASM) at all. Pass
+`computeBlob: 'relayer'` and the client asks its relayer's
+[`POST /blob/encode`](/docs/api/ingest/encode-blob) for the id, computed by the
+same encoder the relayer checks the upload with. Pass `ethers` too, so your
+bundler resolves it instead of the SDK's lazy import (from `@bosphor/sdk` 0.14.0):
+
+```ts
+import * as ethers from 'ethers';
+import { createBosphorClientFromSigner } from '@bosphor/sdk/evm';
+
+const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+const client = await createBosphorClientFromSigner(signer, {
+  ethers,
+  computeBlob: 'relayer',
+  appId: 'my-dapp',
+});
+```
+
+The file bytes go to the relayer to be encoded (nothing is stored). The encode
+route is limited to 30 requests per minute per IP and 10 MiB per blob; a `429`
+throws a `RelayerRequestError` with `retryAfterMs`. See
+[Store a file from a React dApp](/docs/examples/react-injected-wallet) for a full
+component.
+
 ## Cancellation
 
 Pass an `AbortSignal` to cancel the wait and the in-flight upload:

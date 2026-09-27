@@ -8,7 +8,8 @@
  * back to `bigint` here so no precision is lost.
  */
 import { relayerHeaders, resolveFetch, validateAppId, type FetchLike } from "./store-flow.js";
-import { BosphorError } from "./errors.js";
+import { BosphorError, RelayerRequestError } from "./errors.js";
+import { readRetryAfterMs } from "./relayer-http.js";
 
 /** Native token of the origin chain the user pays in: `"ETH"` (EVM) or `"SOL"` (Solana). */
 export type OriginToken = "ETH" | "SOL";
@@ -110,7 +111,9 @@ export interface FetchQuoteOptions {
  * @param request What to price: size, epochs, origin token, and the forward fees.
  * @param opts Injected fetch, abort signal, and integrator app id.
  * @returns The priced quote. Never a fabricated or fallback price.
- * @throws {@link BosphorError} on a non-2xx response or an unparseable body.
+ * @throws {@link RelayerRequestError} on a non-2xx response. On a 429 or 503 its
+ *   `retryAfterMs` says how long to wait, and `retryable` is true.
+ * @throws {@link BosphorError} on an unparseable body.
  *
  * @example
  * ```ts
@@ -147,8 +150,9 @@ export async function fetchQuote(
 
   const res = await fetchFn(url, init);
   const text = await res.text();
+  // Any 2xx is a quote: relayers before 0.17 answer 201, newer ones 200.
   if (!res.ok) {
-    throw new BosphorError(`relayer quote failed (${res.status}): ${text}`);
+    throw new RelayerRequestError("quote", res.status, text, readRetryAfterMs(res));
   }
 
   let body: RawQuote;

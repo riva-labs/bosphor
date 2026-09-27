@@ -126,8 +126,12 @@ const computeBlob: ComputeBlob = async (d: Uint8Array): Promise<BlobEncoding> =>
   encodingType: 0,
 });
 
+/** POST /quote echoes the forward fee; GET /lz-fee/solana is absent (a relayer before 0.17). */
 function quoteFetch(bodies: string[]): FetchLike {
-  return async (_url, init) => {
+  return async (url, init) => {
+    if (url.includes("/lz-fee/solana")) {
+      return { ok: false, status: 404, text: async () => "Cannot GET /lz-fee/solana" };
+    }
     const req = JSON.parse(new TextDecoder().decode(init.body)) as { forwardLzFeeNative: string };
     bodies.push(req.forwardLzFeeNative);
     const fwd = BigInt(req.forwardLzFeeNative);
@@ -218,7 +222,7 @@ test("submitPaid raises the LZ fee bound when the live quote exceeds the cap", a
   assert.equal(submitted[0]?.nativeFee, 5_000n);
 });
 
-test("the Keypair helper falls back to a flagged cap when the LZ SDK peer is absent", async () => {
+test("the Keypair helper falls back to a flagged cap without the LZ SDK and the relayer fee endpoint", async () => {
   const bodies: string[] = [];
   const { chain } = chainRecording();
   const client = await createBosphorSolanaClientFromKeypair({

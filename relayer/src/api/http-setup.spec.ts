@@ -115,8 +115,8 @@ describe('configureHttp (integrator API over HTTP)', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sizeBytes: 1, originToken: 'ETH' }),
       });
-    expect((await post()).status).toBe(201);
-    expect((await post()).status).toBe(201);
+    expect((await post()).status).toBe(200);
+    expect((await post()).status).toBe(200);
     const limited = await post();
     expect(limited.status).toBe(429);
     expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0);

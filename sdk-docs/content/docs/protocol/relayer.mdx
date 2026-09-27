@@ -35,6 +35,8 @@ The relayer does not have custody of user funds. It triggers execution and proof
 | `SUI_NETWORK` | `testnet` | `mainnet` (must not be `testnet`) |
 | `SUI_GRPC_URL` | `https://sui-testnet.mystenlabs.com` | required |
 | `SOLANA_SRC_EID` | `40168` (Solana devnet) | `30168` (Solana mainnet) |
+| `SUI_EID` | `40378` (Sui testnet) | `30378` (Sui mainnet) |
+| `SOLANA_LZ_SUI_PEER` | the testnet Bosphor Sui package (the Solana adapter's peer) | unset: set it to enable `GET /lz-fee/solana` |
 | `QUOTE_RETURN_LZ_FEE_MIST` | `1760000000` (testnet-calibrated) | required, measure the live Sui to origin LayerZero fee |
 | `BREAK_EVEN_GUARD_ENABLED` | `false` | `true` |
 
@@ -69,6 +71,12 @@ On mainnet the WAL auto top-up does not swap (the SUI to WAL exchange only exist
 | `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
 | `SOLANA_SRC_EID` | preset | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
 | `SOLANA_RELAYER_KEYPAIR` | - | Store-admin keypair (inline JSON secret-key array or a path) that signs the Solana return leg `confirm_execution`. Unset disables the return leg |
+| `SUI_EID` | preset | Sui LayerZero endpoint id, the destination priced by `GET /lz-fee/solana` |
+| `SOLANA_LZ_SUI_PEER` | preset | The Sui OApp peer (bytes32) the Solana adapter sends to. With `SOLANA_RPC_URL` and `SOLANA_PROGRAM_ID` it enables `GET /lz-fee/solana`, the live Solana to Sui LayerZero fee for browser quotes; unset, the route answers `501` |
+| `SOLANA_LZ_ENDPOINT_PROGRAM` | `76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6` | LayerZero v2 endpoint program on Solana (canonical, the same on devnet and mainnet) |
+| `SOLANA_LZ_ULN_PROGRAM` | `7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH` | LayerZero v2 ULN302 program on Solana (canonical) |
+| `SOLANA_LZ_OPTIONS` | type-3, lzReceive gas 200k | Executor options priced by the fee quote; must match what the SDK submits |
+| `SOLANA_LZ_FEE_CACHE_MS` | `30000` | How long one fee simulation is reused. A failed simulation is never cached and never replaced by a stale fee |
 | `WALRUS_STORE_EPOCHS` | `5` | Legacy fallback only. Blobs are stored for the intent's committed `storageEpochs`; this default applies only to a commitment recorded without epochs, and the relayer logs each such fallback |
 | `WALRUS_MAX_EPOCHS` | `53` | Largest committed storage duration the relayer stores (Walrus's own max epochs ahead also applies). Larger commitments are dead-lettered before any WAL spend, never shortened, and the escrow refunds on the deadline |
 | `WAL_MIN_BALANCE_MIST` | `500000000` | WAL floor (0.5 WAL); below this the relayer auto-swaps SUI for WAL |

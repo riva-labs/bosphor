@@ -139,10 +139,17 @@ export function clientIp(req: RateLimitRequest, trustProxy: boolean): string {
 
 /**
  * Express middleware enforcing the per-IP, per-app and encode budgets on the
- * integrator routes. Mount it on /blob and /quote BEFORE the body parser so an
- * over-limit client is rejected without the relayer reading a 10 MiB body.
- * Preflights (OPTIONS) and non-POST requests are never counted.
+ * integrator routes. Mount it on /blob, /quote and /lz-fee BEFORE the body
+ * parser so an over-limit client is rejected without the relayer reading a
+ * 10 MiB body. POSTs are counted, and so are GETs under /lz-fee (each can cost
+ * Solana RPC calls). Preflights (OPTIONS) and other GETs are never counted.
  */
+export function isRateLimited(method: string | undefined, path: string): boolean {
+  if (method === 'POST') return true;
+  return method === 'GET' && (path === '/lz-fee' || path.startsWith('/lz-fee/'));
+}
+
+/** Middleware factory; see {@link isRateLimited} for what is counted. */
 export function createRateLimitMiddleware(
   cfg: RateLimitConfig,
   opts: { now?: () => number; onLimited?: (scope: RateLimitScope) => void } = {},
@@ -151,12 +158,12 @@ export function createRateLimitMiddleware(
   const bypass = new Set((cfg.bypassKeys ?? []).filter((k) => k.length > 0));
 
   return (req, res, next) => {
-    if (!cfg.enabled || req.method !== 'POST') return next();
+    const path = (req.originalUrl ?? req.url ?? '').split('?')[0];
+    if (!cfg.enabled || !isRateLimited(req.method, path)) return next();
     const key = firstHeader(req.headers[BYPASS_KEY_HEADER]);
     if (key && bypass.has(key)) return next();
 
     const ip = clientIp(req, cfg.trustProxy);
-    const path = (req.originalUrl ?? req.url ?? '').split('?')[0];
     const checks: { scope: RateLimitScope; key: string; limit: number }[] = [
       { scope: 'ip', key: `ip:${ip}`, limit: cfg.perIp },
     ];

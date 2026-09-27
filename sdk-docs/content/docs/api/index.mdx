@@ -19,6 +19,7 @@ so you can load it into Postman, Insomnia or a client generator.
 |-------|--------|------|--------------|
 | Health | `GET` | [`/health`](/docs/api/health/get-health) | Liveness of the relayer and its chain connections |
 | Pricing | `POST` | [`/quote`](/docs/api/pricing/create-quote) | An all-in price for a store, in the origin chain's native token |
+| Pricing | `GET` | [`/lz-fee/solana`](/docs/api/pricing/get-solana-lz-fee) | The live Solana to Sui LayerZero fee, computed by the relayer |
 | Ingest | `POST` | [`/blob/encode`](/docs/api/ingest/encode-blob) | Compute a blob id without storing anything |
 | Ingest | `POST` | [`/blob/{intentId}`](/docs/api/ingest/ingest-blob) | Upload the file bytes for an on-chain intent, out-of-band |
 | Status | `GET` | [`/public/intents`](/docs/api/status/list-intents) | The live lifecycle of recent intents, newest first |
@@ -113,7 +114,7 @@ If the feed store is unavailable, the endpoint responds `503 Service Unavailable
 
 ## Calling the API from a browser dApp
 
-The integrator endpoints (`POST /quote`, `POST /blob/{intentId}`, `POST /blob/encode`) are meant to be called straight from a browser, so the relayer answers CORS preflights and allows `GET`, `POST` and `OPTIONS` from its configured origin allowlist.
+The integrator endpoints (`POST /quote`, `GET /lz-fee/solana`, `POST /blob/{intentId}`, `POST /blob/encode`) are meant to be called straight from a browser, so the relayer answers CORS preflights and allows `GET`, `POST` and `OPTIONS` from its configured origin allowlist.
 
 - The public relayers allow any origin (`CORS_ORIGINS=*`), so a dApp on your own domain works without any setup.
 - An operator can restrict this with a comma-separated `CORS_ORIGINS` list. The dashboard origin (`DASHBOARD_ORIGIN`, default `https://status.bosphor.xyz`) is always added to an explicit list, so the public status page keeps working.
@@ -136,15 +137,15 @@ const client = createBosphorClient({ adapter, relayerUrl, dstEid: 40378, appId: 
 
 ### Rate limits
 
-The relayer limits `POST /quote`, `POST /blob/{intentId}` and `POST /blob/encode` per client IP, and per app id when `X-Bosphor-App` is sent. Over the limit it answers `429 Too Many Requests` with a `Retry-After` header (seconds). Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+The relayer limits `POST /quote`, `GET /lz-fee/solana`, `POST /blob/{intentId}` and `POST /blob/encode` per client IP, and per app id when `X-Bosphor-App` is sent. Over the limit it answers `429 Too Many Requests` with a `Retry-After` header (seconds). Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
 
 | Budget | Default | Scope |
 |--------|---------|-------|
-| Per IP | 120 requests / minute | `/quote`, `/blob/{intentId}` and `/blob/encode` together |
+| Per IP | 120 requests / minute | `/quote`, `/lz-fee/solana`, `/blob/{intentId}` and `/blob/encode` together |
 | Per IP, encode | 30 requests / minute | `POST /blob/encode` only (it is CPU heavy) |
-| Per app id | 1200 requests / minute | All three routes, across all IPs sending that app id |
+| Per app id | 1200 requests / minute | All four routes, across all IPs sending that app id |
 
-Back off and retry after `Retry-After` on a `429`. Preflight (`OPTIONS`) requests are never counted.
+Back off and retry after `Retry-After` on a `429`. Preflight (`OPTIONS`) requests are never counted, and neither are other `GET` routes (`/health`, `/public/intents`, `/openapi.*`). The SDK parses `Retry-After` into `retryAfterMs` on the error it throws (see [errors](/docs/guides/errors#rate-limits-and-retryafterms)).
 
 ## Quote (pricing)
 
@@ -188,6 +189,33 @@ Response, bigint amounts are decimal strings so no precision is lost:
 every price source fails or a price is stale/implausible, the endpoint fails loud
 rather than returning a fabricated quote. The SDK wraps this as
 `client.priceQuote()` / `client.storePriced()`.
+
+A quote creates nothing, so the relayer answers `200`. Relayers before 0.17.0
+answered `201`; treat any `2xx` as success (the SDK does).
+
+### `GET {relayerBaseUrl}/lz-fee/solana`
+
+[Reference and try it](/docs/api/pricing/get-solana-lz-fee).
+
+On Solana there is no view call for the LayerZero fee, and simulating the
+endpoint's `quote` instruction needs the heavy LayerZero Solana SDK. The relayer
+runs that simulation for you and returns the live fee in lamports, so a browser
+can price a Solana store exactly:
+
+```bash
+curl -s "https://api.bosphor.xyz/testnet/lz-fee/solana?dstEid=40378"
+```
+
+```json
+{ "srcEid": 40168, "dstEid": 40378, "nativeFee": "5911260", "quotedAt": 1790346350000, "maxAgeMs": 30000 }
+```
+
+Pass `nativeFee` as `forwardLzFeeNative` to `POST /quote` with
+`originToken: "SOL"`. One simulation is reused for `maxAgeMs` (30 seconds). If it
+fails the relayer answers `503` with `Retry-After`, never a stale or estimated fee,
+and remembers the failure for those seconds without new RPC calls;
+a relayer without a Solana origin answers `501`. The SDK calls this for you when
+the LayerZero Solana SDK is not installed (`fetchSolanaLzFee()`).
 
 ## Blob ingest (out-of-band)
 
@@ -233,13 +261,13 @@ Each rejection maps to a precise HTTP status so a client can react without parsi
 | `429 Too Many Requests` | Rate limit exceeded; honor `Retry-After` |
 | `503 Service Unavailable` | The relayer is not ready or is shedding load (backpressure); honor `Retry-After` |
 
-A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff. A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
+A `404` right after submitting is usually a timing race: the relayer has not yet observed the `IntentSubmitted` event. Retry with backoff (the SDK's `upload()` and `store()` do, for up to two minutes). A `422` means the bytes you uploaded are not the bytes you committed to; recompute the blob id from the same data and resubmit.
 
 ### `POST {relayerBaseUrl}/blob/encode`
 
 [Reference and try it](/docs/api/ingest/encode-blob).
 
-Encode-only helper: send raw bytes, get back the Walrus blob id you must commit to on-chain (`{ "blobId": "...", "size": 1024 }`). Nothing is stored and no WAL is spent. It lets a browser dApp derive the blob id without loading the Walrus SDK or depending on a public publisher. It has a tighter rate limit than the other routes because encoding is CPU heavy.
+Encode-only helper: send raw bytes, get back the Walrus blob id you must commit to on-chain (`{ "blobId": "...", "size": 1024 }`). Nothing is stored and no WAL is spent. It lets a browser dApp derive the blob id without loading the Walrus SDK or depending on a public publisher. It has a tighter rate limit than the other routes because encoding is CPU heavy. In the SDK, pass `computeBlob: "relayer"` to a client (or use `relayerComputeBlob(relayerUrl)`) to use it.
 
 The `@bosphor/sdk` `store()` flow performs this upload for you (`client.upload(intentId, data)` is also exposed as an escape hatch). See the [EVM guide](/docs/guides/evm) and the [Solana guide](/docs/guides/solana).
 

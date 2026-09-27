@@ -11,11 +11,19 @@ any wallet prompt: **pick a file** (encode and quote), then **Pay and store**
 ## Install
 
 ```bash
-npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+npm install @bosphor/sdk ethers
 ```
 
-`@mysten/walrus` and `@mysten/sui` compute the Walrus blob id in the browser. No
-Sui wallet or SUI is needed.
+That is all a browser dApp needs (from `@bosphor/sdk` 0.14.0). The Walrus blob id
+comes from the relayer's encode endpoint (`computeBlob: "relayer"`), so no Walrus
+WASM is bundled, and `ethers` is passed to the SDK so your bundler resolves it
+normally. No Sui wallet or SUI is needed.
+
+<Callout type="info" title="On @bosphor/sdk 0.13 or older">
+Install `@mysten/walrus` and `@mysten/sui` too and drop the `computeBlob` and
+`ethers` options below: the blob id is then computed in the browser with the
+Walrus WASM encoder.
+</Callout>
 
 ## The component
 
@@ -23,6 +31,7 @@ Sui wallet or SUI is needed.
 "use client";
 
 import { useState, type ChangeEvent } from "react";
+import * as ethers from "ethers";
 import { BrowserProvider, formatEther, type Eip1193Provider } from "ethers";
 import {
   BosphorError,
@@ -57,7 +66,11 @@ async function connect(): Promise<BosphorEvmClient> {
   }
 
   const signer = await provider.getSigner();
-  return createBosphorClientFromSigner(signer, { appId: "my-dapp" });
+  return createBosphorClientFromSigner(signer, {
+    appId: "my-dapp",
+    ethers, // injected: the bundler resolves it, no lazy import at runtime
+    computeBlob: "relayer", // blob id from POST /blob/encode, no Walrus WASM
+  });
 }
 
 type Pending = { client: BosphorEvmClient; bytes: Uint8Array; encoded: EncodedIntent; quote: PricedQuote };
@@ -82,7 +95,12 @@ export function StoreFile() {
       setPending({ client, bytes, encoded, quote });
       setStatus(`Storing ${file.name} costs ${formatEther(quote.totalNative)} ETH ($${quote.breakdown.totalUsd.toFixed(2)}).`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : String(err));
+      // A 429 from the relayer carries how long to wait.
+      if (err instanceof BosphorError && err.retryAfterMs !== undefined) {
+        setStatus(`The relayer is busy. Try again in ${Math.ceil(err.retryAfterMs / 1000)}s.`);
+      } else {
+        setStatus(err instanceof Error ? err.message : String(err));
+      }
     }
   }
 
@@ -127,14 +145,18 @@ export function StoreFile() {
   (`TESTNET.evm.chainId`) when needed, and builds the client with
   `createBosphorClientFromSigner`. The adapter address, relayer URL, and
   LayerZero options all come from the `TESTNET` preset.
-- **Pricing first.** `client.encode()` derives the blob id locally, and
-  `client.priceQuote()` returns the all-in amount (`totalNative`) with a USD
-  breakdown. Nothing is signed yet.
+- **Pricing first.** `client.encode()` derives the blob id (here through the
+  relayer's `POST /blob/encode`, the same Walrus encoder the relayer checks the
+  upload with), and `client.priceQuote()` returns the all-in amount
+  (`totalNative`) with a USD breakdown. Nothing is signed yet.
 - **Paying.** `client.submitPaid(encoded, quote)` sends one transaction whose
   value is the quote. The adapter forwards the LayerZero fee and escrows the rest
   until the proof arrives.
 - **Uploading.** The file bytes never cross the bridge: `client.upload()` sends
-  them to the relayer, which checks them against the on-chain commitment.
+  them to the relayer, which checks them against the on-chain commitment. Right
+  after the transaction the relayer may not have seen the intent yet and answers
+  `404`; the SDK retries that (and `429` or `5xx`) with backoff for up to two
+  minutes, so you do not need your own retry loop.
 - **Proof.** `client.awaitProof()` resolves once the proof is verified on
   Sepolia, with the blob id and the Walrus epoch the storage lasts until.
 

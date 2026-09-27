@@ -6,7 +6,16 @@ import * as solana from "./solana/index.js";
 
 // The integrator-facing surface each entry point must expose. Starter repos and the
 // docs import these by name, so a missing re-export is a breaking change.
-const SHARED = ["TESTNET", "networks", "walrusBlobUrl", "blobIdToBase64Url", "fetchQuote"];
+const SHARED = [
+  "TESTNET",
+  "networks",
+  "walrusBlobUrl",
+  "blobIdToBase64Url",
+  "fetchQuote",
+  "relayerComputeBlob",
+  "RelayerRequestError",
+  "DEFAULT_UPLOAD_RETRY",
+];
 
 test("core entry exports the preset and quote client", () => {
   for (const name of SHARED) assert.ok(name in core, `@bosphor/sdk is missing ${name}`);
@@ -34,11 +43,13 @@ test("solana entry exports the preset, quote client, and send-account helpers", 
     "testnetEndpointAccounts",
     "resolveEndpointAccounts",
     "createBosphorSolanaClientFromKeypair",
+    "createBosphorSolanaClientFromWallet",
     "createDefaultSolanaChain",
     "BOSPHOR_PROGRAM_ID",
     "quoteSolanaStore",
     "quoteSolanaLzFee",
     "LzSolanaSdkMissingError",
+    "fetchSolanaLzFee",
   ]) {
     assert.ok(name in solana, `@bosphor/sdk/solana is missing ${name}`);
   }
