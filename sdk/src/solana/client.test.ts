@@ -100,6 +100,10 @@ test("store() runs encode -> submit -> upload -> awaitProof and returns verified
   assert.equal(result.intentId, INTENT_ID);
   assert.equal(result.blobId, BLOB_ID);
   assert.equal(result.endEpoch, END_EPOCH);
+  // Typed as a required string: this line does not compile if txHash is optional.
+  const signature: string = result.txHash;
+  assert.equal(typeof signature, "string");
+  assert.ok(signature.length > 0);
 
   assert.equal(calls.submit, 1);
   assert.equal(fetchCalls.length, 1);

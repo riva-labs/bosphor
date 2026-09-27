@@ -41,6 +41,9 @@ export interface StoreResult {
   blobId: Hex;
   /** Walrus epoch at which the stored blob expires. */
   endEpoch: bigint;
-  /** Origin-chain transaction hash (EVM) or signature (Solana) of the submit. */
-  txHash?: string;
+  /**
+   * Origin-chain transaction hash (EVM) or signature (Solana) of the submit.
+   * Always set by `store()` and `storePriced()` on both chains.
+   */
+  txHash: string;
 }
