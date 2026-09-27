@@ -8,13 +8,20 @@ the base class once and narrow on the concrete type. Nothing is defaulted or
 fabricated on error, the throw carries the on-chain or relayer reason.
 
 ```ts
-import { BosphorError, ProofTimeoutError, RelayerUploadError } from '@bosphor/sdk';
+import {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerRequestError,
+  RelayerUploadError,
+} from '@bosphor/sdk';
 
 try {
   await client.store(bytes, { epochs: 5 });
 } catch (e) {
   if (e instanceof RelayerUploadError) {
     // e.status (HTTP), e.reason (the relayer's message), e.intentId
+  } else if (e instanceof RelayerRequestError) {
+    // a quote or encode call failed: e.status, e.retryAfterMs on a 429
   } else if (e instanceof ProofTimeoutError) {
     // e.intentId, e.timeoutMs; the intent may still execute, so re-poll awaitProof
   } else if (e instanceof BosphorError) {
@@ -32,16 +39,57 @@ so any import path works.
 
 | Error | Thrown by | Fields | Meaning |
 |-------|-----------|--------|---------|
-| `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId` | The relayer rejected the out-of-band blob upload (e.g. no pending intent yet, or a blob-id mismatch). |
+| `RelayerUploadError` | `upload`, `store` | `status`, `reason`, `intentId`, `retryAfterMs` | The relayer rejected the out-of-band blob upload (e.g. a blob-id mismatch), or kept answering a transient status after the SDK's retries. |
+| `RelayerRequestError` | `fetchQuote`, `priceQuote`, `relayerComputeBlob`, `fetchSolanaLzFee` | `status`, `body`, `operation`, `retryAfterMs` | Any other relayer call answered non-2xx: a 429 rate limit, a 503, a 400 for a bad request. |
 | `ProofTimeoutError` | `awaitProof`, `store` | `intentId`, `timeoutMs` | The intent did not execute within the timeout. It may still execute; re-poll with `awaitProof(intentId)`. |
-| `BosphorError` | base class | `code`, `retryable` | Superclass of every SDK error. Catch this to handle any SDK failure. |
+| `BosphorError` | base class | `code`, `retryable`, `retryAfterMs` | Superclass of every SDK error. Catch this to handle any SDK failure. |
+
+`RelayerRequestError` and `retryAfterMs` arrived in `@bosphor/sdk` 0.14.0. Before
+that, a failed quote was a plain `BosphorError` with the status in the message.
+
+## Rate limits and `retryAfterMs`
+
+The hosted relayers limit requests per IP (120 per minute for quotes and uploads,
+30 per minute for `POST /blob/encode`). Over the limit they answer `429` with a
+`Retry-After` header, and a full storage queue answers `503` with one too. The SDK
+parses it (seconds or an HTTP date) into `retryAfterMs` on the thrown error, and
+`retryable` tells you whether the same call can succeed later:
+
+```ts
+import { BosphorError, fetchQuote, TESTNET } from '@bosphor/sdk';
+
+async function quoteWithBackoff(sizeBytes: number) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchQuote(TESTNET.relayerUrl, { sizeBytes, originToken: 'ETH' });
+    } catch (e) {
+      if (!(e instanceof BosphorError) || !e.retryable || attempt >= 3) throw e;
+      await new Promise((r) => setTimeout(r, e.retryAfterMs ?? 2_000 * 2 ** attempt));
+    }
+  }
+}
+```
+
+In a UI, show a countdown from `retryAfterMs` instead of retrying in a loop.
 
 ## No pending intent yet
 
-`RelayerUploadError` with a 404 right after `submit` is the common race: the relayer
-only accepts bytes once its watcher has seen your on-chain intent, a short lag after
-you submit. If you drive the steps yourself, retry the upload past that window
-rather than failing the flow; `store()` already handles this internally.
+Right after `submit`, the relayer may answer the upload with a `404` "no pending
+intent": it only accepts bytes once its watcher has seen your on-chain intent, a
+short lag after you submit. `upload()` and `store()` retry that, `429`, `5xx` and
+network errors with exponential backoff that honors `Retry-After` and your
+`signal`, for up to two minutes (`DEFAULT_UPLOAD_RETRY`). Only then do they throw
+the last `RelayerUploadError`. Tune it per client, or turn it off:
+
+```ts
+const client = await createBosphorClientFromSigner(signer, {
+  uploadRetry: { maxElapsedMs: 300_000 }, // or false for a single attempt
+});
+await client.upload(intentId, bytes, { retry: { maxAttempts: 3 } }); // per call
+```
+
+A terminal rejection (`409` already executed, `410` expired, `413` too large,
+`422` bytes do not match the commitment) is never retried.
 
 ## A timeout is not a loss
 
