@@ -109,6 +109,29 @@ export const configValidationSchema = Joi.object({
   // Store-admin keypair (inline JSON secret-key array or a path to one) used to
   // sign the Solana return leg confirm_execution. Unset disables the return leg.
   SOLANA_RELAYER_KEYPAIR: Joi.string().optional().allow(''),
+  // Live Solana -> Sui LayerZero fee (GET /lz-fee/solana). Served when the
+  // Solana origin is configured and SOLANA_LZ_SUI_PEER is set. The endpoint and
+  // ULN302 program ids are LayerZero's canonical Solana deployments (the same on
+  // devnet and mainnet).
+  SUI_EID: presetNumber(TESTNET_PRESET.SUI_EID, MAINNET_PRESET.SUI_EID),
+  SOLANA_LZ_ENDPOINT_PROGRAM: Joi.string().default('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6'),
+  SOLANA_LZ_ULN_PROGRAM: Joi.string().default('7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH'),
+  // The Sui OApp peer the Solana adapter sends to (bytes32). Testnet preset; on
+  // mainnet set it explicitly to enable the fee endpoint.
+  SOLANA_LZ_SUI_PEER: Joi.string()
+    .pattern(/^0x[0-9a-fA-F]{64}$/)
+    .allow('')
+    .when('NETWORK', {
+      ...isMainnet,
+      otherwise: Joi.string().default(TESTNET_PRESET.SOLANA_LZ_SUI_PEER),
+    }),
+  // Executor options priced by the fee quote: must match what the SDK submits
+  // (type-3, lzReceive gas 200k).
+  SOLANA_LZ_OPTIONS: Joi.string()
+    .pattern(/^0x([0-9a-fA-F]{2})*$/)
+    .default('0x00030100110100000000000000000000000000030d40'),
+  // How long one fee simulation is reused (ms).
+  SOLANA_LZ_FEE_CACHE_MS: Joi.number().integer().min(0).default(30_000),
 
   // Walrus
   WALRUS_RELAY_URL: Joi.string().uri().required(),
