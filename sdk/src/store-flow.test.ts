@@ -49,6 +49,25 @@ test("uploadBlob retries 429 and 5xx, and transient network failures", async () 
   assert.equal(calls(), 5);
 });
 
+test("uploadBlob treats a 409 on a retry as success: an earlier attempt was ingested", async () => {
+  // The first attempt reached the relayer but its answer was lost (a 503 from a
+  // proxy, a dropped connection); by the retry the intent has moved on.
+  const { fetch, calls } = scripted([
+    { status: 503, body: "upstream timeout" },
+    { status: 409, body: "intent already executed" },
+  ]);
+  await uploadBlob(fetch, "https://r.test", INTENT, new Uint8Array([1]), { retry: FAST });
+  assert.equal(calls(), 2);
+});
+
+test("uploadBlob still fails on a 409 to the first attempt", async () => {
+  const { fetch } = scripted([{ status: 409, body: "intent already executed" }]);
+  await assert.rejects(
+    uploadBlob(fetch, "https://r.test", INTENT, new Uint8Array([1]), { retry: FAST }),
+    (e: unknown) => e instanceof RelayerUploadError && e.status === 409,
+  );
+});
+
 test("uploadBlob does not retry a terminal rejection", async () => {
   const { fetch, calls } = scripted([{ status: 422, body: "blob id mismatch" }]);
   await assert.rejects(

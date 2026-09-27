@@ -286,6 +286,7 @@ export interface UploadBlobOptions {
  * `Retry-After`: the watch-lag 404 ("no pending intent"), 408, 429, 5xx and
  * network errors. Once the bounds run out, or on a terminal rejection (409, 410,
  * 413, 422), it throws a {@link RelayerUploadError} carrying the relayer's reason.
+ * A 409 to a retry counts as success: an earlier attempt was ingested.
  */
 export async function uploadBlob(
   fetchFn: FetchLike,
@@ -294,7 +295,7 @@ export async function uploadBlob(
   data: Uint8Array,
   opts: UploadBlobOptions = {},
 ): Promise<void> {
-  const attempt = async (): Promise<void> => {
+  const attempt = async (n: number): Promise<void> => {
     const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
       method: "POST",
       body: data,
@@ -302,6 +303,10 @@ export async function uploadBlob(
       signal: opts.signal,
     });
     if (res.ok) return;
+    // A 409 ("already executed") on a retry means an earlier attempt reached the
+    // relayer and was ingested (only its answer was lost), and the intent moved
+    // on: the upload succeeded. On the first attempt it stays a real rejection.
+    if (res.status === 409 && n >= 2) return;
     let reason: string;
     try {
       reason = await res.text();
@@ -311,7 +316,7 @@ export async function uploadBlob(
     throw new RelayerUploadError(intentId, res.status, reason, readRetryAfterMs(res));
   };
 
-  if (opts.retry === false) return attempt();
+  if (opts.retry === false) return attempt(1);
   await withRelayerRetry(attempt, {
     ...DEFAULT_UPLOAD_RETRY,
     ...(opts.retry ?? {}),
