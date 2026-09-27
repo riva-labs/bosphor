@@ -147,7 +147,7 @@ describe('createRateLimitMiddleware', () => {
     expect(onLimited).toHaveBeenCalledWith('app');
   });
 
-  it('never counts preflights or GETs, and is a no-op when disabled', () => {
+  it('never counts preflights or GETs outside /lz-fee, and is a no-op when disabled', () => {
     const mw = createRateLimitMiddleware({ ...BASE, perIp: 1 }, { now: () => 0 });
     const next = jest.fn();
     for (let i = 0; i < 5; i++) mw(req({ method: 'OPTIONS' }), fakeRes(), next);
@@ -177,6 +177,22 @@ describe('rate limit bypass and per-app default', () => {
       mw(req({ headers: { 'x-bosphor-key': 's3cret' } }), fakeRes(), next);
     }
     expect(next).toHaveBeenCalledTimes(5);
+  });
+
+  it('counts GET /lz-fee against the per-IP budget (it can trigger Solana RPC work)', () => {
+    const mw = createRateLimitMiddleware({ ...BASE, perIp: 2 });
+    const next = jest.fn();
+    const get = () => req({ method: 'GET', originalUrl: '/lz-fee/solana?dstEid=40378' });
+    mw(get(), fakeRes(), next);
+    mw(get(), fakeRes(), next);
+    const res = fakeRes();
+    mw(get(), res, next);
+    expect(next).toHaveBeenCalledTimes(2);
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['Retry-After']).toBeDefined();
+    // Preflights to the same route are still free.
+    mw(req({ method: 'OPTIONS', originalUrl: '/lz-fee/solana' }), fakeRes(), next);
+    expect(next).toHaveBeenCalledTimes(3);
   });
 
   it('ignores a wrong bypass key', () => {
