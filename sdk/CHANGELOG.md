@@ -2,6 +2,14 @@
 
 ## 0.14.0 (2026-09-27)
 
+### Breaking Changes
+
+- `StoreResult.txHash` is now required (`string`, was `string | undefined`). Code that builds a `StoreResult` itself (mocks, adapters) must set it.
+- `FetchLike` `init.body` is now optional (`Uint8Array | undefined`): it is `undefined` on the new `GET /lz-fee/solana`. A custom fetch that forwards `init.body` keeps working; one that reads it (for example `init.body.length`) must handle `undefined`.
+- Without `@layerzerolabs/lz-solana-sdk-v2`, a Solana quote (`quoteSolanaStore`, `priceQuote()` from the client factories) now asks the relayer for the live LayerZero fee instead of pricing the cap. A relayer `503` or a network error now throws a retryable error (with `retryAfterMs`); only a relayer without the endpoint (`404`/`501`) still falls back to the cap flagged `forwardIsUpperBound`. Pass `relayerLzFee: false` for the old behavior.
+- `client.upload()` / `store()` retry transient relayer answers: an upload for an intent the relayer never sees (`404`) now waits up to about 2 minutes (`DEFAULT_UPLOAD_RETRY`) before throwing. Pass `uploadRetry: false` for a single attempt.
+- `fetchQuote` throws `RelayerRequestError` (a `BosphorError` subclass, same message) instead of a plain `BosphorError`, and it is `retryable` on 408/429/5xx.
+
 ### Features
 
 - feat(sdk): make optional peers bundler friendly
@@ -11,6 +19,11 @@
 - feat(sdk): make StoreResult.txHash required
 - feat(sdk): retry blob uploads with bounded backoff
 - feat(sdk): expose retryAfterMs on relayer errors
+
+### Bug Fixes
+
+- fix(sdk): treat a 409 on an upload retry as success
+- fix(sdk): accept useWallet() as a Solana wallet under strict TS
 
 ## 0.13.1 (2026-09-24)
 
