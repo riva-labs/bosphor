@@ -24,7 +24,12 @@ export type {
 } from "./client.js";
 
 // Typed error hierarchy (shared across chains).
-export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
+export {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerUploadError,
+  RelayerRequestError,
+} from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
 export type {
@@ -32,6 +37,7 @@ export type {
   AwaitProofOptions,
   EncodedIntent,
   FetchLike,
+  FetchLikeResponse,
   StoreProgress,
   ProgressOptions,
 } from "../store-flow.js";

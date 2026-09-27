@@ -11,6 +11,7 @@
 import type { BlobEncoding, ComputeBlob, Hex } from "./types.js";
 import type { PricedQuote } from "./quote.js";
 import { RelayerUploadError } from "./errors.js";
+import { readRetryAfterMs, sleep, withRelayerRetry, type RetryPolicy } from "./relayer-http.js";
 
 /** Default committed storage duration, in Walrus epochs. */
 export const DEFAULT_EPOCHS = 5;
@@ -129,13 +130,20 @@ export type FetchLike = (
     /** Optional cancellation signal, forwarded to the underlying `fetch`. */
     signal?: AbortSignal | undefined;
   },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+) => Promise<FetchLikeResponse>;
 
 /**
- * Sleep for `ms`, rejecting early with the signal's reason if it aborts mid-wait.
- * Used by the poll loops so a cancellation is honored without waiting out the
- * current interval.
+ * The response surface the SDK reads. `headers` is optional so a minimal custom
+ * fetch keeps working; when present, the SDK reads `Retry-After` from it (see
+ * `BosphorError.retryAfterMs`). A standard `fetch` `Response` satisfies it.
  */
+export interface FetchLikeResponse {
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  headers?: { get(name: string): string | null } | undefined;
+}
+
 /**
  * Whether an RPC/network failure is worth retrying: connection resets and
  * timeouts, rate limiting, and 5xx responses. Public RPCs drop connections
@@ -173,20 +181,7 @@ const TRANSIENT_CODES = new Set([
 const TRANSIENT_MESSAGE =
   /socket (hang up|disconnected)|network socket|fetch failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
 
-export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason);
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(signal!.reason);
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
+export { sleep };
 
 /**
  * Resolve the fetch implementation: the injected one if given, else the global
