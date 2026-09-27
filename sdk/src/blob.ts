@@ -52,6 +52,18 @@ const WALRUS_FULLNODE: Record<WalrusNetwork, string> = {
 };
 
 /**
+ * The modules the local Walrus encoder uses, for injection when the SDK's lazy
+ * import cannot resolve them (bundlers). In a browser, prefer the relayer
+ * encoder (`computeBlob: "relayer"`), which needs neither.
+ */
+export interface WalrusEncoderModules {
+  /** The `@mysten/walrus` module (`import * as walrus from "@mysten/walrus"`). */
+  walrus?: object;
+  /** The `@mysten/sui/grpc` module (`import * as suiGrpc from "@mysten/sui/grpc"`). */
+  suiGrpc?: object;
+}
+
+/**
  * Build a `@mysten/walrus`-backed blob-id computation bound to a specific network.
  * Lazily imports the Walrus SDK on first use; `encodeBlob` derives the id offline,
  * so no network call is made. Because the RedStuff encoding depends on the
@@ -61,21 +73,27 @@ const WALRUS_FULLNODE: Record<WalrusNetwork, string> = {
  * testnet default on mainnet would commit a wrong blob id.
  *
  * If `@mysten/walrus` is not installed, this throws loudly with guidance rather
- * than silently fabricating an id.
+ * than silently fabricating an id. Pass `modules` to inject both modules when a
+ * bundler cannot resolve the lazy import.
  */
-export function createDefaultComputeBlob(network: WalrusNetwork): ComputeBlob {
+export function createDefaultComputeBlob(
+  network: WalrusNetwork,
+  modules: WalrusEncoderModules = {},
+): ComputeBlob {
   return async (data: Uint8Array): Promise<BlobEncoding> => {
     // Import specifiers are held in variables so TypeScript does not try to resolve
-    // (and typecheck) the optional peers at compile time. They are only pulled in at
-    // runtime, when a consumer actually opts into the real Walrus-backed impl.
+    // (and typecheck) the optional peers at compile time, and bundlers do not try
+    // to include them. They are only pulled in at runtime, when a consumer opts
+    // into the real Walrus-backed impl without injecting the modules.
     const walrusSpec = "@mysten/walrus";
     const grpcSpec = "@mysten/sui/grpc";
 
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    let walrusMod: any;
-    let grpcMod: any;
+    let walrusMod: any = modules.walrus;
+    let grpcMod: any = modules.suiGrpc;
     try {
-      [walrusMod, grpcMod] = await Promise.all([import(walrusSpec), import(grpcSpec)]);
+      walrusMod ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ walrusSpec);
+      grpcMod ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ grpcSpec);
     } catch (err) {
       throw new Error(
         "computeBlob requires the optional peer dependencies '@mysten/walrus' and " +

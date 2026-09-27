@@ -94,7 +94,7 @@ export type {
 } from "./endpoint-accounts.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
-export type { WalrusNetwork } from "../blob.js";
+export type { WalrusNetwork, WalrusEncoderModules } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/solana` is self-sufficient.
 export {

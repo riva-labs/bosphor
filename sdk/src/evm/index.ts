@@ -61,7 +61,7 @@ export type { RelayerComputeBlobOptions, ComputeBlobOption } from "../relayer-bl
 export type { RetryPolicy } from "../relayer-http.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
-export type { WalrusNetwork } from "../blob.js";
+export type { WalrusNetwork, WalrusEncoderModules } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/evm` is self-sufficient.
 export {

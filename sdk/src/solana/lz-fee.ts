@@ -73,8 +73,8 @@ export async function quoteSolanaLzFee(opts: QuoteSolanaLzFeeOptions): Promise<b
   try {
     const lzSpec = "@layerzerolabs/lz-solana-sdk-v2";
     const web3Spec = "@solana/web3.js";
-    lz ??= await import(lzSpec);
-    web3 ??= await import(web3Spec);
+    lz ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ lzSpec);
+    web3 ??= await import(/* webpackIgnore: true */ /* @vite-ignore */ web3Spec);
   } catch (err) {
     throw new LzSolanaSdkMissingError(err);
   }
