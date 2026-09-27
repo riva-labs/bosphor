@@ -21,6 +21,8 @@ import { PriceSet } from '../pricing/price-oracle.types';
 import { PRICE_ORACLE } from '../pricing/pricing.tokens';
 import { QuoteController } from '../pricing/quote.controller';
 import { QuoteService } from '../pricing/quote.service';
+import { LzFeeController } from '../pricing/lz-fee.controller';
+import { SolanaLzFeeService } from '../pricing/solana-lz-fee.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { OPENAPI_SPEC, OpenApiController } from './openapi.controller';
 import { loadOpenApiSpec } from './openapi-spec';
@@ -166,6 +168,17 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
         .fn()
         .mockResolvedValue({ blobId: 'mLzOEj8l3vxE6CbAvIvtNMeDxOD5DQmvK08kSpFGLp0', size: 5 }),
     };
+    const lzFee = {
+      isEnabled: jest.fn().mockReturnValue(true),
+      dstEid: 40378,
+      quote: jest.fn().mockResolvedValue({
+        nativeFee: 5_911_260n,
+        srcEid: 40168,
+        dstEid: 40378,
+        quotedAtMs: 1_790_346_350_000,
+        maxAgeMs: 30_000,
+      }),
+    };
     const evm = { getBlockNumber: jest.fn().mockResolvedValue(11_779_811) };
     const sui = { getCheckpoint: jest.fn().mockResolvedValue('387649007') };
 
@@ -211,10 +224,12 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
           IngestController,
           PublicController,
           OpenApiController,
+          LzFeeController,
         ],
         providers: [
           HealthService,
           QuoteService,
+          { provide: SolanaLzFeeService, useValue: lzFee },
           { provide: EvmService, useValue: evm },
           { provide: SuiService, useValue: sui },
           { provide: PRICE_ORACLE, useValue: { getPrices: async () => PRICES } },
@@ -317,6 +332,34 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
       });
       expect(res.status).toBe(400);
       await expectDocumented('post', '/quote', res);
+    });
+
+    it('GET /lz-fee/solana returns the documented live fee', async () => {
+      const res = await fetch(`${base}/lz-fee/solana?dstEid=40378`);
+      expect(res.status).toBe(200);
+      const body = (await expectDocumented('get', '/lz-fee/solana', res)) as Record<
+        string,
+        unknown
+      >;
+      expect(body.nativeFee).toBe('5911260');
+      expect(body.dstEid).toBe(40378);
+    });
+
+    it('GET /lz-fee/solana answers the documented 400, 501 and 503', async () => {
+      const wrongEid = await fetch(`${base}/lz-fee/solana?dstEid=30101`);
+      expect(wrongEid.status).toBe(400);
+      await expectDocumented('get', '/lz-fee/solana', wrongEid);
+
+      lzFee.isEnabled.mockReturnValueOnce(false);
+      const disabled = await fetch(`${base}/lz-fee/solana`);
+      expect(disabled.status).toBe(501);
+      await expectDocumented('get', '/lz-fee/solana', disabled);
+
+      lzFee.quote.mockRejectedValueOnce(new Error('simulation failed'));
+      const down = await fetch(`${base}/lz-fee/solana`);
+      expect(down.status).toBe(503);
+      expect(down.headers.get('retry-after')).toBe('5');
+      await expectDocumented('get', '/lz-fee/solana', down);
     });
 
     it('GET /health (real HealthService) returns the documented status, ok and degraded', async () => {

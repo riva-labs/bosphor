@@ -58,8 +58,8 @@ export class SolanaLzFeeService {
   isEnabled(): boolean {
     return Boolean(
       this.config.get<string>('SOLANA_RPC_URL') &&
-        this.config.get<string>('SOLANA_PROGRAM_ID') &&
-        this.config.get<string>('SOLANA_LZ_SUI_PEER'),
+      this.config.get<string>('SOLANA_PROGRAM_ID') &&
+      this.config.get<string>('SOLANA_LZ_SUI_PEER'),
     );
   }
 

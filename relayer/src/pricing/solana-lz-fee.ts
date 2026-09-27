@@ -40,14 +40,12 @@ export interface SolanaLzFeePath {
  * own `@solana/web3.js` copy, so its classes are bridged through base58 strings.
  */
 export interface SolanaLzFeeDeps {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
   /** A `@solana/web3.js` `Connection`. */
   connection: any;
   /** The `@solana/web3.js` module. */
   web3: any;
   /** The `@layerzerolabs/lz-solana-sdk-v2` module. */
   lz: any;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 function hexToBytes(hex: string): Uint8Array {
@@ -109,7 +107,9 @@ export async function quoteSolanaLzFeeLamports(
   });
   const ix = new TransactionInstruction({
     programId: endpointId,
-    keys: (metas as Array<{ pubkey: { toBase58(): string }; isSigner: boolean; isWritable: boolean }>)
+    keys: (
+      metas as Array<{ pubkey: { toBase58(): string }; isSigner: boolean; isWritable: boolean }>
+    )
       .slice(1)
       .map((m) => ({
         pubkey: new PublicKey(m.pubkey.toBase58()),
@@ -137,6 +137,7 @@ export async function quoteSolanaLzFeeLamports(
     );
   }
   const ret = Buffer.from(returnData.data[0] as string, 'base64');
-  if (ret.length < 8) throw new Error(`LayerZero quote returned ${ret.length} bytes, expected >= 8`);
+  if (ret.length < 8)
+    throw new Error(`LayerZero quote returned ${ret.length} bytes, expected >= 8`);
   return ret.readBigUInt64LE(0);
 }
