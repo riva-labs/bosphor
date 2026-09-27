@@ -89,7 +89,9 @@ await client.upload(intentId, bytes, { retry: { maxAttempts: 3 } }); // per call
 ```
 
 A terminal rejection (`409` already executed, `410` expired, `413` too large,
-`422` bytes do not match the commitment) is never retried.
+`422` bytes do not match the commitment) is never retried. One exception: a `409`
+answering a retry means an earlier attempt was ingested (only its answer was
+lost), so the upload counts as done.
 
 ## A timeout is not a loss
 
