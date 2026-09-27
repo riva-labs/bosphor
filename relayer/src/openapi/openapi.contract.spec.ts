@@ -22,7 +22,7 @@ import { PRICE_ORACLE } from '../pricing/pricing.tokens';
 import { QuoteController } from '../pricing/quote.controller';
 import { QuoteService } from '../pricing/quote.service';
 import { LzFeeController } from '../pricing/lz-fee.controller';
-import { SolanaLzFeeService } from '../pricing/solana-lz-fee.service';
+import { SolanaLzFeeService, SolanaLzFeeUnavailableError } from '../pricing/solana-lz-fee.service';
 import { WalrusService } from '../walrus/walrus.service';
 import { OPENAPI_SPEC, OpenApiController } from './openapi.controller';
 import { loadOpenApiSpec } from './openapi-spec';
@@ -337,6 +337,8 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
     it('GET /lz-fee/solana returns the documented live fee', async () => {
       const res = await fetch(`${base}/lz-fee/solana?dstEid=40378`);
       expect(res.status).toBe(200);
+      // Rate limited like the POST routes: the limiter is mounted on /lz-fee.
+      expect(res.headers.get('x-ratelimit-limit')).toBe('1000');
       const body = (await expectDocumented('get', '/lz-fee/solana', res)) as Record<
         string,
         unknown
@@ -360,6 +362,13 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
       expect(down.status).toBe(503);
       expect(down.headers.get('retry-after')).toBe('5');
       await expectDocumented('get', '/lz-fee/solana', down);
+
+      // A remembered failure answers with the time left until the next attempt.
+      lzFee.quote.mockRejectedValueOnce(new SolanaLzFeeUnavailableError('rpc down', 3));
+      const remembered = await fetch(`${base}/lz-fee/solana`);
+      expect(remembered.status).toBe(503);
+      expect(remembered.headers.get('retry-after')).toBe('3');
+      await expectDocumented('get', '/lz-fee/solana', remembered);
     });
 
     it('GET /health (real HealthService) returns the documented status, ok and degraded', async () => {

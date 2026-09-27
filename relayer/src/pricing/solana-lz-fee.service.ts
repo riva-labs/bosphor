@@ -29,12 +29,27 @@ export interface SolanaLzFeeHooks {
 
 export const SOLANA_LZ_FEE_HOOKS = Symbol('SOLANA_LZ_FEE_HOOKS');
 
+/** Seconds a failed simulation is remembered, and the Retry-After clients get. */
+export const SOLANA_LZ_FEE_RETRY_AFTER_SECONDS = 5;
+
+/** The live fee is unavailable right now; retry after `retryAfterSeconds`. */
+export class SolanaLzFeeUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterSeconds: number,
+  ) {
+    super(message);
+    this.name = 'SolanaLzFeeUnavailableError';
+  }
+}
+
 /**
  * Computes the live Solana -> Sui LayerZero fee server-side, so a browser can
  * price a Solana store without bundling `@layerzerolabs/lz-solana-sdk-v2`. One
  * read-only simulation is reused for SOLANA_LZ_FEE_CACHE_MS (30s) and shared by
- * concurrent callers. A failure is thrown to the caller and never cached, and
- * no stale or default fee is ever served in its place.
+ * concurrent callers. A failure is thrown to the caller and remembered for
+ * SOLANA_LZ_FEE_RETRY_AFTER_SECONDS, during which callers get the same error
+ * without a new simulation. No stale or default fee is ever served.
  */
 @Injectable()
 export class SolanaLzFeeService {
@@ -42,6 +57,7 @@ export class SolanaLzFeeService {
   private deps?: SolanaLzFeeDeps;
   private cached?: SolanaLzFeeQuote;
   private inflight?: Promise<SolanaLzFeeQuote>;
+  private failure?: { message: string; untilMs: number };
 
   constructor(
     private readonly config: ConfigService,
@@ -75,6 +91,15 @@ export class SolanaLzFeeService {
     }
     const now = this.hooks.now();
     if (this.cached && now - this.cached.quotedAtMs < this.cached.maxAgeMs) return this.cached;
+    // A recent failure is answered from memory until its retry window ends, so an
+    // RPC outage does not turn every request into more RPC calls. Still an error:
+    // no stale or default fee is served in its place.
+    if (this.failure && now < this.failure.untilMs) {
+      throw new SolanaLzFeeUnavailableError(
+        this.failure.message,
+        Math.max(1, Math.ceil((this.failure.untilMs - now) / 1000)),
+      );
+    }
     this.inflight ??= this.refresh().finally(() => {
       this.inflight = undefined;
     });
@@ -82,6 +107,21 @@ export class SolanaLzFeeService {
   }
 
   private async refresh(): Promise<SolanaLzFeeQuote> {
+    try {
+      const quote = await this.simulate();
+      this.failure = undefined;
+      return quote;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.failure = {
+        message,
+        untilMs: this.hooks.now() + SOLANA_LZ_FEE_RETRY_AFTER_SECONDS * 1000,
+      };
+      throw new SolanaLzFeeUnavailableError(message, SOLANA_LZ_FEE_RETRY_AFTER_SECONDS);
+    }
+  }
+
+  private async simulate(): Promise<SolanaLzFeeQuote> {
     this.deps ??= this.hooks.loadDeps();
     const path: SolanaLzFeePath = {
       programId: this.config.get<string>('SOLANA_PROGRAM_ID')!,

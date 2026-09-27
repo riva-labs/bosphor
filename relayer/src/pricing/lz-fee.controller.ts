@@ -8,10 +8,11 @@ import {
   Res,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { SolanaLzFeeService } from './solana-lz-fee.service';
-
-/** Seconds a client should wait before asking again after a failed simulation. */
-const RETRY_AFTER_SECONDS = 5;
+import {
+  SOLANA_LZ_FEE_RETRY_AFTER_SECONDS,
+  SolanaLzFeeService,
+  SolanaLzFeeUnavailableError,
+} from './solana-lz-fee.service';
 
 /** The one response method this controller needs (typed structurally, no @types/express). */
 interface ResponseLike {
@@ -54,7 +55,11 @@ export class LzFeeController {
       // Fail loudly: no stale, default or estimated fee is ever returned.
       const reason = err instanceof Error ? err.message : String(err);
       this.logger.warn(`Solana LayerZero fee unavailable: ${reason}`);
-      res.header('Retry-After', String(RETRY_AFTER_SECONDS));
+      const retryAfter =
+        err instanceof SolanaLzFeeUnavailableError
+          ? err.retryAfterSeconds
+          : SOLANA_LZ_FEE_RETRY_AFTER_SECONDS;
+      res.header('Retry-After', String(retryAfter));
       throw new ServiceUnavailableException(`live Solana LayerZero fee unavailable: ${reason}`);
     }
     return {

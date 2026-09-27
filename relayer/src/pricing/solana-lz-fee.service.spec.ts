@@ -1,5 +1,9 @@
 import { ConfigService } from '@nestjs/config';
-import { SolanaLzFeeService } from './solana-lz-fee.service';
+import {
+  SOLANA_LZ_FEE_RETRY_AFTER_SECONDS,
+  SolanaLzFeeService,
+  SolanaLzFeeUnavailableError,
+} from './solana-lz-fee.service';
 import type { SolanaLzFeeDeps, SolanaLzFeePath } from './solana-lz-fee';
 
 const ENABLED: Record<string, unknown> = {
@@ -97,7 +101,29 @@ describe('SolanaLzFeeService', () => {
     advance(30_000);
     quote.mockRejectedValueOnce(new Error('rpc down'));
     await expect(svc.quote()).rejects.toThrow('rpc down');
+    advance(SOLANA_LZ_FEE_RETRY_AFTER_SECONDS * 1000);
     quote.mockResolvedValueOnce(300n);
     expect((await svc.quote()).nativeFee).toBe(300n);
+  });
+
+  it('remembers a failure for the retry window instead of re-simulating on every call', async () => {
+    const { svc, quote, advance } = setup();
+    quote.mockRejectedValue(new Error('rpc down'));
+    const first = await svc.quote().catch((e: unknown) => e);
+    expect(first).toBeInstanceOf(SolanaLzFeeUnavailableError);
+    expect((first as SolanaLzFeeUnavailableError).retryAfterSeconds).toBe(
+      SOLANA_LZ_FEE_RETRY_AFTER_SECONDS,
+    );
+
+    advance(2_000);
+    const again = (await svc.quote().catch((e: unknown) => e)) as SolanaLzFeeUnavailableError;
+    expect(again).toBeInstanceOf(SolanaLzFeeUnavailableError);
+    expect(again.message).toMatch(/rpc down/);
+    expect(again.retryAfterSeconds).toBe(SOLANA_LZ_FEE_RETRY_AFTER_SECONDS - 2);
+    expect(quote).toHaveBeenCalledTimes(1);
+
+    advance(3_000);
+    await expect(svc.quote()).rejects.toThrow('rpc down');
+    expect(quote).toHaveBeenCalledTimes(2);
   });
 });
