@@ -26,11 +26,63 @@ const { intentId, blobId, endEpoch, txHash } = await client.storePriced(fileByte
 The helper fills everything from the `TESTNET` preset: the program id, the
 LayerZero send accounts, the LayerZero options, a `nativeFee` cap of 0.01 SOL
 (the endpoint charges only the live fee), a live LayerZero fee quote for
-`priceQuote()` when the optional peer `@layerzerolabs/lz-solana-sdk-v2` is
-installed (otherwise the quote uses the cap and sets `forwardIsUpperBound`), a 400k compute-unit limit for the
-endpoint call, the Sui endpoint id, and the relayer URL. Override any of them in
-the options. See [Pay for storage](/docs/guides/pay-for-storage) for what `storePriced()`
-charges; the free testnet path is `client.store(bytes, { epochs })`.
+`priceQuote()`, a 400k compute-unit limit for the endpoint call, the Sui endpoint
+id, and the relayer URL. Override any of them in the options. See
+[Pay for storage](/docs/guides/pay-for-storage) for what `storePriced()` charges;
+the free testnet path is `client.store(bytes, { epochs })`.
+
+### The live LayerZero fee
+
+`priceQuote()` and `quoteSolanaStore()` price the forward leg at the live
+LayerZero fee, read by simulating the endpoint's `quote` instruction (nothing is
+sent). Where the simulation runs depends on what you installed:
+
+| Setup | Fee source | `forwardIsUpperBound` |
+|-------|-----------|-----------------------|
+| `@layerzerolabs/lz-solana-sdk-v2` installed (scripts, servers) | Simulated locally with `quoteSolanaLzFee` | `false` |
+| No LayerZero SDK, for example a browser (SDK 0.14.0+) | The relayer runs the same simulation: `GET /lz-fee/solana`, `fetchSolanaLzFee()` | `false` |
+| A relayer without that endpoint | The preset cap (0.01 SOL) | `true`: the real charge is lower |
+
+A failed simulation throws (a `RelayerRequestError` with `retryAfterMs` from the
+relayer): the SDK never guesses a fee.
+
+## Sign with a browser wallet
+
+From `@bosphor/sdk` 0.14.0, `wallet` can be a browser wallet instead of a
+`Keypair`: anything with `publicKey` and `signTransaction`, as Phantom, Solflare,
+Backpack and `@solana/wallet-adapter` expose. The SDK builds each transaction,
+the wallet asks the user to approve it, and the SDK sends and confirms it. The
+secret key never reaches your code.
+
+```tsx
+import * as web3 from '@solana/web3.js';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { createBosphorSolanaClientFromWallet } from '@bosphor/sdk/solana';
+
+export function useBosphor() {
+  const { connection } = useConnection();
+  const wallet = useWallet(); // { publicKey, signTransaction, ... }
+
+  return async (bytes: Uint8Array) => {
+    const client = await createBosphorSolanaClientFromWallet({
+      connection,
+      wallet,
+      web3, // pass the module so your bundler resolves it
+      computeBlob: 'relayer', // blob id from the relayer, no Walrus WASM
+      appId: 'my-dapp',
+    });
+    return client.storePriced(bytes, { epochs: 5 });
+  };
+}
+```
+
+Without the wallet adapter, pass Phantom's provider directly
+(`wallet: window.phantom.solana` after `connect()`). A disconnected wallet
+(`publicKey` is `null`) throws before anything is sent, and a transaction that
+fails on-chain throws with its program error. `createBosphorSolanaClientFromWallet`
+takes the same options as `createBosphorSolanaClientFromKeypair`; the only
+browser-specific ones are `web3` and `computeBlob: 'relayer'`, and the only package
+you need next to `@bosphor/sdk` is `@solana/web3.js`.
 
 ## Progress and refunds
 
@@ -101,7 +153,10 @@ backend derives it from the on-chain nonce and cross-checks it against the
 `BosphorSolanaClient` talks to the chain through a minimal structural interface,
 `SolanaChain` (`submitIntent(fields)` and `readIntent(intentId)`). The default
 backend loads `@solana/web3.js` via a lazy dynamic import, so a codec-only or
-EVM-only consumer never pulls the Solana stack. Unit tests inject a fake `SolanaChain`.
+EVM-only consumer never pulls the Solana stack; in a browser bundle pass the module
+as `web3` instead (`createDefaultSolanaChain({ connection, wallet, web3 })`). The
+`wallet` there is a `Keypair` or a browser wallet signer, as above. Unit tests
+inject a fake `SolanaChain`.
 
 ## Reading the proof on-chain
 
