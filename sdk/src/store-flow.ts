@@ -179,7 +179,7 @@ const TRANSIENT_CODES = new Set([
 ]);
 
 const TRANSIENT_MESSAGE =
-  /socket (hang up|disconnected)|network socket|fetch failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
+  /socket (hang up|disconnected)|network socket|fetch failed|failed to fetch|networkerror|load failed|timed? ?out|\b429\b|too many requests|\b50[0-4]\b|service unavailable|bad gateway/i;
 
 export { sleep };
 
@@ -238,34 +238,75 @@ export async function encodeIntent(
 }
 
 /**
+ * Default retry bounds of the blob upload. Right after a submit the relayer may
+ * answer 404 "no pending intent" for a few seconds (it has not observed the
+ * intent yet), and a busy relayer answers 429 or 503 with `Retry-After`. Two
+ * minutes covers the watch lag of both origin chains with room to spare.
+ */
+export const DEFAULT_UPLOAD_RETRY: Readonly<Required<RetryPolicy>> = {
+  maxAttempts: 12,
+  maxElapsedMs: 120_000,
+  baseDelayMs: 1_000,
+  maxDelayMs: 10_000,
+};
+
+/**
+ * Retry bounds for the blob upload, or `false` to make exactly one attempt.
+ * Unset fields take {@link DEFAULT_UPLOAD_RETRY}.
+ */
+export type UploadRetryOptions = RetryPolicy | false;
+
+/** Options of {@link uploadBlob}. */
+export interface UploadBlobOptions {
+  /** Cancel the upload, including the wait between attempts. */
+  signal?: AbortSignal | undefined;
+  /** Integrator app id, sent as `X-Bosphor-App`. */
+  appId?: string | undefined;
+  /** Retry bounds, or `false` for a single attempt. */
+  retry?: UploadRetryOptions | undefined;
+}
+
+/**
  * Upload the raw blob bytes out-of-band to the relayer:
  * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body, plus the
- * `X-Bosphor-App` header when an app id is configured. Throws a
- * {@link RelayerUploadError} carrying the relayer's reason on any non-2xx. Shared
- * by every chain client.
+ * `X-Bosphor-App` header when an app id is configured. Shared by every chain
+ * client.
+ *
+ * Transient failures are retried with bounded exponential backoff, honoring
+ * `Retry-After`: the watch-lag 404 ("no pending intent"), 408, 429, 5xx and
+ * network errors. Once the bounds run out, or on a terminal rejection (409, 410,
+ * 413, 422), it throws a {@link RelayerUploadError} carrying the relayer's reason.
  */
 export async function uploadBlob(
   fetchFn: FetchLike,
   relayerUrl: string,
   intentId: Hex,
   data: Uint8Array,
-  signal?: AbortSignal,
-  appId?: string,
+  opts: UploadBlobOptions = {},
 ): Promise<void> {
-  const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
-    method: "POST",
-    body: data,
-    headers: relayerHeaders("application/octet-stream", appId),
-    signal,
-  });
-
-  if (!res.ok) {
+  const attempt = async (): Promise<void> => {
+    const res = await fetchFn(`${relayerUrl}/blob/${intentId}`, {
+      method: "POST",
+      body: data,
+      headers: relayerHeaders("application/octet-stream", opts.appId),
+      signal: opts.signal,
+    });
+    if (res.ok) return;
     let reason: string;
     try {
       reason = await res.text();
     } catch {
       reason = "(no response body)";
     }
-    throw new RelayerUploadError(intentId, res.status, reason);
-  }
+    throw new RelayerUploadError(intentId, res.status, reason, readRetryAfterMs(res));
+  };
+
+  if (opts.retry === false) return attempt();
+  await withRelayerRetry(attempt, {
+    ...DEFAULT_UPLOAD_RETRY,
+    ...(opts.retry ?? {}),
+    signal: opts.signal,
+    shouldRetry: (err) =>
+      err instanceof RelayerUploadError ? err.retryable : isTransientRpcError(err),
+  });
 }

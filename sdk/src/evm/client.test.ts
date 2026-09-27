@@ -168,6 +168,28 @@ test("store() surfaces a relayer non-2xx as a RelayerUploadError with the reason
   );
 });
 
+test("store() retries the relayer's watch-lag 404 on upload, then completes", async () => {
+  const { adapter } = makeFakeAdapter();
+  const statuses = [404, 404, 200];
+  const seen: number[] = [];
+  const fetch: FetchLike = async () => {
+    const status = statuses.shift() ?? 200;
+    seen.push(status);
+    return { ok: status === 200, status, text: async () => (status === 404 ? "no pending intent" : "{}") };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    uploadRetry: { baseDelayMs: 1, maxDelayMs: 1 },
+  });
+  const result = await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+  assert.equal(result.intentId, INTENT_ID);
+  assert.deepEqual(seen, [404, 404, 200]);
+});
+
 test("awaitProof throws a typed ProofTimeoutError when the intent never executes", async () => {
   const { adapter } = makeFakeAdapter({ neverExecutes: true });
   const { fetch } = makeFetch(200);

@@ -48,11 +48,14 @@ export type {
   EncodedIntent,
   FetchLike,
   FetchLikeResponse,
+  UploadRetryOptions,
   StoreProgress,
   ProgressOptions,
 } from "../store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
-export { APP_ID_HEADER } from "../store-flow.js";
+export { APP_ID_HEADER, DEFAULT_UPLOAD_RETRY } from "../store-flow.js";
+export { parseRetryAfter } from "../relayer-http.js";
+export type { RetryPolicy } from "../relayer-http.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
 export type { WalrusNetwork } from "../blob.js";
