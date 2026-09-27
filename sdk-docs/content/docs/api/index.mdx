@@ -137,15 +137,15 @@ const client = createBosphorClient({ adapter, relayerUrl, dstEid: 40378, appId: 
 
 ### Rate limits
 
-The relayer limits `POST /quote`, `POST /blob/{intentId}` and `POST /blob/encode` per client IP, and per app id when `X-Bosphor-App` is sent. Over the limit it answers `429 Too Many Requests` with a `Retry-After` header (seconds). Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+The relayer limits `POST /quote`, `GET /lz-fee/solana`, `POST /blob/{intentId}` and `POST /blob/encode` per client IP, and per app id when `X-Bosphor-App` is sent. Over the limit it answers `429 Too Many Requests` with a `Retry-After` header (seconds). Allowed responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
 
 | Budget | Default | Scope |
 |--------|---------|-------|
-| Per IP | 120 requests / minute | `/quote`, `/blob/{intentId}` and `/blob/encode` together |
+| Per IP | 120 requests / minute | `/quote`, `/lz-fee/solana`, `/blob/{intentId}` and `/blob/encode` together |
 | Per IP, encode | 30 requests / minute | `POST /blob/encode` only (it is CPU heavy) |
-| Per app id | 1200 requests / minute | All three routes, across all IPs sending that app id |
+| Per app id | 1200 requests / minute | All four routes, across all IPs sending that app id |
 
-Back off and retry after `Retry-After` on a `429`. Preflight (`OPTIONS`) requests are never counted, and neither are `GET` routes. The SDK parses `Retry-After` into `retryAfterMs` on the error it throws (see [errors](/docs/guides/errors#rate-limits-and-retryafterms)).
+Back off and retry after `Retry-After` on a `429`. Preflight (`OPTIONS`) requests are never counted, and neither are other `GET` routes (`/health`, `/public/intents`, `/openapi.*`). The SDK parses `Retry-After` into `retryAfterMs` on the error it throws (see [errors](/docs/guides/errors#rate-limits-and-retryafterms)).
 
 ## Quote (pricing)
 
@@ -212,7 +212,8 @@ curl -s "https://api.bosphor.xyz/testnet/lz-fee/solana?dstEid=40378"
 
 Pass `nativeFee` as `forwardLzFeeNative` to `POST /quote` with
 `originToken: "SOL"`. One simulation is reused for `maxAgeMs` (30 seconds). If it
-fails the relayer answers `503` with `Retry-After`, never a stale or estimated fee;
+fails the relayer answers `503` with `Retry-After`, never a stale or estimated fee,
+and remembers the failure for those seconds without new RPC calls;
 a relayer without a Solana origin answers `501`. The SDK calls this for you when
 the LayerZero Solana SDK is not installed (`fetchSolanaLzFee()`).
 
