@@ -57,6 +57,20 @@ The SDK is ESM-only and targets Node.js 22 or newer. It cannot be `require()`-d
 from CommonJS.
 </Callout>
 
+### In a browser
+
+From `@bosphor/sdk` 0.14.0 a browser dApp needs only the chain library:
+`npm install @bosphor/sdk ethers` or `npm install @bosphor/sdk @solana/web3.js`.
+Skip `@mysten/walrus` and `@mysten/sui` and pass `computeBlob: 'relayer'` to the
+client, which gets the blob id from the relayer instead of the Walrus WASM
+encoder. Pass the chain library itself as an option (`ethers` on the EVM helpers,
+`web3` on the Solana ones): the SDK loads optional peers with an import bundlers
+deliberately do not follow, so they stay optional, and an injected module avoids
+that lazy import. A Solana quote without `@layerzerolabs/lz-solana-sdk-v2` reads
+the live LayerZero fee from the relayer. The SDK's own tests bundle a sample
+browser app with esbuild to keep this working: no Node built-in, and no Walrus,
+Sui or LayerZero SDK in the bundle.
+
 ## Entry points
 
 | Import | Use it for | Reference |
