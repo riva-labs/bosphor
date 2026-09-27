@@ -102,12 +102,12 @@ export function Playground() {
       if (!ac.signal.aborted) setQuote({ status: 'ready', quote: result, at: Date.now() });
     } catch (err) {
       if (ac.signal.aborted) return;
-      const { describeQuoteError, RateLimitedError } = await import('./quote');
-      setQuote({
-        status: 'error',
-        message: describeQuoteError(err),
-        ...(err instanceof RateLimitedError ? { retryAt: Date.now() + err.retryAfterSeconds * 1000 } : {}),
-      });
+      const { describeQuoteError, retryAfterMsOf } = await import('./quote');
+      const message = await describeQuoteError(err);
+      if (ac.signal.aborted) return;
+      // The SDK parses the relayer's Retry-After (429 or 503) into retryAfterMs.
+      const wait = retryAfterMsOf(err);
+      setQuote({ status: 'error', message, ...(wait !== undefined ? { retryAt: Date.now() + wait } : {}) });
     }
   }, [chain, sizeBytes, epochs]);
 
