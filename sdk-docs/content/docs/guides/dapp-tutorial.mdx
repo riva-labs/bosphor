@@ -8,7 +8,7 @@ Practical examples for integrating Bosphor into a frontend application. Bosphor 
 The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples below use the testnet path.
 
 
-<AgentPrompt prompt="Build a TypeScript module for a browser dApp that stores bytes with Bosphor using @bosphor/sdk on the hosted testnet. Get an ethers v6 signer from window.ethereum, build the client with createBosphorClientFromSigner(signer, { ethers, computeBlob: "relayer" }) from @bosphor/sdk/evm (it uses the TESTNET preset; computeBlob "relayer" gets the blob id from the relayer so no Walrus WASM is bundled), show the user client.priceQuote(encoded) before they sign, then call client.storePriced(bytes, { epochs: 5 }) and resolve with the verified { intentId, blobId, endEpoch, txHash }. Show a link to walrusBlobUrl(blobId) when done." />
+<AgentPrompt prompt="Build a TypeScript module for a browser dApp that stores bytes with Bosphor using @bosphor/sdk on the hosted testnet. Get an ethers v6 signer from window.ethereum, build the client with createBosphorClientFromSigner(signer, { ethers, computeBlob: 'relayer' }) from @bosphor/sdk/evm (it uses the TESTNET preset; computeBlob relayer gets the blob id from the relayer so no Walrus WASM is bundled), show the user client.priceQuote(encoded) before they sign, then call client.storePriced(bytes, { epochs: 5 }) and resolve with the verified { intentId, blobId, endEpoch, txHash }. Show a link to walrusBlobUrl(blobId) when done." />
 
 ## Recommended: @bosphor/sdk
 
