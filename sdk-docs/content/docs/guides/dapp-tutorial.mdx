@@ -8,25 +8,28 @@ Practical examples for integrating Bosphor into a frontend application. Bosphor 
 The relayer base URL is `https://api.bosphor.xyz/testnet` on testnet and `https://api.bosphor.xyz` on mainnet. The examples below use the testnet path.
 
 
-<AgentPrompt prompt="Build a TypeScript module for a browser dApp that stores bytes with Bosphor using @bosphor/sdk on the hosted testnet. Get an ethers v6 signer from window.ethereum, build the client with createBosphorClientFromSigner(signer) from @bosphor/sdk/evm (it uses the TESTNET preset), show the user client.priceQuote(encoded) before they sign, then call client.storePriced(bytes, { epochs: 5 }) and resolve with the verified { intentId, blobId, endEpoch, txHash }. Show a link to walrusBlobUrl(blobId) when done." />
+<AgentPrompt prompt="Build a TypeScript module for a browser dApp that stores bytes with Bosphor using @bosphor/sdk on the hosted testnet. Get an ethers v6 signer from window.ethereum, build the client with createBosphorClientFromSigner(signer, { ethers, computeBlob: "relayer" }) from @bosphor/sdk/evm (it uses the TESTNET preset; computeBlob "relayer" gets the blob id from the relayer so no Walrus WASM is bundled), show the user client.priceQuote(encoded) before they sign, then call client.storePriced(bytes, { epochs: 5 }) and resolve with the verified { intentId, blobId, endEpoch, txHash }. Show a link to walrusBlobUrl(blobId) when done." />
 
 ## Recommended: @bosphor/sdk
 
 The SDK is the recommended path. One `storePriced()` call runs the whole paid flow: derive the blob id, quote, pay, submit, upload the bytes out-of-band, and wait for the verified proof. The [EVM guide](/docs/guides/evm) and the [SDK reference](/docs/reference) cover the full API.
 
 ```bash
-npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
+npm install @bosphor/sdk ethers
 ```
 
 ```typescript
-import { ethers } from "ethers";
+import * as ethers from "ethers";
 import { createBosphorClientFromSigner, walrusBlobUrl } from "@bosphor/sdk/evm";
 
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner(); // must be on Sepolia (chain id 11155111)
 
 // Uses the TESTNET preset: adapter address and ABI, relayer URL, Sui EID, LZ options.
-const client = await createBosphorClientFromSigner(signer);
+const client = await createBosphorClientFromSigner(signer, {
+  ethers, // injected so your bundler resolves it
+  computeBlob: "relayer", // blob id from the relayer, no Walrus WASM in the browser
+});
 
 const data = new TextEncoder().encode("data to store on Walrus");
 
@@ -42,8 +45,10 @@ console.log("Stored:", intentId, "expires at epoch", endEpoch.toString());
 console.log("Download:", walrusBlobUrl(blobId));
 ```
 
-`storePriced()` derives the blob id with `@mysten/walrus`. If your bundler cannot
-load it in the browser, pass your own `computeBlob` in the client options.
+With `computeBlob: "relayer"` the client gets the Walrus blob id from the relayer's
+[`POST /blob/encode`](/docs/api/ingest/encode-blob), so the browser bundle needs no
+Walrus WASM (from `@bosphor/sdk` 0.14.0). To compute it locally instead, install
+`@mysten/walrus` and `@mysten/sui` and drop the option.
 
 ### Escape hatches
 
