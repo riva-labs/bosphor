@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0 (2026-09-27)
+
+### Features
+
+- feat(sdk): make optional peers bundler friendly
+- feat(sdk): use the relayer's live Solana LayerZero fee
+- feat(sdk): sign Solana stores with a browser wallet
+- feat(sdk): derive blob ids through the relayer encoder
+- feat(sdk): make StoreResult.txHash required
+- feat(sdk): retry blob uploads with bounded backoff
+- feat(sdk): expose retryAfterMs on relayer errors
+
 ## 0.13.1 (2026-09-24)
 
 ### Bug Fixes
