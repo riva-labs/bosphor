@@ -144,8 +144,10 @@ paths:
                   originToken: ETH
                   forwardLzFeeNative: '1211000000000000'
       responses:
-        '201':
-          description: The quote.
+        '200':
+          description: |
+            The quote. A quote creates nothing, so the status is `200`. Relayers
+            before 0.17.0 answered `201`; treat any `2xx` as success.
           headers:
             X-RateLimit-Limit:
               $ref: '#/components/headers/X-RateLimit-Limit'

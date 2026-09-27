@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Headers, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Headers, HttpCode, Post } from '@nestjs/common';
 import { APP_ID_HEADER, parseAppId } from '../api/app-id';
 import { OriginToken } from './quote-engine';
 import { QuoteService } from './quote.service';
@@ -31,7 +31,10 @@ function decimalBigint(field: string, v: unknown): bigint | undefined {
 export class QuoteController {
   constructor(private readonly quote: QuoteService) {}
 
+  // A quote creates nothing, so answer 200 rather than Nest's POST default 201.
+  // The SDK accepts any 2xx, so older SDKs keep working.
   @Post()
+  @HttpCode(200)
   async getQuote(
     @Body() dto: QuoteRequestDto,
     @Headers(APP_ID_HEADER.toLowerCase()) rawAppId?: string,

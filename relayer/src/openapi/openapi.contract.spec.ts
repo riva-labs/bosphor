@@ -279,6 +279,8 @@ describe('OpenAPI spec (relayer/openapi/openapi.yaml)', () => {
         jsonHeaders,
       );
       expect(res.headers.get('x-ratelimit-limit')).toBe('1000');
+      // A quote is a query, not a resource creation: 200, not Nest's POST default 201.
+      expect(res.status).toBe(200);
       const body = (await expectDocumented('post', '/quote', res)) as Record<string, string>;
       expect(BigInt(body.totalNative)).toBe(BigInt(body.escrowNative) + BigInt(body.forwardNative));
     });
