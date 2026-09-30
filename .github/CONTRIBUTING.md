@@ -19,7 +19,7 @@ cp .env.example .env
 ```
 
 This is not an npm workspace yet: the root `npm install` only installs the root
-tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`, `sdk-docs/`)
+tooling. Each package (`relayer/`, `sdk/`, `canary/`, `sdk-docs/`)
 has its own `package.json`. Run `npm run setup` to install all of them in one
 command, or install just the ones you work on, e.g. `(cd relayer && npm install)`.
 

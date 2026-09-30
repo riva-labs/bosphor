@@ -63,9 +63,10 @@ hand-written.
 Move the file, then add `old path -> new path` to `redirects/map.mjs`. The build
 proves the target exists.
 
-## Domain cutover
+## Domains
 
-The portal still serves at sdk.bosphor.xyz. At the docs.bosphor.xyz cutover:
-set `siteUrl` in `src/lib/shared.ts`, add the route in `wrangler.jsonc`, and set
-the Worker var `CANONICAL_ORIGIN=https://docs.bosphor.xyz` so other hosts 301 to
-it.
+The portal serves at docs.bosphor.xyz (`siteUrl` in `src/lib/shared.ts`). The
+former SDK docs host sdk.bosphor.xyz is also routed to this Worker, which 301s
+every request there to the same page on docs.bosphor.xyz (the Worker var
+`CANONICAL_ORIGIN` in `wrangler.jsonc`). Paths from the retired Docusaurus site
+are 301'd through `redirects/map.mjs`.

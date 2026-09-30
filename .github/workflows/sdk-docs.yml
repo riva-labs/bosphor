@@ -1,5 +1,5 @@
-# Builds and deploys the developer portal (sdk-docs/, served at sdk.bosphor.xyz
-# until the docs.bosphor.xyz cutover) to Cloudflare Workers.
+# Builds and deploys the developer portal (sdk-docs/, served at docs.bosphor.xyz;
+# sdk.bosphor.xyz 301s to it) to Cloudflare Workers.
 #
 # `npm run build` also runs the post-build checks: internal links and anchors,
 # the retired-URL redirect map, and the redirect Worker tests. Pull requests run
@@ -13,8 +13,9 @@
 # One-time setup (repo Settings -> Secrets and variables -> Actions):
 #   - CLOUDFLARE_API_TOKEN  (a token with Workers Scripts:Edit on the account)
 #   - CLOUDFLARE_ACCOUNT_ID (the account that owns the bosphor.xyz zone)
-# The custom domain sdk.bosphor.xyz is declared in sdk-docs/wrangler.jsonc and is
-# bound on the first deploy; no dashboard step is needed once the secrets exist.
+# The custom domains docs.bosphor.xyz and sdk.bosphor.xyz are declared in
+# sdk-docs/wrangler.jsonc and bound on deploy; no dashboard step is needed once the
+# secrets exist and neither domain is attached to another Worker.
 name: Deploy SDK Docs
 
 on:
@@ -35,7 +36,6 @@ on:
       - 'sdk/tsconfig.json'
       - 'tsconfig.base.json'
       - 'relayer/openapi/**'
-      - 'website/docs/**'
       - '.github/workflows/sdk-docs.yml'
   workflow_dispatch:
 

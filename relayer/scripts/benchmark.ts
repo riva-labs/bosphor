@@ -1,7 +1,7 @@
 /**
  * Relayer latency benchmark runner.
  *
- * Two latency figures exist (see #411 and website/docs/relayer.md "Latency metrics"):
+ * Two latency figures exist (see #411 and the portal page docs/protocol/relayer "Latency metrics"):
  *   - COMPUTE latency  (bosphor_relayer_compute_latency_seconds): the relayer's
  *     own reaction time, i.e. the store span MINUS external chain/Walrus/LZ I/O.
  *     THIS is the M4 <3s KPI.
