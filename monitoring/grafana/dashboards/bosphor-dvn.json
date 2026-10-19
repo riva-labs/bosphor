@@ -249,8 +249,12 @@
                 "value": null
               },
               {
+                "color": "yellow",
+                "value": 5
+              },
+              {
                 "color": "red",
-                "value": 1
+                "value": 50
               }
             ]
           },
