@@ -1482,7 +1482,7 @@
     {
       "id": 25,
       "type": "stat",
-      "title": "Dead-lettered (total)",
+      "title": "Dead-lettered (24h)",
       "gridPos": {
         "h": 4,
         "w": 6,
@@ -1537,7 +1537,7 @@
             "type": "prometheus",
             "uid": "bosphor-prometheus"
           },
-          "expr": "sum by(job)(bosphor_relayer_store_dead_letter_total)",
+          "expr": "sum by(job)(increase(bosphor_relayer_store_dead_letter_total[24h]))",
           "legendFormat": "{{job}}",
           "instant": true
         }
