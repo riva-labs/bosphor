@@ -34,7 +34,7 @@
  *                            ../../relayer/.env.testnet; no default on mainnet)
  *   SUI_ENDPOINT_V2 | SUI_LZ_ENDPOINT_V2   Sui endpoint id (for the event type)
  *   SUI_LZ_PACKAGE_ID        Sui OApp package id (packet sender bytes32)
- *   SUI_JSONRPC_URL          Sui JSON-RPC (testnet default publicnode; required on mainnet)
+ *   SUI_GRAPHQL_URL          Sui GraphQL (testnet default graphql.testnet.sui.io; required on mainnet)
  *   SUI_RELAYER_ADDR         the Sui sender to filter queryEvents by (required on mainnet)
  *   RETURN_CONFIRMATIONS     DVN confirmations to attest (default 1)
  *   RETURN_MIN_NONCE         skip return packets below this nonce in loop mode
@@ -67,6 +67,7 @@ import {
   storePda,
 } from "./config.ts";
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
+import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
 // /home/arb/bosphor/sdk/src/solana/program.ts (KNOWN_DISCRIMINATORS.instruction).
@@ -106,9 +107,9 @@ if (!SUI_OAPP_PACKAGE_ID) {
 
 const PACKET_SENT_EVENT = `${SUI_ENDPOINT_V2}::messaging_channel::PacketSentEvent`;
 
-// Sui JSON-RPC. On testnet the official fullnode rate-limits JSON-RPC hard and
-// often returns empty bodies, so the preset uses publicnode. Required on mainnet.
-const SUI_JSONRPC = setting("SUI_JSONRPC_URL", PRESET.suiJsonRpcUrl);
+// Sui GraphQL. JSON-RPC was shut off on the public testnet endpoints in 2026-10.
+// Required on mainnet.
+const SUI_GRAPHQL = setting("SUI_GRAPHQL_URL", PRESET.suiGraphqlUrl);
 // The Sui relayer that sends the return proof. Filtering queryEvents by this
 // sender returns a small, recent set the public RPCs serve reliably.
 const SUI_RELAYER_ADDR = setting("SUI_RELAYER_ADDR", PRESET.suiRelayerAddr);
@@ -465,36 +466,9 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   }
 }
 
-/**
- * Resilient Sui JSON-RPC call: retries on network errors, non-2xx, and empty /
- * non-JSON bodies (the public fullnode returns these under load).
- */
-async function suiRpc(method: string, params: unknown[], attempts = 4): Promise<any> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch(SUI_JSONRPC, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      });
-      const text = await res.text();
-      if (!res.ok || !text) throw new Error(`sui rpc ${res.status} (${text.length} bytes)`);
-      const d = JSON.parse(text);
-      if (d.error) throw new Error(`sui rpc error: ${JSON.stringify(d.error)}`);
-      return d.result;
-    } catch (e) {
-      lastErr = e;
-      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-function packetFromEvent(ev: any): LzPacket | null {
-  const ep = ev?.parsedJson?.encoded_packet;
-  if (!ep) return null;
-  const hex = Array.isArray(ep) ? "0x" + Buffer.from(ep).toString("hex") : ep;
+function packetFromEvent(ev: SuiEvent): LzPacket | null {
+  const hex = bytesFieldToHex(ev?.parsedJson?.encoded_packet);
+  if (!hex) return null;
   try {
     return decodePacket(hex);
   } catch {
@@ -502,21 +476,11 @@ function packetFromEvent(ev: any): LzPacket | null {
   }
 }
 
-/** Pull recent PacketSentEvents (from our relayer's txs), newest first. */
+/** Pull our relayer's most recent PacketSentEvents, newest first. */
 async function querySuiPacketSent(limit = 15): Promise<LzPacket[]> {
-  let result: any;
-  for (let l = limit; l >= 2; l = Math.floor(l / 2)) {
-    try {
-      result = await suiRpc("suix_queryEvents", [{ Sender: SUI_RELAYER_ADDR }, null, l, true]);
-      break;
-    } catch (e: any) {
-      if (!String(e?.message).includes("referenced transaction events")) throw e;
-      // window includes an unresolvable tx; try a smaller (newer-only) window
-    }
-  }
+  const page = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, { type: PACKET_SENT_EVENT, limit });
   const out: LzPacket[] = [];
-  for (const ev of result?.data ?? []) {
-    if (ev.type !== PACKET_SENT_EVENT) continue;
+  for (const ev of page.data) {
     const pkt = packetFromEvent(ev);
     if (pkt && isOurReturn(pkt)) out.push(pkt);
   }
@@ -532,23 +496,22 @@ async function findReturnPacketsInRange(from: bigint, to: bigint): Promise<Map<b
   const want = new Set<bigint>();
   for (let n = from; n <= to; n++) want.add(n);
   const found = new Map<bigint, LzPacket>();
-  let cursor: unknown = null;
+  let cursor: string | null = null;
   for (let page = 0; page < 40 && want.size; page++) {
-    let res: any;
+    let res;
     try {
-      res = await suiRpc("suix_queryEvents", [{ Sender: SUI_RELAYER_ADDR }, cursor, 50, true]);
+      res = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, { type: PACKET_SENT_EVENT, limit: 50, cursor });
     } catch {
       break;
     }
-    for (const ev of res?.data ?? []) {
-      if (ev.type !== PACKET_SENT_EVENT) continue;
+    for (const ev of res.data) {
       const pkt = packetFromEvent(ev);
       if (pkt && isOurReturn(pkt) && want.has(pkt.nonce)) {
         found.set(pkt.nonce, pkt);
         want.delete(pkt.nonce);
       }
     }
-    if (!res?.hasNextPage) break;
+    if (!res.hasNextPage) break;
     cursor = res.nextCursor;
   }
   return found;
@@ -609,8 +572,8 @@ async function healReturnGap(tip: bigint): Promise<void> {
 
 /** Fetch the PacketSentEvent from a single Sui transaction digest. */
 async function packetFromDigest(digest: string): Promise<LzPacket> {
-  const result = await suiRpc("sui_getTransactionBlock", [digest, { showEvents: true }]);
-  const ev = (result?.events ?? []).find((e: any) => e.type === PACKET_SENT_EVENT);
+  const events = await transactionEvents(SUI_GRAPHQL, digest);
+  const ev = events.find((e) => e.type === PACKET_SENT_EVENT);
   const pkt = ev && packetFromEvent(ev);
   if (!pkt) throw new Error("no PacketSentEvent in tx");
   return pkt;

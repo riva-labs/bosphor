@@ -39,7 +39,7 @@ interface NetworkPreset {
   solanaRpcUrl?: string;
   keypairPath?: string;
   programId?: string;
-  suiJsonRpcUrl?: string;
+  suiGraphqlUrl?: string;
   /** Sui bosphor_lz PACKAGE id: the Solana peer for the Sui eid (SUI_RECEIVER). */
   suiOappPackageId?: string;
   /** Sui relayer address that sends return proofs (SUI_RELAYER_ADDR). */
@@ -55,9 +55,8 @@ const PRESETS: Record<BosphorNetwork, NetworkPreset> = {
     solanaRpcUrl: "https://api.devnet.solana.com",
     keypairPath: resolve(homedir(), ".config/solana/bosphor-devnet.json"),
     programId: "7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF",
-    // The official testnet fullnode rate-limits JSON-RPC hard; publicnode is a
-    // reliable free alternative.
-    suiJsonRpcUrl: "https://sui-testnet-rpc.publicnode.com",
+    // Sui JSON-RPC was shut off on the public testnet endpoints in 2026-10.
+    suiGraphqlUrl: "https://graphql.testnet.sui.io/graphql",
     // v6 testnet deployment.
     suiOappPackageId: "0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5",
     suiRelayerAddr: "0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366",
