@@ -226,12 +226,14 @@ export const configValidationSchema = Joi.object({
   // rows older than this so the queue table does not grow without bound; the
   // durable evidence they carry lives in the intent_lifecycle feed regardless.
   STAGED_RETENTION_MS: Joi.number().integer().default(86400000), // 24 h
-  // Active rows that buffered bytes but never got their Sui IntentReceived (a
-  // lost or skipped forward delivery) have no deadline, so they would stay active
-  // forever. The reaper expires them after this TTL. Expiry is final: a delivery
-  // that lands later cannot store, so keep this well above the longest forward
-  // outage we expect to recover from (61h observed in 2026-09).
-  STAGED_UNRECEIVED_TTL_MS: Joi.number().integer().min(1).default(604800000), // 7 d
+  // Backstop for active rows that buffered bytes but never got their Sui
+  // IntentReceived (a lost or skipped forward delivery) AND carry no deadline
+  // (ingest normally records the committed deadline, so expireDue settles those
+  // on time). Without it they would stay active forever. An expired row refuses
+  // re-uploads and ignores a late IntentReceived until it is purged, so keep this
+  // well above the longest forward outage we expect to recover from (61h in
+  // 2026-09). Floor 1h: forward delivery normally takes minutes.
+  STAGED_UNRECEIVED_TTL_MS: Joi.number().integer().min(3600000).default(604800000), // 7 d
   // Graceful-shutdown drain budget. On SIGTERM the processor waits up to this
   // long for in-flight stores to settle before exiting; anything still active
   // resumes idempotently on next boot (no re-upload / re-record).
