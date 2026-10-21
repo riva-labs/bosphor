@@ -108,6 +108,12 @@ The relayer may not be running, or it may have missed the event. Check:
 3. Sui wallet balance (relayer needs SUI for gas and LZ fees)
 4. That all `SUI_LZ_*` environment variables are set
 
+### `execute_store` aborts with `MoveAbort` code 1 in `system::inner`
+
+Walrus has upgraded its on-chain package and the executor still links the old one. Every store fails until the executor is relinked. To confirm, run `npx tsx scripts/util/walrus-drift.ts` (add `NETWORK=mainnet` for mainnet). It exits non-zero and names both versions. The scheduled **Walrus Drift** workflow runs the same check every 6 hours.
+
+To fix it, bump the `walrus` and `wal` `rev` in `contracts/sui/executor/Move.toml` to the upstream MystenLabs/walrus commit whose `Published.toml` matches the new package. Then upgrade the executor with the pinned Sui CLI.
+
 ### Sui transaction fails with "object version conflict"
 
 This happens when two Sui transactions reference the same object in quick succession. The deploy scripts include `waitForTransaction` calls to prevent this. If you run manual transactions too quickly, wait a few seconds and retry.
