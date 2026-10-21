@@ -139,8 +139,8 @@ deps = { std = "MoveStdlib", sui = "Sui" }
 [pinned.testnet.bosphor]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "BAA19A4495CFD0F66880C88025E8D4B076855FB20A075CC271D3FADB8D2327B4"
-deps = { bosphor_lz = "bosphor_lz", oapp = "OApp", std = "MoveStdlib", sui = "Sui", walrus = "walrus" }
+manifest_digest = "E796E3916A9F8A6E13F2B9EB55BCBA10709F607B6A021912B46CE41F2A292A3A"
+deps = { bosphor_lz = "bosphor_lz", call = "Call", endpoint_v2 = "EndpointV2", oapp = "OApp", ptb_move_call = "PtbMoveCall", std = "MoveStdlib", sui = "Sui", utils = "Utils", wal = "wal", walrus = "walrus", zro = "Zro" }
 
 [pinned.testnet.bosphor_lz]
 source = { local = "../lz-receiver" }

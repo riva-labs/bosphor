@@ -5,7 +5,7 @@ edition = "2024"
 [dependencies]
 # Pinned to the upstream commit whose testnet-contracts/walrus Published.toml
 # matches the Walrus package testnet runs (System v4, published-at 0x7d3b2086...).
-# When Walrus upgrades, bump this rev (scripts/sui/check-walrus-drift.ts fails
+# When Walrus upgrades, bump this rev (scripts/util/walrus-drift.ts fails
 # loudly when the chain moves past it).
 walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "2e35317046cf5f6e7274fe24f31431d832d2be25" }
 wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "2e35317046cf5f6e7274fe24f31431d832d2be25" }
@@ -20,6 +20,10 @@ ptb_move_call = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", su
 utils = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/utils", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
 zro = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/zro", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
 
+# Mainnet: this graph compiles, but bosphor_lz has no mainnet publication yet
+# (lz-receiver/Published.toml has only testnet). Publish lz-receiver on mainnet
+# before upgrading the mainnet executor, or the upgrade reports
+# "Unpublished dependencies: bosphor_lz".
 [dep-replacements.mainnet]
 walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "mainnet-contracts/walrus", rev = "544d3cf71b4c043759657e5622508570999fddd0" }
 wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "mainnet-contracts/wal", rev = "544d3cf71b4c043759657e5622508570999fddd0" }
