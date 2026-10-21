@@ -31,7 +31,7 @@ M3 makes three deploy-time changes versus M2:
 scripts/util/deploy-testnet.sh deploy:sui
 ```
 
-`deploy-sui.ts` removes `contracts/sui/lz-receiver/Published.toml`, publishes fresh, runs
+`deploy-sui.ts` removes `contracts/sui/lz-receiver/Published.toml` (tracked; commit the regenerated file), publishes fresh, runs
 `register_oapp`, sets the LZ libraries + DVN/executor config, sets the Sui->EVM
 peer if `EVM_ADAPTER_ADDRESS` is already set (it is not on a fresh redeploy; the
 peer is set later in Step 6), and writes these to `relayer/.env.testnet`:
@@ -49,9 +49,15 @@ you just published.
 > dependency resolves to the just-published `bosphor_lz` (from that package's
 > `Move.lock`). Do NOT reorder these two publishes.
 
+Both `Published.toml` files are tracked in git (they hold the package ids and
+upgrade caps for every network). For a fresh testnet publish, remove only the
+`[published.testnet]` section of `contracts/sui/executor/Published.toml`, not
+the whole file, so the mainnet entry and its upgrade cap survive. Use the Sui
+CLI pinned in `contracts/sui/executor/sui-toolchain`. Commit both regenerated
+`Published.toml` files afterwards.
+
 ```bash
-# Fresh publish of the executor package.
-rm -f contracts/sui/executor/Published.toml
+# Fresh publish of the executor package (after removing its [published.testnet] section).
 sui client publish contracts/sui/executor --gas-budget 500000000 \
   --skip-dependency-verification --json | tee /tmp/exec-publish.json
 ```

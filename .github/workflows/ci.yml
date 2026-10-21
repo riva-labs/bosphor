@@ -104,7 +104,9 @@ jobs:
         run: sui move test --build-env testnet
         working-directory: contracts/sui/executor
 
-      - name: Build for mainnet
+      # Compile check only: bosphor_lz is not published on mainnet yet, so this
+      # graph cannot be published there (see the note in Move.toml).
+      - name: Build for mainnet (compile check)
         run: sui move build --build-env mainnet
         working-directory: contracts/sui/executor
 
