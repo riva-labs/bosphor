@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
-import { pollDelay, sendPolled } from "./rpc.ts";
+import { RateLimitStreak, pollDelay, sendPolled } from "./rpc.ts";
 
 test("pollDelay keeps the normal poll interval while the RPC is healthy", () => {
   assert.equal(pollDelay(15_000, 0), 15_000);
@@ -52,4 +52,40 @@ test("sendPolled confirms through a rate-limited status poll without an unhandle
   } finally {
     process.off("unhandledRejection", onUnhandled);
   }
+});
+
+test("sendPolled re-checks the status before declaring a tx expired, so a late landing is not resent", async () => {
+  const payer = Keypair.generate();
+  let statusCalls = 0;
+  const conn = {
+    getLatestBlockhash: async () => ({
+      blockhash: Keypair.generate().publicKey.toBase58(),
+      lastValidBlockHeight: 100,
+    }),
+    sendRawTransaction: async () => "sig2",
+    // First poll: not seen yet. It lands in the last valid block, which the
+    // height read below already shows as passed.
+    getSignatureStatuses: async () => ({
+      value: [++statusCalls === 1 ? null : { confirmationStatus: "confirmed", err: null }],
+    }),
+    getBlockHeight: async () => 101,
+  };
+  const tx = new Transaction().add(
+    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: payer.publicKey, lamports: 1 }),
+  );
+
+  assert.equal(await sendPolled(conn as never, tx, payer, { pollMs: 1 }), "sig2");
+});
+
+test("RateLimitStreak counts consecutive ticks that hit a 429 anywhere, and resets on a clean tick", () => {
+  const rl = new RateLimitStreak();
+  // A 429 caught and swallowed deep inside a delivery still marks the tick.
+  rl.note(new Error("429 Too Many Requests"));
+  rl.note(new Error("custom program error: 0x1771"));
+  assert.equal(rl.endTick(), 1);
+  rl.note(new Error("Server responded with 429"));
+  assert.equal(rl.endTick(), 2);
+  // Non-rate-limit errors alone do not back off.
+  rl.note(new Error("fetch failed"));
+  assert.equal(rl.endTick(), 0);
 });
