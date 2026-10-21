@@ -122,7 +122,8 @@ export interface StagedBytes {
  * no-op): a backfilled duplicate on a `done` row, or a forward delivery that
  * landed after the row was expired. `missing` covers a row purged in between.
  */
-export type ReceivedOutcome = { recorded: true } | { recorded: false; state: StagedState | 'missing' };
+export type ReceivedOutcome =
+  { recorded: true } | { recorded: false; state: StagedState | 'missing' };
 
 /** Fields carried by the Sui IntentReceived event. */
 export interface ReceivedDetails {
