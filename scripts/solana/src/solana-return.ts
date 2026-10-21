@@ -66,7 +66,7 @@ import {
   storePda,
 } from "./config.ts";
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
-import { isRateLimited, pollDelay, sendPolled } from "./rpc.ts";
+import { RateLimitStreak, pollDelay, sendPolled } from "./rpc.ts";
 import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
@@ -106,6 +106,10 @@ if (!SUI_OAPP_PACKAGE_ID) {
 }
 
 const PACKET_SENT_EVENT = `${SUI_ENDPOINT_V2}::messaging_channel::PacketSentEvent`;
+
+// RPC 429s are mostly caught inside deliver()/heal and turned into "skipped",
+// so the loop's backoff reads them from here rather than from tick errors.
+const rpcRateLimits = new RateLimitStreak();
 
 // Sui GraphQL. JSON-RPC was shut off on the public testnet endpoints in 2026-10.
 // Required on mainnet.
@@ -336,6 +340,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     );
     epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
   }
 
@@ -351,6 +356,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     );
     initVerifyIx = raw ? normalizeIx(raw as never) : null;
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(`  uln.initVerify build skipped (${errText(e)})`);
   }
 
@@ -366,6 +372,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   try {
     lzReceiveMetas = await resolveLzReceiveAccounts(conn, worker.publicKey, params);
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(
       `  lz_receive_types resolve failed (${String((e as Error).message).split("\n")[0]})`,
     );
@@ -393,6 +400,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
         );
       }
     } catch (e) {
+      rpcRateLimits.note(e);
       console.log(
         `  [dry] nonce ${pkt.nonce} verify simulate error: ${String((e as Error).message).split("\n")[0]}`,
       );
@@ -419,6 +427,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     const sig = await sendPolled(conn, tx, worker);
     console.log(`  verify   ${sig}`);
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(
       `  verify   skipped (${String((e as Error).message).split("\n")[0]})`,
     );
@@ -432,6 +441,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     const sig = await sendPolled(conn, new Transaction().add(commitIx), worker);
     console.log(`  commit   ${sig}`);
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(`  commit   skipped (${errText(e)})`);
   }
 
@@ -452,6 +462,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     console.log(`  lzReceive ${sig} -> escrow released`);
     return "sent";
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(`  lzReceive skipped (${errText(e)})`);
     return "skipped";
   }
@@ -492,7 +503,8 @@ async function findReturnPacketsInRange(from: bigint, to: bigint): Promise<Map<b
     let res;
     try {
       res = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, { type: PACKET_SENT_EVENT, limit: 50, cursor });
-    } catch {
+    } catch (e) {
+      rpcRateLimits.note(e);
       break;
     }
     for (const ev of res.data) {
@@ -538,7 +550,8 @@ async function healReturnGap(tip: bigint): Promise<void> {
     );
     if (!nonce) return;
     frontier = BigInt(nonce.inboundNonce.toString());
-  } catch {
+  } catch (e) {
+    rpcRateLimits.note(e);
     return;
   }
   if (tip <= frontier + 1n) return; // no gap below the tip
@@ -594,11 +607,10 @@ async function runLoop(): Promise<void> {
       `worker ${worker.publicKey.toBase58()}; store ${storePda().toBase58()}; RUN=${RUN}`,
   );
   const seen = new Set<string>();
-  // Consecutive ticks that failed on an RPC rate limit. A transient RPC error is
-  // never fatal: it is logged and the tick retried, backing off with jitter while
-  // the RPC keeps answering 429 (a process exit would restart gap-heal from
-  // scratch and add even more load on the limited RPC).
-  let rateLimitedStreak = 0;
+  // A transient RPC error is never fatal: it is logged and the tick retried,
+  // backing off with jitter while the RPCs (Solana or Sui) keep answering 429.
+  // A process exit would restart gap-heal from scratch and add even more load on
+  // the limited RPC.
   for (;;) {
     try {
       const packets = await querySuiPacketSent();
@@ -613,13 +625,13 @@ async function runLoop(): Promise<void> {
         const r = await deliver(pkt);
         if (r !== "skipped") seen.add(pkt.guid);
       }
-      rateLimitedStreak = 0;
     } catch (e) {
-      rateLimitedStreak = isRateLimited(e) ? rateLimitedStreak + 1 : 0;
-      console.error(
-        rateLimitedStreak > 0 ? `tick error (rate limited x${rateLimitedStreak}):` : "tick error:",
-        e,
-      );
+      rpcRateLimits.note(e);
+      console.error("tick error:", e);
+    }
+    const rateLimitedStreak = rpcRateLimits.endTick();
+    if (rateLimitedStreak > 0) {
+      console.log(`rate limited for ${rateLimitedStreak} tick(s); backing off`);
     }
     await new Promise((r) => setTimeout(r, pollDelay(POLL_MS, rateLimitedStreak)));
   }
