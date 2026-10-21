@@ -73,6 +73,43 @@ jobs:
         run: sui move test --build-env testnet
         working-directory: contracts/sui/lz-receiver
 
+  executor-move-tests:
+    name: Executor Move Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The executor needs the Sui CLI pinned in contracts/sui/executor/sui-toolchain
+      # (older CLIs panic against the current testnet protocol).
+      - name: Read pinned Sui CLI
+        id: sui
+        run: echo "version=$(tr -d '[:space:]' < contracts/sui/executor/sui-toolchain)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Sui CLI
+        id: cache-sui
+        uses: actions/cache@v6
+        with:
+          path: /usr/local/bin/sui
+          key: sui-cli-${{ runner.os }}-${{ steps.sui.outputs.version }}
+
+      - name: Install Sui CLI
+        if: steps.cache-sui.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/sui-install
+          curl -fsSL "https://github.com/MystenLabs/sui/releases/download/${{ steps.sui.outputs.version }}/sui-${{ steps.sui.outputs.version }}-ubuntu-x86_64.tgz" -o /tmp/sui-install/sui.tgz
+          tar -xzf /tmp/sui-install/sui.tgz -C /tmp/sui-install ./sui
+          sudo mv /tmp/sui-install/sui /usr/local/bin/sui
+
+      - name: Run executor Move tests
+        run: sui move test --build-env testnet
+        working-directory: contracts/sui/executor
+
+      # Compile check only: bosphor_lz is not published on mainnet yet, so this
+      # graph cannot be published there (see the note in Move.toml).
+      - name: Build for mainnet (compile check)
+        run: sui move build --build-env mainnet
+        working-directory: contracts/sui/executor
+
   relayer-build-and-test:
     name: Relayer Build & Test
     runs-on: ubuntu-latest
