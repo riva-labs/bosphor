@@ -15,7 +15,7 @@ function build(cfg: Record<string, number> = {}, staged: unknown = undefined) {
   const store = staged ?? storeStub();
   const config = { get: jest.fn((k: string) => cfg[k]) };
   const errorReporter = { captureException: jest.fn() };
-  const metrics = { setStagedQueueStats: jest.fn() };
+  const metrics = { setStagedQueueStats: jest.fn(), recordOrphanExpired: jest.fn() };
   const reaper = new StagedReaper(
     config as never,
     errorReporter as never,
@@ -58,6 +58,18 @@ describe('StagedReaper', () => {
 
     const [cutoff] = store.purgeTerminal.mock.calls[0];
     expect(cutoff).toBeLessThanOrEqual(before - 86_400_000 + 1_000);
+  });
+
+  it('counts orphan expiries in Prometheus so a lost forward delivery stays on the dashboard (#494)', async () => {
+    const store = {
+      ...storeStub(),
+      expireUnreceived: jest.fn().mockResolvedValue(['0xorphan1', '0xorphan2']),
+    };
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const { reaper, metrics } = build({}, store);
+    await reaper.reap();
+    expect(metrics.recordOrphanExpired).toHaveBeenCalledWith(2);
+    warn.mockRestore();
   });
 
   it('expires un-received rows older than STAGED_UNRECEIVED_TTL_MS and names them in a warning', async () => {

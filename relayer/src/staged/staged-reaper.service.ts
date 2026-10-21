@@ -17,7 +17,8 @@ import { REAP_INTERVAL_MS } from '../common/constants';
  *   orphan  -> active rows that buffered bytes but were never received from Sui
  *              (forward delivery lost or skipped, so no deadline ever arrives)
  *              become `expired` after STAGED_UNRECEIVED_TTL_MS and free their
- *              bytes. Logged by id, so a real forward outage stays visible.
+ *              bytes. Logged by id and counted (staged_orphan_expired_total),
+ *              so a real forward outage stays visible.
  *   purge   -> terminal rows (done/dead/expired) older than STAGED_RETENTION_MS
  *              are deleted so the table does not grow without bound.
  *   gauges  -> publish the queue depth (active / bytes / dead) so the dashboard
@@ -56,6 +57,7 @@ export class StagedReaper {
       const now = Date.now();
       const expired = await this.staged.expireDue(now);
       const orphaned = await this.staged.expireUnreceived(now - this.unreceivedTtlMs, now);
+      this.metrics.recordOrphanExpired(orphaned.length);
       const purged = await this.staged.purgeTerminal(now - this.retentionMs);
       if (expired > 0) {
         this.logger.warn(`Expired ${expired} past-deadline intent(s) that never stored`);

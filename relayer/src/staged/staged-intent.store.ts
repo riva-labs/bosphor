@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ByteRecoveryCandidate,
   ReceivedDetails,
+  ReceivedOutcome,
   StagedBytes,
   StagedIntentRow,
   StagedStats,
@@ -234,11 +235,13 @@ export class StagedIntentStore {
   /**
    * Record that the Sui IntentReceived event fired for `intentId`. Creates the
    * row if the bytes have not landed yet, otherwise flags the existing active
-   * row. No-op on a terminal row.
+   * row. No-op on a terminal row: then it reports `recorded: false` with the
+   * row's state, so the caller can surface a forward delivery that landed after
+   * the row was expired (#494) instead of dropping it silently.
    */
-  async markReceived(intentId: string, details: ReceivedDetails): Promise<void> {
+  async markReceived(intentId: string, details: ReceivedDetails): Promise<ReceivedOutcome> {
     const now = Date.now();
-    await this.pool.query(
+    const { rows } = await this.pool.query(
       `INSERT INTO ${TABLE}
          (intent_id, received, src_eid, committed_blob_id, deadline, delivery_digest,
           storage_epochs, next_attempt_at, created_at, updated_at)
@@ -251,7 +254,8 @@ export class StagedIntentStore {
          delivery_digest = COALESCE(EXCLUDED.delivery_digest, ${TABLE}.delivery_digest),
          storage_epochs = COALESCE(EXCLUDED.storage_epochs, ${TABLE}.storage_epochs),
          updated_at = EXCLUDED.updated_at
-       WHERE ${TABLE}.state = 'active'`,
+       WHERE ${TABLE}.state = 'active'
+       RETURNING intent_id`,
       [
         intentId,
         details.srcEid,
@@ -262,6 +266,9 @@ export class StagedIntentStore {
         details.storageEpochs ?? null,
       ],
     );
+    if (rows.length) return { recorded: true };
+    const row = await this.get(intentId);
+    return { recorded: false, state: row?.state ?? 'missing' };
   }
 
   /**

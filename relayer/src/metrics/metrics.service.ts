@@ -113,6 +113,24 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Forward deliveries the queue could not use (#494). `orphanExpired` counts
+  // rows expired because their Sui IntentReceived never arrived (a lost or
+  // skipped forward delivery); `lateReceived` counts IntentReceived events that
+  // landed on a terminal row, by that row's state (`expired` = arrived after the
+  // orphan TTL; `done` = a backfilled duplicate, benign).
+  private readonly stagedOrphanExpired = new Counter({
+    name: 'bosphor_relayer_staged_orphan_expired_total',
+    help: 'Durable-queue rows expired because their Sui IntentReceived never arrived',
+    registers: [this.registry],
+  });
+
+  private readonly stagedLateReceived = new Counter({
+    name: 'bosphor_relayer_staged_late_received_total',
+    help: 'Sui IntentReceived events that landed on a terminal durable-queue row',
+    labelNames: ['state'] as const,
+    registers: [this.registry],
+  });
+
   // Never-lose-money accounting (M4). `intentNetMargin` is the net USD margin of
   // the most recently settled intent (collected - spent); `intentSettled` counts
   // settlements by result (completed vs skipped-by-guard); `negativeMargin` is the
@@ -359,6 +377,14 @@ export class MetricsService {
   recordWalSpendSkipped(): void {
     this.walSpendSkipped.inc();
     this.intentSettled.inc({ result: 'skipped' });
+  }
+
+  recordOrphanExpired(count: number): void {
+    if (count > 0) this.stagedOrphanExpired.inc(count);
+  }
+
+  recordLateReceived(state: string): void {
+    this.stagedLateReceived.inc({ state });
   }
 
   /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */

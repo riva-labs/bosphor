@@ -1383,6 +1383,62 @@
           "legendFormat": "{{deployment}} eid {{src_eid}}"
         }
       ]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Lost forward deliveries (orphan expiries, late IntentReceived)",
+      "description": "Orphan expiries: staged rows expired because their Sui IntentReceived never arrived (lost or skipped forward delivery). Late receipts: IntentReceived events that landed on a terminal row; state=expired means the delivery came after the orphan TTL and the intent will not be stored. state=done is a benign backfilled duplicate.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "bosphor-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "sum by (deployment) (increase(bosphor_relayer_staged_orphan_expired_total[1h]))",
+          "legendFormat": "orphan expired {{deployment}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "bosphor-prometheus"
+          },
+          "expr": "sum by (deployment, state) (increase(bosphor_relayer_staged_late_received_total[1h]))",
+          "legendFormat": "late IntentReceived on {{state}} {{deployment}}"
+        }
+      ]
     }
   ]
 }

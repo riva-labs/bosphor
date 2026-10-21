@@ -183,7 +183,7 @@ class FakePool implements PgQueryable {
       // digest never clobbers one already captured.
       existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
       existing.storage_epochs = (params[6] as number | null) ?? existing.storage_epochs;
-      return { rows: [] };
+      return { rows: [{ intent_id: id }] }; // RETURNING intent_id => recorded
     }
 
     const now = params[4] as number;
@@ -232,7 +232,7 @@ class FakePool implements PgQueryable {
     base.delivery_digest = (params[5] as string | null) ?? null;
     base.storage_epochs = (params[6] as number | null) ?? null;
     this.rows.set(id, base);
-    return { rows: [] };
+    return { rows: [{ intent_id: id }] }; // RETURNING intent_id => recorded
   }
 
   private update(sql: string, params: unknown[]): { rows: Record<string, unknown>[] } {
@@ -490,6 +490,27 @@ describe('StagedIntentStore', () => {
     expect(row?.received).toBe(true);
     expect(row?.hasBytes).toBe(true);
     expect(row?.blobId).toBe('blob-b');
+  });
+
+  it('reports a fresh or active IntentReceived as recorded', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    expect(await store.markReceived('0xnew', RX)).toEqual({ recorded: true });
+    await store.upsertBytes('0xact', { bytes: bytes('x'), blobId: 'blob-a', size: 1 });
+    expect(await store.markReceived('0xact', RX)).toEqual({ recorded: true });
+  });
+
+  it('reports a late IntentReceived on an expired row as not recorded, with its state', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    clock = 1000;
+    await store.upsertBytes('0xlate', { bytes: bytes('x'), blobId: 'blob-l', size: 1 });
+    clock = 5000;
+    await store.expireUnreceived(2000, 5000); // orphan expiry (#487)
+
+    expect(await store.markReceived('0xlate', RX)).toEqual({ recorded: false, state: 'expired' });
   });
 
   it('is terminal-sticky: a late event cannot resurrect a done intent', async () => {
