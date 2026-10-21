@@ -118,6 +118,13 @@ export interface StagedBytes {
 }
 
 /** Fields carried by the Sui IntentReceived event. */
+/**
+ * Result of markReceived. Not recorded means the row is terminal (the event is a
+ * no-op): a backfilled duplicate on a `done` row, or a forward delivery that
+ * landed after the row was expired. `missing` covers a row purged in between.
+ */
+export type ReceivedOutcome = { recorded: true } | { recorded: false; state: StagedState | 'missing' };
+
 export interface ReceivedDetails {
   srcEid: number;
   committedBlobId: string;
