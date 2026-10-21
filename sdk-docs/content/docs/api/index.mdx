@@ -255,7 +255,7 @@ Each rejection maps to a precise HTTP status so a client can react without parsi
 | `400 Bad Request` | Body is empty or not raw bytes, or `X-Bosphor-App` is malformed |
 | `404 Not Found` | No pending intent for that id (or the relayer has not seen it yet) |
 | `409 Conflict` | The intent is already executed |
-| `410 Gone` | The intent deadline has passed |
+| `410 Gone` | The intent deadline has passed, or the relayer already settled the intent (expired or dead-lettered) and will not store it |
 | `413 Payload Too Large` | Body exceeds the ingest cap (`MAX_INGEST_BLOB_BYTES`, default 10 MiB) |
 | `422 Unprocessable Entity` | The recomputed blob id or size does not match the commitment |
 | `429 Too Many Requests` | Rate limit exceeded; honor `Retry-After` |

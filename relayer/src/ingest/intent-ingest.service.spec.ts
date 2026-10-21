@@ -205,7 +205,13 @@ describe('IntentIngest with the durable staged queue', () => {
     // The cap is passed so the write enforces it atomically (not the fast-path read).
     expect(staged.upsertBytes).toHaveBeenCalledWith(
       INTENT_ID,
-      { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5, appId: null },
+      {
+        bytes,
+        blobId: COMMITTED_BLOB_ID_B64URL,
+        size: 5,
+        appId: null,
+        deadline: expect.any(Number),
+      },
       268_435_456,
     );
     // Event-driven drain: staging nudges the processor to store without waiting
@@ -219,6 +225,28 @@ describe('IntentIngest with the durable staged queue', () => {
     expect(staged.upsertBytes).toHaveBeenCalledWith(
       INTENT_ID,
       expect.objectContaining({ appId: 'my-dapp' }),
+      268_435_456,
+    );
+  });
+
+  it('rejects with expired (no wake) when the staged row is already terminal', async () => {
+    // e.g. the reaper expired an orphan whose Sui IntentReceived never arrived.
+    // The write is a no-op, so reporting ok would claim bytes that will never store.
+    staged.upsertBytes.mockResolvedValue('terminal');
+
+    const result = await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: 'expired' }));
+    expect(waker.wake).not.toHaveBeenCalled();
+  });
+
+  it('records the committed deadline on the staged row so the reaper can expire it on time', async () => {
+    const deadline = Date.now() + 3_600_000;
+    mockStore.getCommitment.mockResolvedValue(makeCommitment({ deadline }));
+    await ingest.ingest(INTENT_ID, Buffer.from('hello'));
+    expect(staged.upsertBytes).toHaveBeenCalledWith(
+      INTENT_ID,
+      expect.objectContaining({ deadline }),
       268_435_456,
     );
   });

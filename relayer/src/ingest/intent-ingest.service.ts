@@ -133,9 +133,15 @@ export class IntentIngest {
     if (this.staged) {
       const outcome = await this.staged.upsertBytes(
         intentId,
-        { bytes, blobId, size: bytes.length, appId },
+        { bytes, blobId, size: bytes.length, appId, deadline: commitment.deadline },
         this.maxStagedBytes,
       );
+      // The row already settled (expired by the reaper, or dead-lettered): the
+      // write was a no-op, so the bytes will never store. Refuse rather than
+      // report an upload that cannot succeed.
+      if (outcome === 'terminal') {
+        return this.reject(intentId, 'expired', 'intent is no longer pending on this relayer');
+      }
       if (outcome === 'backpressure') {
         return this.reject(
           intentId,

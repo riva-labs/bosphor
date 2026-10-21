@@ -182,8 +182,8 @@ export class StagedIntentStore {
           WHERE bytes IS NOT NULL AND intent_id <> $1
        )
        INSERT INTO ${TABLE}
-         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at, app_id)
-       SELECT $1, $2, $3, $4::bigint, $5, $5, $5, $8
+         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at, app_id, deadline)
+       SELECT $1, $2, $3, $4::bigint, $5, $5, $5, $8, $9::bigint
          FROM capacity
         WHERE $6 = false OR capacity.staged + $4::bigint <= $7::bigint
        ON CONFLICT (intent_id) DO UPDATE SET
@@ -191,12 +191,24 @@ export class StagedIntentStore {
          blob_id = EXCLUDED.blob_id,
          size = EXCLUDED.size,
          updated_at = EXCLUDED.updated_at,
-         app_id = COALESCE(EXCLUDED.app_id, ${TABLE}.app_id)
+         app_id = COALESCE(EXCLUDED.app_id, ${TABLE}.app_id),
+         -- The Sui-delivered deadline (markReceived) wins over the ingest copy.
+         deadline = COALESCE(${TABLE}.deadline, EXCLUDED.deadline)
        WHERE ${TABLE}.state = 'active'
          AND ($6 = false
               OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7::bigint)
        RETURNING intent_id`,
-      [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap, blob.appId ?? null],
+      [
+        intentId,
+        blob.bytes,
+        blob.blobId,
+        blob.size,
+        now,
+        capped,
+        cap,
+        blob.appId ?? null,
+        blob.deadline ?? null,
+      ],
     );
     if (rows.length > 0) return 'accepted';
     // No row written. Distinguish "cap would be breached" from "row is terminal"
@@ -494,6 +506,25 @@ export class StagedIntentStore {
       [now],
     );
     return rows.length;
+  }
+
+  /**
+   * Expire active rows that buffered bytes before `cutoff` but were never
+   * received from Sui. They have no deadline (it arrives with IntentReceived), so
+   * expireDue() can never settle them: a lost or skipped forward delivery would
+   * otherwise leave them active, holding bytes, forever (#486). Frees bytes.
+   * Returns the expired intent ids so the caller can log them.
+   */
+  async expireUnreceived(cutoff: number, now: number): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE ${TABLE}
+          SET state = 'expired', bytes = NULL, updated_at = $2
+        WHERE state = 'active' AND received = false AND deadline IS NULL
+          AND created_at < $1
+        RETURNING intent_id`,
+      [cutoff, now],
+    );
+    return rows.map((r) => r.intent_id as string);
   }
 
   /**

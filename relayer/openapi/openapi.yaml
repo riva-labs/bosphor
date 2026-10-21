@@ -431,7 +431,7 @@ paths:
                 message: intent already executed
                 error: Conflict
         '410':
-          description: The intent deadline has passed. It will be refunded on the origin chain instead.
+          description: The intent deadline has passed, or this relayer already settled the intent (expired or dead-lettered) and will not store it. It will be refunded on the origin chain instead.
           content:
             application/json:
               schema:

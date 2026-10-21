@@ -14,6 +14,10 @@ import { REAP_INTERVAL_MS } from '../common/constants';
  *   expire  -> active rows whose deadline passed before they stored become
  *              `expired` and free their bytes (the processor skips past-deadline
  *              rows; this is what actually settles them).
+ *   orphan  -> active rows that buffered bytes but were never received from Sui
+ *              (forward delivery lost or skipped, so no deadline ever arrives)
+ *              become `expired` after STAGED_UNRECEIVED_TTL_MS and free their
+ *              bytes. Logged by id, so a real forward outage stays visible.
  *   purge   -> terminal rows (done/dead/expired) older than STAGED_RETENTION_MS
  *              are deleted so the table does not grow without bound.
  *   gauges  -> publish the queue depth (active / bytes / dead) so the dashboard
@@ -27,6 +31,7 @@ import { REAP_INTERVAL_MS } from '../common/constants';
 export class StagedReaper {
   private readonly logger = new Logger(StagedReaper.name);
   private readonly retentionMs: number;
+  private readonly unreceivedTtlMs: number;
   private reaping = false;
 
   constructor(
@@ -40,6 +45,7 @@ export class StagedReaper {
     private readonly staged: StagedIntentStore | null = null,
   ) {
     this.retentionMs = this.config.get<number>('STAGED_RETENTION_MS') ?? 86_400_000;
+    this.unreceivedTtlMs = this.config.get<number>('STAGED_UNRECEIVED_TTL_MS') ?? 7 * 86_400_000;
   }
 
   @Interval(REAP_INTERVAL_MS)
@@ -49,9 +55,18 @@ export class StagedReaper {
     try {
       const now = Date.now();
       const expired = await this.staged.expireDue(now);
+      const orphaned = await this.staged.expireUnreceived(now - this.unreceivedTtlMs, now);
       const purged = await this.staged.purgeTerminal(now - this.retentionMs);
       if (expired > 0) {
         this.logger.warn(`Expired ${expired} past-deadline intent(s) that never stored`);
+      }
+      if (orphaned.length > 0) {
+        this.logger.warn(
+          `Expired ${orphaned.length} intent(s) whose Sui IntentReceived never arrived ` +
+            `within ${Math.round(this.unreceivedTtlMs / 3_600_000)}h (forward delivery ` +
+            `lost or skipped): ${orphaned.slice(0, 20).join(', ')}` +
+            (orphaned.length > 20 ? ` (+${orphaned.length - 20} more)` : ''),
+        );
       }
       if (purged > 0) {
         this.logger.log(`Purged ${purged} terminal row(s) past retention`);
