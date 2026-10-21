@@ -11,12 +11,21 @@ const CHAIN_INTERVAL_VARS: Partial<Record<CanaryChain, string>> = {
   solana: 'CANARY_SOLANA_INTERVAL_MS',
 };
 
+// A probe spends fees, so a typo (negative, "30m", or a few ms) must never
+// become a tight setInterval loop. Anything under a minute is rejected.
+const MIN_INTERVAL_MS = 60 * 1000;
+
+function parseInterval(raw: string | undefined): number | undefined {
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms >= MIN_INTERVAL_MS ? ms : undefined;
+}
+
 /**
  * The round-trip interval for one chain's probe: its per-chain override when
- * set, else the shared CANARY_INTERVAL_MS, else 15 minutes.
+ * set and valid, else the shared CANARY_INTERVAL_MS, else 15 minutes.
  */
 export function probeIntervalMs(chain: CanaryChain, env: Env = process.env): number {
-  const shared = Number(env.CANARY_INTERVAL_MS) || DEFAULT_INTERVAL_MS;
+  const shared = parseInterval(env.CANARY_INTERVAL_MS) ?? DEFAULT_INTERVAL_MS;
   const override = CHAIN_INTERVAL_VARS[chain];
-  return (override && Number(env[override])) || shared;
+  return (override && parseInterval(env[override])) || shared;
 }
