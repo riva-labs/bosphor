@@ -34,7 +34,12 @@ services:
     build: ../bosphor-dvn
     container_name: bosphor-dvn-solana
     command: ["npm", "run", "start-solana"]
-    env_file: ../bosphor-dvn/.env
+    env_file:
+      - ../bosphor-dvn/.env
+      # Optional, gitignored: SOLANA_RPC_URL for a keyed devnet RPC. The public
+      # endpoint rate-limits this host when the DVN, return worker and canary share it.
+      - path: .env.solana-rpc
+        required: false
     environment:
       - DVN_METRICS_PORT=9302
       - DVN_STATE_DIR=/data
@@ -76,11 +81,13 @@ services:
     build: ./scripts/solana
     container_name: bosphor-dvn-solana-return
     command: ["npm", "run", "solana-return"]
+    env_file:
+      - path: .env.solana-rpc
+        required: false
     environment:
       - RUN=1
       - RETURN_MODE=loop
       - RETURN_MIN_NONCE=2
-      - SOLANA_RPC_URL=https://api.devnet.solana.com
       - SOLANA_KEYPAIR=/keypair.json
       - SUI_ENDPOINT_V2=0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a
       - SUI_LZ_PACKAGE_ID=0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5
