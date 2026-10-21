@@ -309,7 +309,10 @@ function packetBytes(pkt: LzPacket): Uint8Array {
 
 /**
  * Read the endpoint's delivery state for one return nonce: the inbound frontier
- * and whether the nonce's payload hash PDA still exists. Null on an RPC error.
+ * and whether the nonce's payload hash PDA still exists. Both accounts come from
+ * one getMultipleAccountsInfo call so they are read at the same slot; two calls
+ * to a load-balanced RPC could pair a fresh frontier with a stale "absent" PDA
+ * and misread a verified-but-unexecuted nonce as delivered. Null on an RPC error.
  */
 async function readNonceState(
   conn: ReturnType<typeof connection>,
@@ -317,11 +320,17 @@ async function readNonceState(
 ): Promise<EndpointNonceState | null> {
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const sender = hexToBytes(SUI_OAPP_SENDER_B32);
+  const [noncePda] = endpoint.deriver.nonce(storePda() as never, SUI_EID, sender);
+  const [hashPda] = endpoint.deriver.payloadHash(storePda() as never, SUI_EID, sender, Number(nonce));
   try {
-    const n = await endpoint.getNonce(conn as never, storePda() as never, SUI_EID, sender);
-    const [pda] = endpoint.deriver.payloadHash(storePda() as never, SUI_EID, sender, Number(nonce));
-    const account = await conn.getAccountInfo(new PublicKey(pda.toBase58()));
-    return { inboundNonce: n ? BigInt(n.inboundNonce.toString()) : 0n, payloadHashExists: account !== null };
+    const [nonceAccount, hashAccount] = await conn.getMultipleAccountsInfo([
+      new PublicKey(noncePda.toBase58()),
+      new PublicKey(hashPda.toBase58()),
+    ]);
+    const inboundNonce = nonceAccount
+      ? BigInt(EndpointProgram.accounts.Nonce.fromAccountInfo(nonceAccount as never)[0].inboundNonce.toString())
+      : 0n;
+    return { inboundNonce, payloadHashExists: hashAccount !== null };
   } catch (e) {
     rpcRateLimits.note(e);
     return null;
