@@ -1,11 +1,18 @@
+import { Logger } from '@nestjs/common';
 import { StagedReaper } from './staged-reaper.service';
 
-function build(cfg: Record<string, number> = {}, staged: unknown = undefined) {
-  const store = staged ?? {
+/** A quiet store stub: nothing to expire or purge, empty queue. */
+function storeStub() {
+  return {
     expireDue: jest.fn().mockResolvedValue(0),
+    expireUnreceived: jest.fn().mockResolvedValue([] as string[]),
     purgeTerminal: jest.fn().mockResolvedValue(0),
     stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
   };
+}
+
+function build(cfg: Record<string, number> = {}, staged: unknown = undefined) {
+  const store = staged ?? storeStub();
   const config = { get: jest.fn((k: string) => cfg[k]) };
   const errorReporter = { captureException: jest.fn() };
   const metrics = { setStagedQueueStats: jest.fn() };
@@ -21,6 +28,7 @@ function build(cfg: Record<string, number> = {}, staged: unknown = undefined) {
 describe('StagedReaper', () => {
   it('expires past-deadline rows and purges terminal rows past retention', async () => {
     const store = {
+      ...storeStub(),
       expireDue: jest.fn().mockResolvedValue(2),
       purgeTerminal: jest.fn().mockResolvedValue(3),
       stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
@@ -39,6 +47,7 @@ describe('StagedReaper', () => {
 
   it('defaults retention to 24h when unset', async () => {
     const store = {
+      ...storeStub(),
       expireDue: jest.fn().mockResolvedValue(0),
       purgeTerminal: jest.fn().mockResolvedValue(0),
       stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
@@ -51,8 +60,39 @@ describe('StagedReaper', () => {
     expect(cutoff).toBeLessThanOrEqual(before - 86_400_000 + 1_000);
   });
 
+  it('expires un-received rows older than STAGED_UNRECEIVED_TTL_MS and names them in a warning', async () => {
+    const store = {
+      ...storeStub(),
+      expireUnreceived: jest.fn().mockResolvedValue(['0xorphan1', '0xorphan2']),
+    };
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const { reaper } = build({ STAGED_UNRECEIVED_TTL_MS: 3_600_000 }, store);
+    const before = Date.now();
+    await reaper.reap();
+    const after = Date.now();
+
+    const [cutoff, now] = store.expireUnreceived.mock.calls[0];
+    expect(now).toBeGreaterThanOrEqual(before);
+    expect(now).toBeLessThanOrEqual(after);
+    expect(cutoff).toBe(now - 3_600_000);
+    const logged = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('IntentReceived never arrived');
+    expect(logged).toContain('0xorphan1');
+    warn.mockRestore();
+  });
+
+  it('defaults the un-received TTL to 7 days, outlasting a multi-day forward outage', async () => {
+    const store = storeStub();
+    const { reaper } = build({}, store);
+    await reaper.reap();
+
+    const [cutoff, now] = store.expireUnreceived.mock.calls[0];
+    expect(now - cutoff).toBe(7 * 86_400_000);
+  });
+
   it('publishes queue-depth gauges from the post-reap stats snapshot', async () => {
     const store = {
+      ...storeStub(),
       expireDue: jest.fn().mockResolvedValue(0),
       purgeTerminal: jest.fn().mockResolvedValue(0),
       stats: jest.fn().mockResolvedValue({ active: 7, dead: 2, bytes: 4096 }),
@@ -71,6 +111,7 @@ describe('StagedReaper', () => {
   it('does not run reentrantly while a prior pass is in flight', async () => {
     let resolveExpire!: (n: number) => void;
     const store = {
+      ...storeStub(),
       expireDue: jest
         .fn()
         .mockImplementationOnce(() => new Promise<number>((r) => (resolveExpire = r)))
@@ -91,6 +132,7 @@ describe('StagedReaper', () => {
 
   it('reports a reap failure loudly and stays runnable', async () => {
     const store = {
+      ...storeStub(),
       expireDue: jest.fn().mockRejectedValue(new Error('db down')),
       purgeTerminal: jest.fn().mockResolvedValue(0),
       stats: jest.fn().mockResolvedValue({ active: 0, dead: 0, bytes: 0 }),
