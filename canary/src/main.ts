@@ -9,6 +9,7 @@ import { CanaryMetrics, type CanaryChain } from './metrics.ts';
 import { runProbe, type ChainProbe, type PreflightOutcome } from './probe.ts';
 import { createEvmProbe } from './probes/evm.ts';
 import { initSentry, reportProbeFailure } from './error-report.ts';
+import { probeIntervalMs } from './schedule.ts';
 
 if (initSentry(process.env.SENTRY_DSN, process.env.SENTRY_ENVIRONMENT || 'production')) {
   console.log('[canary] Sentry error reporting enabled');
@@ -16,8 +17,10 @@ if (initSentry(process.env.SENTRY_DSN, process.env.SENTRY_ENVIRONMENT || 'produc
 
 // --- shared config ---
 const PORT = Number(process.env.CANARY_PORT) || 9300;
-const INTERVAL_MS = Number(process.env.CANARY_INTERVAL_MS) || 15 * 60 * 1000;
-// Must stay below INTERVAL_MS. If a probe is allowed to run as long as the
+// Probe interval is per chain: CANARY_INTERVAL_MS, overridable per chain (e.g.
+// CANARY_SOLANA_INTERVAL_MS). See schedule.ts.
+//
+// Must stay below every chain's interval. If a probe is allowed to run as long as the
 // interval, a single slow round-trip overruns into the next tick, which is then
 // skipped ("previous probe still in flight") -- so exactly when the return path
 // is degraded we collect half the samples. A round-trip normally takes ~4 min,
@@ -29,15 +32,8 @@ const LZ_OPTIONS = process.env.LZ_OPTIONS || '0x00030100110100000000000000000000
 const RELAYER_URL = process.env.RELAYER_URL || 'http://relayer:3000';
 // Wallet balances are refreshed on this fast cadence, decoupled from the probe
 // interval, so Grafana shows near-live balances instead of a value that only
-// moves once per round-trip (every CANARY_INTERVAL_MS).
+// moves once per round-trip (every probe interval).
 const BALANCE_REFRESH_MS = Number(process.env.CANARY_BALANCE_REFRESH_MS) || 60 * 1000;
-
-if (MAX_WAIT_MS >= INTERVAL_MS) {
-  console.warn(
-    `[canary] CANARY_MAX_WAIT_MS (${MAX_WAIT_MS}) >= CANARY_INTERVAL_MS (${INTERVAL_MS}); ` +
-      'a slow probe will overrun the next tick and skip a sample',
-  );
-}
 
 const metrics = new CanaryMetrics();
 
@@ -96,6 +92,12 @@ async function runCycle(probe: ChainProbe): Promise<void> {
  * the EVM leg.
  */
 function scheduleChain(probe: ChainProbe, intervalMs: number): void {
+  if (MAX_WAIT_MS >= intervalMs) {
+    console.warn(
+      `[canary:${probe.chain}] CANARY_MAX_WAIT_MS (${MAX_WAIT_MS}) >= probe interval (${intervalMs}); ` +
+        'a slow probe will overrun the next tick and skip a sample',
+    );
+  }
   let running = false;
   const tick = async (): Promise<void> => {
     if (running) {
@@ -225,12 +227,12 @@ async function main(): Promise<void> {
     res.end('not found');
   }).listen(PORT, () => {
     console.log(
-      `[canary] /metrics on :${PORT}, interval ${INTERVAL_MS / 1000}s, ` +
-        `chains: ${probes.map((p) => p.chain).join(', ')}`,
+      `[canary] /metrics on :${PORT}, chains: ` +
+        probes.map((p) => `${p.chain} every ${probeIntervalMs(p.chain) / 1000}s`).join(', '),
     );
   });
 
-  for (const probe of probes) scheduleChain(probe, INTERVAL_MS);
+  for (const probe of probes) scheduleChain(probe, probeIntervalMs(probe.chain));
   // Keep wallet balances fresh between round-trips (near-live in Grafana).
   for (const probe of probes) scheduleBalanceRefresh(probe, BALANCE_REFRESH_MS);
 }
