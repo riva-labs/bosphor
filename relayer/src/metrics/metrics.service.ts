@@ -379,7 +379,6 @@ export class MetricsService {
     this.intentSettled.inc({ result: 'skipped' });
   }
 
-  /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */
   recordOrphanExpired(count: number): void {
     if (count > 0) this.stagedOrphanExpired.inc(count);
   }
@@ -388,6 +387,7 @@ export class MetricsService {
     this.stagedLateReceived.inc({ state });
   }
 
+  /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */
   setStagedQueueStats(stats: { active: number; dead: number; bytes: number }): void {
     if (Number.isFinite(stats.active)) this.stagedActive.set(stats.active);
     if (Number.isFinite(stats.bytes)) this.stagedBytes.set(stats.bytes);
