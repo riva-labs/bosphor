@@ -14,8 +14,8 @@ contracts/evm/foundry.lock
 
 # sui (under contracts/)
 contracts/sui/executor/build/
-contracts/sui/executor/deps/
-contracts/sui/executor/Published.toml
+# executor/Published.toml is tracked: it records the testnet/mainnet package ids
+# and upgrade caps, which an upgrade from a clean clone needs.
 contracts/sui/lz-receiver/build/
 contracts/sui/lz-receiver/Published.toml
 contracts/sui/lz-receiver/traces/

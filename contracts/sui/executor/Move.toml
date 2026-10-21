@@ -1,10 +1,25 @@
 [package]
 name = "bosphor"
-edition = "2024.beta"
+edition = "2024"
 
 [dependencies]
-Walrus = { local = "deps/walrus" }
+# Pinned to the upstream commit whose testnet-contracts/walrus Published.toml
+# matches the Walrus package testnet runs (System v4, published-at 0x7d3b2086...).
+# When Walrus upgrades, bump this rev (scripts/sui/check-walrus-drift.ts fails
+# loudly when the chain moves past it).
+walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/walrus", rev = "2e35317046cf5f6e7274fe24f31431d832d2be25" }
+wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "testnet-contracts/wal", rev = "2e35317046cf5f6e7274fe24f31431d832d2be25" }
 bosphor_lz = { local = "../lz-receiver" }
+# LayerZero packages, all at the commit lz-receiver's lock already resolves to.
+# The executor imports oapp directly; the rest are named by the tests and the
+# test linkage shim, and the new-style package format needs them listed.
+oapp = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/oapps/oapp", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+call = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/dynamic-call/call", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+endpoint_v2 = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/endpoint-v2", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+ptb_move_call = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/ptb-builders/ptb-move-call", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+utils = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/utils", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
+zro = { git = "https://github.com/LayerZero-Labs/LayerZero-v2.git", subdir = "packages/layerzero-v2/sui/contracts/zro", rev = "9c741e7f9790639537b1710a203bcdfd73b0b9ac" }
 
-[addresses]
-bosphor = "0x0"
+[dep-replacements.mainnet]
+walrus = { git = "https://github.com/MystenLabs/walrus.git", subdir = "mainnet-contracts/walrus", rev = "544d3cf71b4c043759657e5622508570999fddd0" }
+wal = { git = "https://github.com/MystenLabs/walrus.git", subdir = "mainnet-contracts/wal", rev = "544d3cf71b4c043759657e5622508570999fddd0" }
