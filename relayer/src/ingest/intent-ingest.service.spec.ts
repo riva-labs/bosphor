@@ -205,7 +205,13 @@ describe('IntentIngest with the durable staged queue', () => {
     // The cap is passed so the write enforces it atomically (not the fast-path read).
     expect(staged.upsertBytes).toHaveBeenCalledWith(
       INTENT_ID,
-      { bytes, blobId: COMMITTED_BLOB_ID_B64URL, size: 5, appId: null, deadline: expect.any(Number) },
+      {
+        bytes,
+        blobId: COMMITTED_BLOB_ID_B64URL,
+        size: 5,
+        appId: null,
+        deadline: expect.any(Number),
+      },
       268_435_456,
     );
     // Event-driven drain: staging nudges the processor to store without waiting

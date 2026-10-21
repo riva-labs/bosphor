@@ -845,7 +845,9 @@ describe('StagedIntentStore', () => {
     };
 
     // Bytes arrived at t=1000 but the Sui IntentReceived never did (forward leg lost).
-    await at(1000, () => store.upsertBytes('0xorphan', { bytes: bytes('z'), blobId: 'b', size: 1 }));
+    await at(1000, () =>
+      store.upsertBytes('0xorphan', { bytes: bytes('z'), blobId: 'b', size: 1 }),
+    );
     // Same age, but received: has a future deadline and must be left alone.
     await at(1000, () => store.upsertBytes('0xrx', { bytes: bytes('z'), blobId: 'b', size: 1 }));
     await store.markReceived('0xrx', { ...RX, deadline: 9_000_000 });

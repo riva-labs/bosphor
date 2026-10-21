@@ -45,8 +45,7 @@ export class StagedReaper {
     private readonly staged: StagedIntentStore | null = null,
   ) {
     this.retentionMs = this.config.get<number>('STAGED_RETENTION_MS') ?? 86_400_000;
-    this.unreceivedTtlMs =
-      this.config.get<number>('STAGED_UNRECEIVED_TTL_MS') ?? 7 * 86_400_000;
+    this.unreceivedTtlMs = this.config.get<number>('STAGED_UNRECEIVED_TTL_MS') ?? 7 * 86_400_000;
   }
 
   @Interval(REAP_INTERVAL_MS)
