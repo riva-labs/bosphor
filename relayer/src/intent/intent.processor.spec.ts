@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 // IntentProcessor transitively imports SolanaService, which imports
 // @solana/web3.js (heavy transitive ESM). SolanaService is provided as a mock
 // here, so stub the module to keep the spec pure.
@@ -58,7 +59,7 @@ function build(
   } = {},
 ) {
   const staged = {
-    markReceived: jest.fn().mockResolvedValue(undefined),
+    markReceived: jest.fn().mockResolvedValue({ recorded: true }),
     drainDue: jest.fn().mockResolvedValue(rows),
     fetchBytes: jest.fn().mockResolvedValue(Buffer.from('hello')),
     persistUpload: jest.fn().mockResolvedValue(undefined),
@@ -122,6 +123,7 @@ function build(
     recordLzSend: jest.fn(),
     recordReturnMode: jest.fn(),
     recordDeadLetter: jest.fn(),
+    recordLateReceived: jest.fn(),
   };
   const lifecycle = {
     getCommitment: jest.fn().mockResolvedValue({
@@ -216,6 +218,42 @@ describe('IntentProcessor durable queue', () => {
       deliveryDigest: '0xdeliver',
       storageEpochs: 5,
     });
+  });
+
+  const LATE_EVENT = {
+    intentId: '0xlate',
+    committedBlobId: BigInt(COMMITTED_HEX).toString(),
+    size: 5,
+    encodingType: 0,
+    storageEpochs: 5,
+    deadline: 1_700_000_000n,
+    srcEid: 40161,
+    nonce: 1n,
+  } as never;
+
+  it('warns and counts a late IntentReceived that lands on an expired row (#494)', async () => {
+    const { proc, staged, metrics } = build();
+    staged.markReceived.mockResolvedValueOnce({ recorded: false, state: 'expired' });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await proc.onReceived(LATE_EVENT);
+
+    expect(metrics.recordLateReceived).toHaveBeenCalledWith('expired');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('0xlate'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('expired'));
+    warn.mockRestore();
+  });
+
+  it('counts a backfilled IntentReceived on a done row without warning', async () => {
+    const { proc, staged, metrics } = build();
+    staged.markReceived.mockResolvedValueOnce({ recorded: false, state: 'done' });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await proc.onReceived(LATE_EVENT);
+
+    expect(metrics.recordLateReceived).toHaveBeenCalledWith('done');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('recovers missing bytes by re-fetching the committed blob from Walrus', async () => {

@@ -230,13 +230,27 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   async onReceived(event: SuiLzEvent): Promise<void> {
     if (!this.staged) return;
     try {
-      await this.staged.markReceived(event.intentId, {
+      const outcome = await this.staged.markReceived(event.intentId, {
         srcEid: event.srcEid,
         committedBlobId: u256ToHex(event.committedBlobId),
         deadline: Number(event.deadline) * 1000, // seconds -> ms
         deliveryDigest: event.deliveryDigest || undefined,
         storageEpochs: event.storageEpochs,
       });
+      if (!outcome.recorded) {
+        // The row is terminal, so the event is a no-op. On `expired` the forward
+        // delivery landed after the orphan TTL: the store will never run and the
+        // dApp stepper stays stuck, so say so loudly (#494). A `done` row is a
+        // backfilled duplicate and only counted.
+        this.metrics.recordLateReceived(outcome.state);
+        if (outcome.state === 'expired') {
+          this.logger.warn(
+            `[${event.intentId}] IntentReceived arrived after the staged row expired ` +
+              `(src_eid ${event.srcEid}); the intent will not be stored`,
+          );
+        }
+        return;
+      }
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
       // The row may now be ready (bytes already ingested): drain without waiting
       // for the poll. If bytes are not in yet, the drain is a cheap no-op and the
