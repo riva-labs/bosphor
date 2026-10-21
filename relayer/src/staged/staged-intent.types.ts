@@ -109,6 +109,12 @@ export interface StagedBytes {
   size: number;
   /** Validated X-Bosphor-App integrator id, or null/absent when none was sent. */
   appId?: string | null;
+  /**
+   * Committed deadline (epoch ms) from the origin-chain commitment. Recorded at
+   * ingest so a row whose Sui IntentReceived never arrives still expires on its
+   * real deadline (expireDue) instead of only on the un-received TTL backstop.
+   */
+  deadline?: number | null;
 }
 
 /** Fields carried by the Sui IntentReceived event. */
