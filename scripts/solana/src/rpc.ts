@@ -34,6 +34,23 @@ export function backoffDelay(attempt: number, baseMs: number, capMs: number): nu
   return Math.min(baseMs * 2 ** attempt, capMs);
 }
 
+/**
+ * Delay before a long-running worker's next poll. Healthy: exactly `pollMs`.
+ * After `rateLimitedStreak` consecutive rate-limited ticks: an exponential
+ * backoff (capped) with equal jitter, so restarts or sibling workers sharing
+ * one RPC key do not retry in lockstep.
+ */
+export function pollDelay(
+  pollMs: number,
+  rateLimitedStreak: number,
+  random: () => number = Math.random,
+  capMs = 5 * 60_000,
+): number {
+  if (rateLimitedStreak <= 0) return pollMs;
+  const backoff = backoffDelay(rateLimitedStreak, pollMs, capMs);
+  return backoff / 2 + random() * (backoff / 2);
+}
+
 /** Run `fn`, retrying rate-limited failures with capped exponential backoff. */
 export async function withBackoff<T>(fn: () => Promise<T>, o: BackoffOptions = {}): Promise<T> {
   const retries = o.retries ?? 8;
