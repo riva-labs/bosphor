@@ -170,6 +170,8 @@ class FakePool implements PgQueryable {
         // COALESCE(EXCLUDED.app_id, existing): a re-ingest without an app id
         // (e.g. byte recovery) never clears one recorded earlier.
         existing.app_id = (params[7] as string | null) ?? existing.app_id;
+        // COALESCE(existing.deadline, EXCLUDED.deadline): the Sui deadline wins.
+        existing.deadline = existing.deadline ?? (params[8] as number | null) ?? null;
         return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
       }
       existing.received = true;
@@ -219,6 +221,7 @@ class FakePool implements PgQueryable {
       base.blob_id = params[2] as string;
       base.size = params[3] as number;
       base.app_id = (params[7] as string | null) ?? null;
+      base.deadline = (params[8] as number | null) ?? null;
       this.rows.set(id, base);
       return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
     }
@@ -804,6 +807,29 @@ describe('StagedIntentStore', () => {
     expect((await store.get('0xexp'))?.state).toBe('expired');
     expect((await store.get('0xexp'))?.hasBytes).toBe(false);
     expect((await store.get('0xlive'))?.state).toBe('active');
+  });
+
+  it('records the committed deadline with the bytes, so expireDue settles an un-received row on time', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.upsertBytes('0xlost', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 1500 });
+    await store.upsertBytes('0xlive', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 9000 });
+
+    expect(await store.expireDue(2000)).toBe(1);
+    expect((await store.get('0xlost'))?.state).toBe('expired');
+    expect((await store.get('0xlost'))?.hasBytes).toBe(false);
+    expect((await store.get('0xlive'))?.state).toBe('active');
+  });
+
+  it('keeps the Sui-delivered deadline when bytes are re-buffered after IntentReceived', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.markReceived('0xrx', { ...RX, deadline: 9000 });
+    await store.upsertBytes('0xrx', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 1500 });
+
+    expect((await store.get('0xrx'))?.deadline).toBe(9000);
   });
 
   it('expires stale un-received rows (no deadline) and frees their bytes, leaving the rest', async () => {
