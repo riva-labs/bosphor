@@ -67,6 +67,7 @@ import {
 } from "./config.ts";
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
 import { RateLimitStreak, pollDelay, sendPolled } from "./rpc.ts";
+import { returnDeliveryState, type EndpointNonceState } from "./return-delivery.ts";
 import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
@@ -306,10 +307,53 @@ function packetBytes(pkt: LzPacket): Uint8Array {
   ]);
 }
 
+/**
+ * Read the endpoint's delivery state for one return nonce: the inbound frontier
+ * and whether the nonce's payload hash PDA still exists. Both accounts come from
+ * one getMultipleAccountsInfo call so they are read at the same slot; two calls
+ * to a load-balanced RPC could pair a fresh frontier with a stale "absent" PDA
+ * and misread a verified-but-unexecuted nonce as delivered. Null on an RPC error.
+ */
+async function readNonceState(
+  conn: ReturnType<typeof connection>,
+  nonce: bigint,
+): Promise<EndpointNonceState | null> {
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
+  const sender = hexToBytes(SUI_OAPP_SENDER_B32);
+  const [noncePda] = endpoint.deriver.nonce(storePda() as never, SUI_EID, sender);
+  const [hashPda] = endpoint.deriver.payloadHash(storePda() as never, SUI_EID, sender, Number(nonce));
+  try {
+    const [nonceAccount, hashAccount] = await conn.getMultipleAccountsInfo([
+      new PublicKey(noncePda.toBase58()),
+      new PublicKey(hashPda.toBase58()),
+    ]);
+    const inboundNonce = nonceAccount
+      ? BigInt(EndpointProgram.accounts.Nonce.fromAccountInfo(nonceAccount as never)[0].inboundNonce.toString())
+      : 0n;
+    return { inboundNonce, payloadHashExists: hashAccount !== null };
+  } catch (e) {
+    rpcRateLimits.note(e);
+    return null;
+  }
+}
+
 /** verify -> commit -> lz_receive for one return packet. Idempotent + revert-tolerant. */
-async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
+async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | "dry"> {
   const conn = connection();
   const worker = payer();
+
+  // Check delivery on chain before building or simulating anything: a delivered
+  // nonce fails every preflight, and re-simulating it each tick only adds load
+  // on the rate-limited devnet RPC (bosphor#493).
+  const state = returnDeliveryState(pkt.nonce, await readNonceState(conn, pkt.nonce));
+  if (state === "delivered") {
+    console.log(`  already delivered (nonce ${pkt.nonce}) -> skip-ok`);
+    return "already";
+  }
+  if (state === "unknown") {
+    console.log(`  delivery state unreadable (nonce ${pkt.nonce}); retry next tick`);
+    return "skipped";
+  }
   const uln = new UlnProgram.Uln(ULN_ID);
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const bytes = packetBytes(pkt);
