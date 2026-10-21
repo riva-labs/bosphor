@@ -301,6 +301,7 @@ A skipped tick still refreshes the balance and gas gauges, so monitoring always 
 | `CANARY_MIN_BALANCE_ETH` | `0.005` | Skip a probe when the sender balance is below this (roughly ten probes of runway). |
 | `CANARY_MAX_GAS_GWEI` | `50` | Skip a probe when network gas exceeds this. Normal Sepolia gas is ~2 gwei. |
 | `CANARY_INTERVAL_MS` | `900000` | Interval between round-trips (15 min). |
+| `CANARY_SOLANA_INTERVAL_MS` | `CANARY_INTERVAL_MS` | Solana-only interval override. Testnet runs Solana every 30 min (`1800000`) because each probe pays LZ fees from a hand-funded devnet wallet. |
 | `CANARY_PORT` | `9300` | Port for the `/metrics` and `/health` endpoints. |
 
 ## Metrics endpoint
@@ -324,8 +325,8 @@ The provided `monitoring/alerts.yml` ships these canary rules:
 | Alert | Severity | Fires when |
 |-------|----------|-----------|
 | `BosphorCanaryDown` | critical | The canary is not scrapable for 2m |
-| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m |
-| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m |
+| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m (70m for Solana) |
+| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m (70m for Solana) |
 | `BosphorCanaryWalletLow` | warning | Wallet balance below 0.05 ETH (refill soon) |
 | `BosphorCanaryWalletCritical` | critical | Wallet balance below 0.01 ETH (probes skipping) |
 | `BosphorCanaryGasSpikeSkipping` | warning | Three or more probes skipped for high gas in 30m |
