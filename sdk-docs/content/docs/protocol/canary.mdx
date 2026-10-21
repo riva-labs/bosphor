@@ -49,8 +49,8 @@ The provided `monitoring/alerts.yml` ships these canary rules:
 | Alert | Severity | Fires when |
 |-------|----------|-----------|
 | `BosphorCanaryDown` | critical | The canary is not scrapable for 2m |
-| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m |
-| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m |
+| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m (70m for Solana) |
+| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m (70m for Solana) |
 | `BosphorCanaryWalletLow` | warning | Wallet balance below 0.05 ETH (refill soon) |
 | `BosphorCanaryWalletCritical` | critical | Wallet balance below 0.01 ETH (probes skipping) |
 | `BosphorCanaryGasSpikeSkipping` | warning | Three or more probes skipped for high gas in 30m |
