@@ -48,7 +48,6 @@ import {
   PublicKey,
   Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { EndpointProgram, UlnProgram } from "@layerzerolabs/lz-solana-sdk-v2";
 import * as dotenv from "dotenv";
@@ -67,6 +66,7 @@ import {
   storePda,
 } from "./config.ts";
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
+import { isRateLimited, pollDelay, sendPolled } from "./rpc.ts";
 import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
@@ -416,9 +416,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     if (epInitVerifyIx) tx.add(epInitVerifyIx);
     if (initVerifyIx) tx.add(initVerifyIx);
     tx.add(verifyIx);
-    const sig = await sendAndConfirmTransaction(conn, tx, [worker], {
-      commitment: "confirmed",
-    });
+    const sig = await sendPolled(conn, tx, worker);
     console.log(`  verify   ${sig}`);
   } catch (e) {
     console.log(
@@ -431,12 +429,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     const commitIx = normalizeIx(
       (await uln.commitVerification(conn as never, ENDPOINT_ID as never, bytes)) as never,
     );
-    const sig = await sendAndConfirmTransaction(
-      conn,
-      new Transaction().add(commitIx),
-      [worker],
-      { commitment: "confirmed" },
-    );
+    const sig = await sendPolled(conn, new Transaction().add(commitIx), worker);
     console.log(`  commit   ${sig}`);
   } catch (e) {
     console.log(`  commit   skipped (${errText(e)})`);
@@ -455,9 +448,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     const tx = new Transaction()
       .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }))
       .add(lzReceiveIx);
-    const sig = await sendAndConfirmTransaction(conn, tx, [worker], {
-      commitment: "confirmed",
-    });
+    const sig = await sendPolled(conn, tx, worker);
     console.log(`  lzReceive ${sig} -> escrow released`);
     return "sent";
   } catch (e) {
@@ -603,6 +594,11 @@ async function runLoop(): Promise<void> {
       `worker ${worker.publicKey.toBase58()}; store ${storePda().toBase58()}; RUN=${RUN}`,
   );
   const seen = new Set<string>();
+  // Consecutive ticks that failed on an RPC rate limit. A transient RPC error is
+  // never fatal: it is logged and the tick retried, backing off with jitter while
+  // the RPC keeps answering 429 (a process exit would restart gap-heal from
+  // scratch and add even more load on the limited RPC).
+  let rateLimitedStreak = 0;
   for (;;) {
     try {
       const packets = await querySuiPacketSent();
@@ -617,10 +613,15 @@ async function runLoop(): Promise<void> {
         const r = await deliver(pkt);
         if (r !== "skipped") seen.add(pkt.guid);
       }
+      rateLimitedStreak = 0;
     } catch (e) {
-      console.error("tick error:", e);
+      rateLimitedStreak = isRateLimited(e) ? rateLimitedStreak + 1 : 0;
+      console.error(
+        rateLimitedStreak > 0 ? `tick error (rate limited x${rateLimitedStreak}):` : "tick error:",
+        e,
+      );
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await new Promise((r) => setTimeout(r, pollDelay(POLL_MS, rateLimitedStreak)));
   }
 }
 
