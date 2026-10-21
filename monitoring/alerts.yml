@@ -17,16 +17,21 @@ groups:
 
       # Early warning: repeated round-trip failures before staleness trips.
       # The canary increments result="failure" on submit errors and return
-      # timeouts; two in 20m means the cross-chain path is degraded, not a blip.
+      # timeouts; two in a window that holds at least two probes means the
+      # cross-chain path is degraded, not a blip. Solana probes run every 30m
+      # (CANARY_SOLANA_INTERVAL_MS), so a 20m window could never see two of them.
       - alert: BosphorCanaryRoundTripFailing
-        expr: increase(bosphor_canary_roundtrip_total{result="failure"}[20m]) >= 2
+        expr: >-
+          increase(bosphor_canary_roundtrip_total{result="failure",chain!="solana"}[20m]) >= 2
+          or increase(bosphor_canary_roundtrip_total{result="failure",chain="solana"}[70m]) >= 2
         for: 0m
         labels:
           severity: warning
         annotations:
           summary: "Bosphor synthetic round-trips are failing"
           description: >-
-            {{ $value | printf "%.0f" }} canary round-trips failed in the last 20m.
+            {{ $value | printf "%.0f" }} {{ $labels.chain }} canary round-trips failed
+            recently (20m window for EVM, 70m for Solana).
             The forward (submitIntent) or return (executed proof on EVM) leg is
             broken. Check the relayer return path and LayerZero delivery.
 
@@ -109,20 +114,25 @@ groups:
       # the relayer stopped fulfilling, or the canary itself died mid-flight. The
       # second clause suppresses the alert during the canary's first 40m of
       # uptime so a cold start (last_success still 0) does not page; after that,
-      # a never-succeeding canary correctly alerts.
+      # a never-succeeding canary correctly alerts. Solana probes run every 30m,
+      # so its limit is 70m (two missed probes) instead of 40m.
       - alert: BosphorCanaryRoundTripStale
         expr: >-
-          (time() - bosphor_canary_last_success_timestamp_seconds > 2400)
+          (
+            (time() - bosphor_canary_last_success_timestamp_seconds{chain!="solana"} > 2400)
+            or (time() - bosphor_canary_last_success_timestamp_seconds{chain="solana"} > 4200)
+          )
           and on(instance) (time() - process_start_time_seconds{job="bosphor-canary"} > 2400)
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "No successful Bosphor round-trip in over 40m"
+          summary: "No successful Bosphor {{ $labels.chain }} round-trip in too long"
           description: >-
-            The last successful end-to-end round-trip was
-            {{ $value | printf "%.0f" }}s ago. The EVM -> Sui -> EVM path is not
-            completing. This is the primary end-to-end health signal.
+            The last successful {{ $labels.chain }} end-to-end round-trip was
+            {{ $value | printf "%.0f" }}s ago (limit 40m for EVM, 70m for Solana).
+            The origin -> Sui -> origin path is not completing. This is the primary
+            end-to-end health signal.
 
   - name: bosphor-dvn
     rules:
@@ -143,19 +153,23 @@ groups:
             delivery has stalled. Check the DVN worker container/process.
 
       # Dead-man's switch: the DVN is up but has not delivered a packet in over
-      # 40m. With the canary heart-beating both legs every 15m, a healthy DVN
-      # commits well within that window; staleness means it is stuck (bad RPC,
+      # 40m (70m on Solana pathways). The canary heartbeats EVM every 10-15m and
+      # Solana every 30m, so a healthy DVN commits well within that window, and
+      # one skipped Solana probe does not page; staleness means it is stuck (bad RPC,
       # object-version conflict, exhausted gas). The second clause suppresses the
       # first 40m of uptime so a cold start does not page.
       - alert: BosphorDvnDeliveryStale
         expr: >-
-          (time() - bosphor_dvn_last_success_timestamp_seconds > 2400)
+          (
+            (time() - bosphor_dvn_last_success_timestamp_seconds{pathway!~".*solana.*"} > 2400)
+            or (time() - bosphor_dvn_last_success_timestamp_seconds{pathway=~".*solana.*"} > 4200)
+          )
           and on(instance) (time() - process_start_time_seconds{job="bosphor-dvn"} > 2400)
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Bosphor DVN has not delivered in over 40m ({{ $labels.pathway }})"
+          summary: "Bosphor DVN has not delivered in too long ({{ $labels.pathway }})"
           description: >-
             The last verify+commit+execute on pathway {{ $labels.pathway }} was
             {{ $value | printf "%.0f" }}s ago. The DVN is up but not making

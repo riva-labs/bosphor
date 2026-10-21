@@ -10,6 +10,7 @@ services:
       - .env.canary-testnet
     volumes:
       # Solana devnet keypair the Solana probe submits with. Point
-      # SOLANA_CANARY_KEYPAIR at this path in .env.canary-testnet. Shared with the
-      # testnet relayer's keypair is fine on devnet (per-sender nonce PDA).
-      - /home/arb/.config/solana/bosphor-devnet.json:/home/arb/.config/solana/bosphor-devnet.json:ro
+      # SOLANA_CANARY_KEYPAIR at this path in .env.canary-testnet. Deliberately NOT
+      # the relayer / dvn-solana-return keypair (bosphor-devnet.json): probes burn
+      # LZ fees, and a drained canary wallet must never stop production returns.
+      - /home/arb/.config/solana/bosphor-canary-devnet.json:/home/arb/.config/solana/bosphor-canary-devnet.json:ro
