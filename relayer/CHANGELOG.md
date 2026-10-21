@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.2 (2026-10-21)
+
+### Bug Fixes
+
+- fix(relayer): count orphan expiries in bosphor_relayer_staged_orphan_expired_total
+- fix(relayer): warn and count a late IntentReceived on an expired row
+- fix(relayer): report whether markReceived recorded the IntentReceived
+
 ## 0.17.1 (2026-10-21)
 
 ### Bug Fixes
