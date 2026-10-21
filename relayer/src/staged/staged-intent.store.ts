@@ -497,6 +497,25 @@ export class StagedIntentStore {
   }
 
   /**
+   * Expire active rows that buffered bytes before `cutoff` but were never
+   * received from Sui. They have no deadline (it arrives with IntentReceived), so
+   * expireDue() can never settle them: a lost or skipped forward delivery would
+   * otherwise leave them active, holding bytes, forever (#486). Frees bytes.
+   * Returns the expired intent ids so the caller can log them.
+   */
+  async expireUnreceived(cutoff: number, now: number): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE ${TABLE}
+          SET state = 'expired', bytes = NULL, updated_at = $2
+        WHERE state = 'active' AND received = false AND deadline IS NULL
+          AND created_at < $1
+        RETURNING intent_id`,
+      [cutoff, now],
+    );
+    return rows.map((r) => r.intent_id as string);
+  }
+
+  /**
    * Delete terminal rows older than `cutoff` (retention). Returns the number
    * purged. A completed store is kept until the ops ledger has recorded it, so a
    * persistently failing ledger write can never lose the op to the reaper.
