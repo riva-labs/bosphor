@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.1 (2026-10-21)
+
+### Bug Fixes
+
+- fix(relayer): floor STAGED_UNRECEIVED_TTL_MS at 1h and document it as a backstop
+- fix(relayer): record the committed deadline when bytes are staged
+- fix(relayer): refuse an upload whose staged row is already settled
+- fix(relayer): reap un-received staged rows after STAGED_UNRECEIVED_TTL_MS
+- fix(relayer): add expireUnreceived to settle bytes that never got a Sui event
+
 ## 0.17.0 (2026-09-27)
 
 ### Features
