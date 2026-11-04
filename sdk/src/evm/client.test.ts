@@ -471,6 +471,45 @@ test("fromEthersContract delegates methods and wires queryProof from the event l
   assert.equal(adapter.getIntentId, undefined);
 });
 
+test("fromEthersContract's default proof lookback stays inside a pruning RPC's history", async () => {
+  // Public Sepolia RPCs (publicnode) reject eth_getLogs ranges that reach into
+  // pruned history: 50k blocks back fails, 10k succeeds.
+  const PRUNED_HISTORY_BLOCKS = 10_000;
+  const contract: EthersContractLike = {
+    async submitIntent() {
+      return { hash: "0xabc", async wait() { return { logs: [] }; } };
+    },
+    async quote() {
+      return { nativeFee: 7n, lzTokenFee: 0n };
+    },
+    async executed() {
+      return true;
+    },
+    async committedBlobId() {
+      return BLOB_ID;
+    },
+    interface: {
+      parseLog() {
+        return null;
+      },
+    },
+    filters: {
+      IntentExecuted(intentId) {
+        return { intentId };
+      },
+    },
+    async queryFilter(_event, fromBlock) {
+      if (-Number(fromBlock) > PRUNED_HISTORY_BLOCKS) {
+        throw new Error("pruned history unavailable");
+      }
+      return [{ args: { proof: encodeProof(BLOB_ID, END_EPOCH) } }];
+    },
+  };
+
+  const proof = await fromEthersContract(contract).queryProof!(INTENT_ID);
+  assert.equal(decodeProofEndEpoch(proof!), END_EPOCH);
+});
+
 // --- Priced store flow (M4) -------------------------------------------------
 
 const QUOTE_BODY = JSON.stringify({
