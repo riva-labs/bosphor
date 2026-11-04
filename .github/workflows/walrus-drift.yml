@@ -39,6 +39,10 @@ jobs:
         run: npx --yes tsx --test scripts/util/walrus-drift.test.ts
 
       - name: Check the linked Walrus package is still current
+        # Mainnet is warn-only until launch: the mainnet executor upgrade is
+        # deferred (#511) and mainnet carries no traffic. Remove this line as
+        # part of that upgrade so mainnet drift fails the run again.
+        continue-on-error: ${{ matrix.network == 'mainnet' }}
         run: npx --yes tsx scripts/util/walrus-drift.ts
         env:
           NETWORK: ${{ matrix.network }}
