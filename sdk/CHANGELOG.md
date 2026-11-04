@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.1 (2026-11-04)
+
+### Bug Fixes
+
+- fix(sdk): default the proof lookback to 5,000 blocks
+
 ## 0.14.0 (2026-09-27)
 
 ### Breaking Changes
