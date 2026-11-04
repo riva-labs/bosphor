@@ -63,11 +63,17 @@ export interface EthersContractLike {
   getAddress?(): Promise<string>;
 }
 
+// The proof is read minutes after execution; ~16h of Sepolia blocks is plenty
+// and stays inside what public (pruning) RPCs will serve.
+const DEFAULT_PROOF_LOOKBACK_BLOCKS = 5_000;
+
 /** Options for {@link fromEthersContract}. */
 export interface FromEthersContractOptions {
   /**
    * How many blocks back `queryProof` scans for the `IntentExecuted` event when
-   * reading the end epoch. Defaults to 50_000.
+   * reading the end epoch. Defaults to 5_000. Public RPCs prune log history and
+   * reject wider ranges, and the proof is read right after execution, so a
+   * larger window rarely helps. Raise it only against an archive RPC.
    */
   proofLookbackBlocks?: number;
 }
@@ -97,7 +103,7 @@ export function fromEthersContract(
   contract: EthersContractLike,
   opts: FromEthersContractOptions = {},
 ): AdapterContract {
-  const lookback = opts.proofLookbackBlocks ?? 50_000;
+  const lookback = opts.proofLookbackBlocks ?? DEFAULT_PROOF_LOOKBACK_BLOCKS;
 
   const adapter: AdapterContract = {
     submitIntent: (dstEid, blobId, size, encodingType, storageEpochs, deadline, options, overrides) =>
