@@ -91,3 +91,39 @@ test('counts skipped probes by chain and reason', async () => {
   assert.match(out, /bosphor_canary_skipped_total\{chain="evm",reason="high_gas"\} 1/);
   assert.match(out, /bosphor_canary_skipped_total\{chain="solana",reason="low_balance"\} 1/);
 });
+
+test('wallet balance gauge carries chain/network/role/address/coin labels', async () => {
+  const m = new CanaryMetrics();
+
+  m.setWalletBalance({ chain: 'sui', network: 'testnet', role: 'relayer', address: '0xabc', coin: 'WAL' }, 12.5);
+
+  const out = await m.getMetrics();
+  assert.match(
+    out,
+    /bosphor_wallet_balance\{chain="sui",network="testnet",role="relayer",address="0xabc",coin="WAL"\} 12.5/,
+  );
+});
+
+test('a failed wallet read counts an error and never sets a fake balance', async () => {
+  const m = new CanaryMetrics();
+  const labels = { chain: 'evm', network: 'sepolia', role: 'operator', address: '0x1', coin: 'ETH' };
+
+  m.setWalletBalance(labels, 0.3);
+  m.setWalletBalance(labels, NaN);
+  m.recordWalletReadError('evm', 'operator');
+
+  const out = await m.getMetrics();
+  assert.match(out, /bosphor_wallet_balance\{[^}]*role="operator"[^}]*\} 0.3/);
+  assert.match(out, /bosphor_wallet_balance_read_errors_total\{chain="evm",role="operator"\} 1/);
+});
+
+test('counts top-ups by chain, role and result', async () => {
+  const m = new CanaryMetrics();
+
+  m.recordTopUp('sui', 'dvn', 'success');
+  m.recordTopUp('sui', 'dvn', 'error');
+
+  const out = await m.getMetrics();
+  assert.match(out, /bosphor_wallet_topup_total\{chain="sui",role="dvn",result="success"\} 1/);
+  assert.match(out, /bosphor_wallet_topup_total\{chain="sui",role="dvn",result="error"\} 1/);
+});
