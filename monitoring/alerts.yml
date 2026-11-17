@@ -125,8 +125,8 @@ groups:
             address with SUI.
 
       # Relayer SUI exhaustion: every store pays Sui gas (~0.005 SUI budget), so
-      # an empty wallet fails all stores and dead-letters them. The WAL top-up
-      # alert above never fires on testnet (no swap there), so watch SUI directly.
+      # an empty wallet blocks every store. The WAL top-up swaps SUI for WAL, so
+      # an empty SUI wallet also stops WAL refills: watch SUI directly.
       - alert: BosphorRelayerSuiLow
         expr: bosphor_relayer_sui_balance_sui < 0.5
         for: 10m
@@ -174,7 +174,7 @@ groups:
       # goes dark (the exact outage this DVN was built to fix). Per instance, so it
       # names which pathway (evm_sui / solana_sui) is down.
       - alert: BosphorDvnDown
-        expr: up{job="bosphor-dvn"} == 0
+        expr: up{job=~"bosphor-dvn|bosphor-dvn-return"} == 0
         for: 3m
         labels:
           severity: critical
