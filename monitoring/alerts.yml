@@ -209,6 +209,23 @@ groups:
             terminal error). The blob was never stored. Inspect staged_intent rows
             in state='dead' and their last_error.
 
+      # The relayer's own Sui wallet cannot pay for stores (no SUI for gas or no
+      # WAL for storage). Rows are kept and retried, never dead-lettered, but no
+      # intent can complete until the operator funds the wallet.
+      - alert: BosphorRelayerStoreBlocked
+        expr: increase(bosphor_relayer_store_blocked_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer stores blocked by an unfunded wallet ({{ $labels.reason }})"
+          description: >-
+            {{ $value | printf "%.0f" }} store attempt(s) in the last 15m were
+            blocked because the relayer Sui wallet could not pay
+            ({{ $labels.reason }}). Intents stay queued with their bytes intact
+            and do not consume store attempts.
+          fix: "Fund the relayer Sui address (SUI for gas, WAL for storage). Intents resume automatically once funded."
+
       # The blob is safe on Walrus and recorded on Sui, but its return proof could
       # not be delivered within the return-leg budget. Storage is not lost, but
       # the origin chain still shows the intent unexecuted until the proof lands.
