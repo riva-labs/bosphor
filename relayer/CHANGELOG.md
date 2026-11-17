@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.3 (2026-11-17)
+
+### Bug Fixes
+
+- fix(relayer): never dead-letter an intent on relayer funding faults
+- fix(relayer): add a store_blocked metric for funding faults
+- fix(relayer): add a classifier for operator funding faults
+
 ## 0.17.2 (2026-10-21)
 
 ### Bug Fixes
