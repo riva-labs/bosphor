@@ -12,6 +12,21 @@ test("a verified nonce whose payload hash account still exists is pending execut
   assert.equal(returnDeliveryState(3850n, { inboundNonce: 3853n, payloadHashExists: true }), "pending");
 });
 
+test("a nonce under the frontier with a committed payload hash only needs lz_receive", () => {
+  // Verified + committed but never executed (a stranded nonce, bosphor#525).
+  assert.equal(
+    returnDeliveryState(3850n, { inboundNonce: 3853n, payloadHashExists: true, payloadHashCommitted: true }),
+    "committed",
+  );
+});
+
+test("a committed hash above the frontier is not executable yet, so it stays pending", () => {
+  assert.equal(
+    returnDeliveryState(3855n, { inboundNonce: 3853n, payloadHashExists: true, payloadHashCommitted: true }),
+    "pending",
+  );
+});
+
 test("a nonce above the inbound frontier with no payload hash was never verified, so it is pending", () => {
   assert.equal(returnDeliveryState(3854n, { inboundNonce: 3853n, payloadHashExists: false }), "pending");
 });
