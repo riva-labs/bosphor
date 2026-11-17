@@ -4,6 +4,12 @@ global:
 rule_files:
   - /etc/prometheus/alerts.yml
 
+# Alerts go to Alertmanager, which pushes them to the operator's phone via ntfy.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
 scrape_configs:
   # The mainnet relayer (bosphor-relayer-1), reachable over the compose network.
   # It still runs a pre-0.15 build that serves /metrics on the API port 3000.
@@ -41,3 +47,39 @@ scrape_configs:
     static_configs:
       - targets: ['dvn-evm:9301', 'dvn-solana:9302']
     metrics_path: /metrics
+
+  # Return DVN workers (Sui -> EVM, Sui -> Solana). Same metric names as the
+  # forward workers, so the DVN alerts cover the return legs too.
+  - job_name: bosphor-dvn-return
+    static_configs:
+      - targets: ['dvn-evm-return:9303', 'dvn-solana-return:9304']
+    metrics_path: /metrics
+
+  # Public endpoint probes: catches outages the protocol canary cannot see
+  # (demo dApp, its Drive index, docs, status page, the public relayer APIs).
+  - job_name: blackbox
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://demo.bosphor.xyz
+          - https://api.bosphor.xyz/health
+          - https://api.bosphor.xyz/testnet/health
+          - https://supabase.bosphor.xyz/
+          - https://docs.bosphor.xyz
+          - https://bosphor.xyz
+          - https://status.bosphor.xyz
+          - https://waitlist.bosphor.xyz
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: target
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # The alerting pipeline itself.
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['alertmanager:9093']
