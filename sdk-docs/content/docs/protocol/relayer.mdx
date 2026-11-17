@@ -46,7 +46,7 @@ On mainnet the WAL auto top-up does not swap (the SUI to WAL exchange only exist
 
 | Variable | Description |
 |----------|-------------|
-| `EVM_RPC_URL` | Sepolia RPC endpoint |
+| `EVM_RPC_URL` | Sepolia RPC endpoint, or a comma-separated failover list (see [RPC failover](#rpc-failover)) |
 | `EVM_RELAYER_KEY` | Private key (0x-prefixed) with Sepolia ETH for gas |
 | `EVM_ADAPTER_ADDRESS` | Deployed BosphorAdapter contract address |
 | `SUI_RELAYER_KEY` | Sui private key (`suiprivkey1...` or base64 Ed25519) |
@@ -61,12 +61,12 @@ On mainnet the WAL auto top-up does not swap (the SUI to WAL exchange only exist
 | `NETWORK` | `testnet` | Network preset, `testnet` or `mainnet` (see [Network presets](#network-presets)) |
 | `EVM_DST_EID` | preset | EVM destination endpoint ID for proof verification |
 | `EVM_CHAIN_ID` | preset | Chain id of the network behind `EVM_RPC_URL`. Pins the provider to a static network so startup never depends on runtime chain-id discovery over a flaky RPC |
-| `SUI_GRPC_URL` | preset | Sui gRPC endpoint |
+| `SUI_GRPC_URL` | preset | Sui gRPC endpoint, or a comma-separated failover list (see [RPC failover](#rpc-failover)) |
 | `SUI_LZ_PACKAGE_ID` | - | LZ receiver package ID (required for proof verification) |
 | `SUI_LZ_CONFIG_ID` | - | LzReceiverConfig shared object ID |
 | `SUI_LZ_OAPP_ID` | - | OApp shared object ID |
 | `SUI_LZ_MESSAGING_CHANNEL` | - | LZ messaging channel object ID |
-| `SOLANA_RPC_URL` | - | Solana RPC endpoint. Set with `SOLANA_PROGRAM_ID` to accept Solana-origin intents; unset keeps the relayer EVM-only |
+| `SOLANA_RPC_URL` | - | Solana RPC endpoint, or a comma-separated failover list (see [RPC failover](#rpc-failover)). Set with `SOLANA_PROGRAM_ID` to accept Solana-origin intents; unset keeps the relayer EVM-only |
 | `SOLANA_PROGRAM_ID` | - | Bosphor Solana adapter program id, watched for `IntentSubmitted` so ingest and `execute_store` work for Solana origins |
 | `SOLANA_SUI_RECIPIENT` | relayer's Sui address | Sui address that receives the stored blob for a Solana-origin intent (a Solana pubkey cannot own a Sui object) |
 | `SOLANA_SRC_EID` | preset | Origin endpoint id that marks a Solana-origin intent, so its return proof is confirmed on Solana rather than EVM |
@@ -96,6 +96,24 @@ On mainnet the WAL auto top-up does not swap (the SUI to WAL exchange only exist
 | `RATE_LIMIT_BYPASS_KEYS` | - | Comma-separated secrets. A request with one in the `X-Bosphor-Key` header skips the limits (for trusted server-side callers whose users share one egress IP) |
 | `TRUST_PROXY` | `false` | Take the client IP from `CF-Connecting-IP` / `X-Forwarded-For`. Enable only when the relayer is reachable solely through Cloudflare / nginx; otherwise all clients share the proxy IP (off) or can spoof theirs (on while directly reachable) |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+
+### RPC failover
+
+`EVM_RPC_URL`, `SUI_GRPC_URL` and `SOLANA_RPC_URL` each accept either one URL or a comma-separated list:
+
+```bash
+EVM_RPC_URL=https://sepolia.infura.io/v3/YOUR_KEY,https://ethereum-sepolia-rpc.publicnode.com
+SUI_GRPC_URL=https://YOUR_SUI_PROVIDER.example,https://sui-testnet.mystenlabs.com
+SOLANA_RPC_URL=https://YOUR_PROVIDER.example/devnet,https://api.devnet.solana.com
+```
+
+The first URL is the primary. When a call to the current endpoint fails with a connection or DNS error, a timeout (20 seconds per attempt), an HTTP 429 or 5xx, a gRPC `UNAVAILABLE` / `RESOURCE_EXHAUSTED` / `DEADLINE_EXCEEDED`, or a log query the node cannot serve (pruned history, block range too large), the relayer sends the same request to the next URL. It stays on the endpoint that answered and tries the primary again after 60 seconds.
+
+Errors that describe the request itself are never retried on another endpoint: a contract revert, a Move abort, a failed Solana preflight, or an invalid argument would get the same answer anywhere. Signed transactions are re-sent as the exact same bytes, so a failover can never produce a second, different transaction.
+
+Each hop logs a warning that names the failing and the next host (never the full URL, which may contain an API key) and increments `bosphor_relayer_rpc_failover_total{chain}`. With a single URL nothing changes: no extra timeout, no retries, the metric stays at zero.
+
+Only the relayer reads these lists. The scripts under `scripts/` and other tools that share a `.env` expect a single URL.
 
 ### Durable store queue variables
 
@@ -250,6 +268,7 @@ Alongside the default `prom-client` process metrics (`process_cpu_seconds_total`
 | `bosphor_relayer_ledger_bytes_total` | counter | `src_eid` | Bytes stored across ops recorded in the ledger |
 | `bosphor_relayer_ledger_write_failures_total` | counter | (none) | Inline ledger writes that failed (the backfill sweep retries them) |
 | `bosphor_relayer_rate_limited_total` | counter | `scope` (`ip`/`app`/`encode`) | Integrator API requests rejected with 429 |
+| `bosphor_relayer_rpc_failover_total` | counter | `chain` (`evm`/`sui`/`solana`) | RPC calls re-sent to the next configured endpoint (see [RPC failover](#rpc-failover)). A steady rise means the primary endpoint is degraded |
 
 The `path` label distinguishes the two ways an intent is detected: `evm` (polled directly from the EVM adapter) and `sui_lz` (received on Sui via LayerZero). A rising `checkpoint_cursor_lag` indicates the relayer is falling behind the Sui chain tip.
 
