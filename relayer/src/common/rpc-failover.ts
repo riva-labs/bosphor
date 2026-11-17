@@ -260,7 +260,7 @@ async function fetchWithTimeout(
     return await baseFetch(url, { ...init, signal: controller.signal });
   } catch (err) {
     // Our own timer firing is a transport timeout (fail over); a caller abort is not.
-    if (timedOut) throw new Error(`request timeout after ${timeoutMs}ms`);
+    if (timedOut) throw new Error(`request timeout after ${timeoutMs}ms`, { cause: err });
     throw err;
   } finally {
     clearTimeout(timer);
