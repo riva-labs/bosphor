@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ethers } from 'ethers';
 import {
@@ -6,6 +6,7 @@ import {
   EVM_BOOTSTRAP_MAX_ATTEMPTS,
   MAX_BACKOFF_MS,
 } from '../../common';
+import { MetricsService } from '../../metrics/metrics.service';
 import { ErrorReporter } from '../../observability/error-reporter';
 import { isTransientRpcError } from '../../observability/transient-rpc-error';
 import {
@@ -15,6 +16,7 @@ import {
   isNonceConflictError,
   MAX_FEE_BUMPS,
 } from './nonce-conflict';
+import { createEvmProvider } from './failover-provider';
 
 /** Blocks to stay behind head when querying logs, to tolerate load-balanced RPCs
  * whose nodes lag the one that answered getBlockNumber. */
@@ -88,6 +90,7 @@ export class EvmService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly errorReporter: ErrorReporter,
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   onModuleInit() {
@@ -104,10 +107,15 @@ export class EvmService implements OnModuleInit {
     // detection" NETWORK_ERROR (the 2026-08-31 testnet relayer crash). With
     // both set, the provider starts with the network already known and never
     // performs runtime network discovery.
-    this.provider = new ethers.JsonRpcProvider(rpcUrl, chainId, {
-      staticNetwork: true,
-      polling: true,
-    });
+    //
+    // EVM_RPC_URL may be a comma-separated failover list (#524); a single URL
+    // builds the same plain JsonRpcProvider as before.
+    this.provider = createEvmProvider(
+      rpcUrl,
+      chainId,
+      { staticNetwork: true, polling: true },
+      { onFailover: (chain) => this.metrics?.recordRpcFailover(chain) },
+    );
     // The background block poller (needed by tx.wait) makes RPC calls that
     // reject on transient public-RPC errors (520, timeout). Give ethers an
     // error listener so those are logged here as warnings instead of bubbling

@@ -30,6 +30,24 @@ function presetString(base: Joi.StringSchema, testnet: string, mainnet?: string)
   });
 }
 
+/**
+ * An RPC endpoint setting: one URL, or a comma-separated failover list whose
+ * first URL is the primary (#524). Every entry must be a valid URI.
+ */
+function rpcUrlList(): Joi.StringSchema {
+  return Joi.string().custom((value: string, helpers) => {
+    const urls = value
+      .split(',')
+      .map((u) => u.trim())
+      .filter((u) => u !== '');
+    if (urls.length === 0) return helpers.error('string.uri');
+    for (const url of urls) {
+      if (Joi.string().uri().validate(url).error) return helpers.error('string.uri');
+    }
+    return value;
+  }, 'RPC URL list');
+}
+
 export const configValidationSchema = Joi.object({
   // Network preset. testnet keeps every historical default (no behavior change
   // for a deployment that never sets NETWORK); mainnet has no testnet fallbacks,
@@ -39,7 +57,8 @@ export const configValidationSchema = Joi.object({
     .default('testnet'),
 
   // EVM
-  EVM_RPC_URL: Joi.string().uri().required(),
+  // One RPC URL, or a comma-separated failover list (first = primary, #524).
+  EVM_RPC_URL: rpcUrlList().required(),
   // Private key for the EVM relayer wallet (EVM_PRIVATE_KEY)
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
@@ -61,7 +80,8 @@ export const configValidationSchema = Joi.object({
     MAINNET_PRESET.SUI_NETWORK,
   ),
   // Sui fullnode gRPC endpoint. Public testnet node on testnet; required on mainnet.
-  SUI_GRPC_URL: presetString(Joi.string().uri(), TESTNET_PRESET.SUI_GRPC_URL),
+  // Accepts a comma-separated failover list (first = primary, #524).
+  SUI_GRPC_URL: presetString(rpcUrlList(), TESTNET_PRESET.SUI_GRPC_URL),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
@@ -96,7 +116,8 @@ export const configValidationSchema = Joi.object({
   // IntentSubmitted events and records their commitment, so ingest and
   // execute_store work for Solana-origin intents. Unset on the EVM-only
   // deployment, where the Solana watcher stays inert.
-  SOLANA_RPC_URL: Joi.string().uri().optional().allow(''),
+  // Accepts a comma-separated failover list (first = primary, #524).
+  SOLANA_RPC_URL: rpcUrlList().optional().allow(''),
   SOLANA_PROGRAM_ID: Joi.string().optional().allow(''),
   // Sui address that receives the stored blob for a Solana-origin intent. A
   // Solana pubkey cannot own a Sui object, so the M3 single-relayer model routes

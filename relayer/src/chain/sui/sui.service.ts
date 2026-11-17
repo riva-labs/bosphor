@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
@@ -7,6 +7,8 @@ import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { walrus } from '@mysten/walrus';
 import { ethers } from 'ethers';
 import { SUI_CLOCK_OBJECT } from '../../common/constants';
+import { MetricsService } from '../../metrics/metrics.service';
+import { createSuiGrpcClient } from './sui-client.factory';
 
 /** Ceiling (MIST) the relayer will pay as a Walrus upload-relay tip. Mainnet
  * tips have been observed around 2.58M MIST, above the SDK-default 1M cap that
@@ -98,7 +100,10 @@ export class SuiService implements OnModuleInit {
   private lzInfra!: LzInfra;
   private executeStoreAbi?: Promise<ExecuteStoreAbi>;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly metrics?: MetricsService,
+  ) {}
 
   onModuleInit() {
     const grpcUrl = this.config.getOrThrow<string>('SUI_GRPC_URL');
@@ -128,8 +133,10 @@ export class SuiService implements OnModuleInit {
       treasuryObj: this.config.get<string>('SUI_LZ_TREASURY_OBJ', ''),
     };
 
-    const network = grpcUrl.includes('mainnet') ? ('mainnet' as const) : ('testnet' as const);
-    this.client = new SuiGrpcClient({ network, baseUrl: grpcUrl });
+    // SUI_GRPC_URL may be a comma-separated failover list (#524).
+    this.client = createSuiGrpcClient(grpcUrl, {
+      onFailover: (chain) => this.metrics?.recordRpcFailover(chain),
+    });
 
     if (relayerKey.startsWith('suipriv')) {
       const { scheme, secretKey } = decodeSuiPrivateKey(relayerKey);

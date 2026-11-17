@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '../metrics/metrics.service';
 import {
   quoteSolanaLzFeeLamports,
   type SolanaLzFeeDeps,
@@ -62,6 +63,7 @@ export class SolanaLzFeeService {
   constructor(
     private readonly config: ConfigService,
     @Optional() @Inject(SOLANA_LZ_FEE_HOOKS) hooks?: Partial<SolanaLzFeeHooks>,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     this.hooks = {
       loadDeps: hooks?.loadDeps ?? (() => this.loadRealDeps()),
@@ -151,8 +153,16 @@ export class SolanaLzFeeService {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const web3 = require('@solana/web3.js');
     const lz = require('@layerzerolabs/lz-solana-sdk-v2');
+    const { createSolanaConnection } = require('../chain/solana/solana-connection.factory');
     /* eslint-enable @typescript-eslint/no-require-imports */
-    const connection = new web3.Connection(this.config.get<string>('SOLANA_RPC_URL')!, 'confirmed');
+    // SOLANA_RPC_URL may be a comma-separated failover list (#524).
+    const connection = createSolanaConnection(
+      this.config.get<string>('SOLANA_RPC_URL')!,
+      'confirmed',
+      {
+        onFailover: (chain: 'solana') => this.metrics?.recordRpcFailover(chain),
+      },
+    );
     return { connection, web3, lz };
   }
 }

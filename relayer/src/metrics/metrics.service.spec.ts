@@ -51,6 +51,13 @@ describe('MetricsService', () => {
     expect(out).toContain('bosphor_relayer_rate_limited_total{scope="ip"} 0');
   });
 
+  it('counts RPC failovers by chain, initialized to 0', async () => {
+    service.recordRpcFailover('evm');
+    const out = await service.getMetrics();
+    expect(out).toContain('bosphor_relayer_rpc_failover_total{chain="evm"} 1');
+    expect(out).toContain('bosphor_relayer_rpc_failover_total{chain="sui"} 0');
+  });
+
   it('counts LZ send outcomes by result', async () => {
     service.recordLzSend('success');
     service.recordLzSend('failure');

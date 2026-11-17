@@ -77,6 +77,8 @@ The `/health` endpoint returns `"degraded"` when one or both chain connections f
 2. `SUI_GRPC_URL` is responding
 3. Network connectivity from the relayer host
 
+To ride out a single flaky provider, give the relayer a comma-separated list of endpoints for each RPC variable. It fails over to the next one automatically and counts each hop in `bosphor_relayer_rpc_failover_total` (see [RPC failover](/docs/protocol/relayer#rpc-failover)).
+
 ## Cross-chain debugging
 
 ### How to check LayerZero message status

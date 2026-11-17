@@ -210,6 +210,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // RPC endpoint failovers (#524): one increment per hop from a failing RPC URL
+  // to the next one in a comma-separated EVM_RPC_URL / SUI_GRPC_URL /
+  // SOLANA_RPC_URL list. Flat at zero on a single-URL config.
+  private readonly rpcFailover = new Counter({
+    name: 'bosphor_relayer_rpc_failover_total',
+    help: 'RPC calls re-issued on the next configured endpoint, by chain',
+    labelNames: ['chain'] as const,
+    registers: [this.registry],
+  });
+
   // Durable ops ledger (storage_op_ledger): one increment per op the ledger
   // records for the first time (exactly-once per intent, per process). Labelled
   // by origin chain (LayerZero src EID) and integrator app. The app label is
@@ -272,6 +282,9 @@ export class MetricsService {
     for (const scope of ['ip', 'app', 'encode'] as const) {
       this.rateLimited.inc({ scope }, 0);
     }
+    for (const chain of ['evm', 'sui', 'solana'] as const) {
+      this.rpcFailover.inc({ chain }, 0);
+    }
     this.ledgerWriteFailures.inc(0);
   }
 
@@ -306,6 +319,11 @@ export class MetricsService {
   /** Record an integrator API request rejected with 429 by the given budget. */
   recordRateLimited(scope: 'ip' | 'app' | 'encode'): void {
     this.rateLimited.inc({ scope });
+  }
+
+  /** Record one RPC call failing over to the next configured endpoint. */
+  recordRpcFailover(chain: 'evm' | 'sui' | 'solana'): void {
+    this.rpcFailover.inc({ chain });
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {

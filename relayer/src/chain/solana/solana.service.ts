@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { getBytes } from 'ethers';
 import {
@@ -15,6 +15,8 @@ import {
   encodeConfirmExecutionData,
   parseIntentSubmittedEvents,
 } from './solana-intent.codec';
+import { MetricsService } from '../../metrics/metrics.service';
+import { createSolanaConnection } from './solana-connection.factory';
 
 /** PDA seed for the singleton Store (OApp) account: `[b"store"]`. */
 const STORE_SEED = Buffer.from('store');
@@ -70,7 +72,10 @@ export class SolanaService implements OnModuleInit {
   /** Store-admin keypair used to sign the return-leg confirm_execution. */
   private admin?: Keypair;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Optional() private readonly metrics?: MetricsService,
+  ) {}
 
   onModuleInit(): void {
     const rpcUrl = this.config.get<string>('SOLANA_RPC_URL');
@@ -79,7 +84,10 @@ export class SolanaService implements OnModuleInit {
       this.logger.log('Solana origin watching disabled (SOLANA_RPC_URL / SOLANA_PROGRAM_ID unset)');
       return;
     }
-    this.connection = new Connection(rpcUrl, 'confirmed');
+    // SOLANA_RPC_URL may be a comma-separated failover list (#524).
+    this.connection = createSolanaConnection(rpcUrl, 'confirmed', {
+      onFailover: (chain) => this.metrics?.recordRpcFailover(chain),
+    });
     this.program = new PublicKey(programId);
     this.logger.log(`Solana adapter: ${programId}`);
 
