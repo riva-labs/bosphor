@@ -91,6 +91,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Stores held back by an operator funding fault (relayer Sui wallet out of
+  // SUI for gas or WAL for storage). These never consume an attempt or
+  // dead-letter: the row waits until the wallet is funded. Any increase pages.
+  private readonly storeBlocked = new Counter({
+    name: 'bosphor_relayer_store_blocked_total',
+    help: 'Store attempts blocked by an operator funding fault (row kept, retried)',
+    labelNames: ['reason'] as const,
+    registers: [this.registry],
+  });
+
   // Durable store queue depth. `active` is rows still in play (crude queue
   // length), `bytes` the total committed size still held in BYTEA (backpressure
   // headroom vs MAX_STAGED_BYTES), `dead` the count dead-lettered. Set
@@ -256,6 +266,9 @@ export class MetricsService {
     for (const phase of ['pre_store', 'return'] as const) {
       this.storeDeadLetter.inc({ phase }, 0);
     }
+    for (const reason of ['insufficient_gas', 'insufficient_wal'] as const) {
+      this.storeBlocked.inc({ reason }, 0);
+    }
     for (const scope of ['ip', 'app', 'encode'] as const) {
       this.rateLimited.inc({ scope }, 0);
     }
@@ -340,6 +353,11 @@ export class MetricsService {
   /** Record a durable-queue dead-letter (pre-store) or return-budget exhaustion. */
   recordDeadLetter(phase: 'pre_store' | 'return'): void {
     this.storeDeadLetter.inc({ phase });
+  }
+
+  /** Record a store blocked by an operator funding fault (no attempt consumed). */
+  recordStoreBlocked(reason: 'insufficient_gas' | 'insufficient_wal'): void {
+    this.storeBlocked.inc({ reason });
   }
 
   /**

@@ -27,6 +27,7 @@ Multi-chain EVM support (Arbitrum, Base, Optimism) is planned for Milestone 2. S
 
 - LZ messaging fees are estimated via `quoteLzFee` with a 10% buffer. In periods of high gas volatility, the buffer may be insufficient, causing the LZ send to fail. The relayer retries with updated fee quotes on failure.
 - The relayer pays all LZ fees and Sui gas costs. There is no on-chain fee recovery mechanism from the intent sender. Fee sustainability depends on off-chain arrangements.
+- If the relayer's Sui wallet runs out of SUI (gas) or WAL (storage payment), intents pause rather than fail. They stay queued with their data, do not use up their retry budget, and store automatically once the operator funds the wallet. An intent whose deadline passes while the wallet is unfunded expires and its escrow refunds the payer.
 - The default LZ executor gas limit for `_lzReceive` on EVM is 200,000 gas, configured via LZ options. Complex `_lzReceive` handlers on EVM may require increasing this value.
 
 ## Deadline enforcement

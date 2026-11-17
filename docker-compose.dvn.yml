@@ -27,7 +27,7 @@ services:
       # re-scanning history (429 bursts on free RPCs, missed-packet window on EVM).
       - dvn-state:/data
     ports:
-      - "9301:9301"
+      - "127.0.0.1:9301:9301"
     restart: unless-stopped
 
   dvn-solana:
@@ -46,7 +46,7 @@ services:
     volumes:
       - dvn-state:/data
     ports:
-      - "9302:9302"
+      - "127.0.0.1:9302:9302"
     restart: unless-stopped
 
   # Sui -> Sepolia RETURN worker. Watches the Sui endpoint's PacketSentEvent for
