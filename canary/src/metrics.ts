@@ -77,6 +77,27 @@ export class CanaryMetrics {
     registers: [this.registry],
   });
 
+  private readonly walletBalance = new Gauge({
+    name: 'bosphor_wallet_balance',
+    help: 'Service wallet balance in whole-token units, by chain, network, role, address and coin',
+    labelNames: ['chain', 'network', 'role', 'address', 'coin'] as const,
+    registers: [this.registry],
+  });
+
+  private readonly walletReadErrors = new Counter({
+    name: 'bosphor_wallet_balance_read_errors_total',
+    help: 'Failed service wallet balance reads (the gauge is left stale, never faked)',
+    labelNames: ['chain', 'role'] as const,
+    registers: [this.registry],
+  });
+
+  private readonly walletTopUps = new Counter({
+    name: 'bosphor_wallet_topup_total',
+    help: 'Testnet wallet top-up attempts by chain, role and result (success, error, daily_cap, treasury_floor)',
+    labelNames: ['chain', 'role', 'result'] as const,
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }
@@ -113,6 +134,24 @@ export class CanaryMetrics {
   /** Count a probe the preflight guard skipped, labelled by chain and reason. */
   recordSkip(chain: CanaryChain, reason: SkipReason): void {
     this.skipped.inc({ chain, reason });
+  }
+
+  /** Publish a watched wallet balance (whole tokens). Only called with a real read. */
+  setWalletBalance(
+    labels: { chain: string; network: string; role: string; address: string; coin: string },
+    amount: number,
+  ): void {
+    if (Number.isFinite(amount)) this.walletBalance.set(labels, amount);
+  }
+
+  /** Count a failed balance read. The gauge keeps its last real value. */
+  recordWalletReadError(chain: string, role: string): void {
+    this.walletReadErrors.inc({ chain, role });
+  }
+
+  /** Count a top-up outcome for a watched wallet. */
+  recordTopUp(chain: string, role: string, result: string): void {
+    this.walletTopUps.inc({ chain, role, result });
   }
 
   get contentType(): string {

@@ -422,3 +422,46 @@ groups:
             Send devnet SOL to HnooBvpx8pSebZxaZx4GUq1vGQCfggjU9HLsaCQM58UA
             (faucet.solana.com, or solana transfer from a funded devnet wallet).
             Below 0.05 SOL the Solana probe stops.
+
+      # Service wallet watcher (canary, WALLET_WATCH). A failed read leaves
+      # bosphor_wallet_balance stale rather than faking a value, so a balance
+      # alert cannot fire on a wallet we can no longer read. This catches that.
+      - alert: BosphorWalletBalanceReadErrors
+        expr: sum by(chain, role) (increase(bosphor_wallet_balance_read_errors_total[30m])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor cannot read the {{ $labels.role }} wallet balance on {{ $labels.chain }}"
+          description: >-
+            {{ $value | printf "%.0f" }} balance read(s) for the {{ $labels.role }}
+            wallet on {{ $labels.chain }} failed in the last 30m. Its
+            bosphor_wallet_balance gauge is stale, so low-balance alerts for it
+            are blind.
+          fix: >-
+            Run `docker logs bosphor-canary-1 2>&1 | grep "\[wallets\] balance read failed"`
+            to see the error. If the RPC is down or rate limited, point
+            WALLET_SUI_GRPC_URL / WALLET_EVM_RPC_URL / WALLET_SOLANA_RPC_URL at a
+            working endpoint in .env.canary-testnet; if the address or coin type
+            is wrong, correct the WALLET_WATCH entry. Then recreate the canary
+            container.
+
+      # Testnet auto top-up is broken: a wallet is below its floor and the
+      # treasury send keeps failing, so it will drain to zero unattended.
+      - alert: BosphorWalletTopUpFailing
+        expr: sum by(chain, role) (increase(bosphor_wallet_topup_total{result="error"}[1h])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor testnet top-up failing for {{ $labels.role }} on {{ $labels.chain }}"
+          description: >-
+            {{ $value | printf "%.0f" }} top-up attempt(s) for the {{ $labels.role }}
+            wallet on {{ $labels.chain }} failed in the last hour. The wallet is
+            below its floor and is not being refilled.
+          fix: >-
+            Run `docker logs bosphor-canary-1 2>&1 | grep "\[wallets\]"` to find the
+            failing send. Most often the {{ $labels.chain }} treasury
+            (SUI_TREASURY_KEY / EVM_TREASURY_KEY / SOLANA_TREASURY_KEYPAIR) is out
+            of gas or near its floor: fund it from a faucet. Meanwhile refill the
+            {{ $labels.role }} wallet by hand from the treasury.
