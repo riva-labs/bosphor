@@ -27,7 +27,7 @@ services:
       retries: 5
 
   kener:
-    image: rajnandan1/kener:latest
+    image: rajnandan1/kener:4.2.1
     container_name: bosphor-kener
     restart: unless-stopped
     environment:
@@ -37,8 +37,9 @@ services:
       REDIS_URL: redis://redis:6379
       # DB defaults to SQLite at /app/database (persisted below).
     ports:
-      # Host 3008. Cloudflare tunnel routes status.bosphor.xyz here at cutover.
-      - "3008:3000"
+      # Host 3008, loopback only: the cloudflared tunnel (host network) is the
+      # sole way in. Bound to 0.0.0.0 it was reachable straight from the internet.
+      - "127.0.0.1:3008:3000"
     volumes:
       - data:/app/database
     depends_on:
