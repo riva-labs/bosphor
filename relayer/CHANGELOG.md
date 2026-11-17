@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.18.0 (2026-11-17)
+
+### Features
+
+- feat(relayer): fail over between Solana RPC endpoints
+- feat(relayer): fail over between Sui gRPC endpoints
+- feat(relayer): fail over between EVM RPC endpoints
+- feat(relayer): add bosphor_relayer_rpc_failover_total metric
+- feat(relayer): accept comma-separated RPC URL lists in config
+- feat(relayer): add RPC endpoint failover pool and failover fetch
+
 ## 0.17.2 (2026-10-21)
 
 ### Bug Fixes
