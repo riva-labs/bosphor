@@ -110,6 +110,21 @@ groups:
             reserve threshold. Storage payments will fail. Fund the relayer's Sui
             address with SUI.
 
+      # Relayer SUI exhaustion: every store pays Sui gas (~0.005 SUI budget), so
+      # an empty wallet fails all stores and dead-letters them. The WAL top-up
+      # alert above never fires on testnet (no swap there), so watch SUI directly.
+      - alert: BosphorRelayerSuiLow
+        expr: bosphor_relayer_sui_balance_sui < 0.5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer SUI is low ({{ $labels.job }})"
+          description: >-
+            The relayer has {{ $value | printf "%.4f" }} SUI. Stores need Sui gas
+            and will fail with "insufficient SUI balance" then dead-letter. Fund
+            the relayer's Sui address with SUI.
+
       # Dead-man's switch -- the catch-all. Fires whether round-trips are failing,
       # the relayer stopped fulfilling, or the canary itself died mid-flight. The
       # second clause suppresses the alert during the canary's first 40m of
