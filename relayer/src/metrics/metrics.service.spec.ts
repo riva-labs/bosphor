@@ -80,6 +80,19 @@ describe('MetricsService', () => {
     expect(out).toContain('bosphor_relayer_return_mode_total{mode="fallback"} 0');
   });
 
+  it('counts funding-blocked stores by reason, zero-initialized from boot', async () => {
+    expect(await service.getMetrics()).toContain(
+      'bosphor_relayer_store_blocked_total{reason="insufficient_wal"} 0',
+    );
+    service.recordStoreBlocked('insufficient_gas');
+    service.recordStoreBlocked('insufficient_gas');
+
+    const out = await service.getMetrics();
+
+    expect(out).toContain('bosphor_relayer_store_blocked_total{reason="insufficient_gas"} 2');
+    expect(out).toContain('bosphor_relayer_store_blocked_total{reason="insufficient_wal"} 0');
+  });
+
   it('reports the latest checkpoint cursor lag as a gauge', async () => {
     service.setCheckpointCursorLag(7);
     service.setCheckpointCursorLag(3);
