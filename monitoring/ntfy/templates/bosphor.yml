@@ -1,0 +1,11 @@
+# ntfy message template for Alertmanager webhooks (?template=bosphor).
+# One notification per webhook group: status, then each alert's summary and fix.
+title: |
+  {{- if eq .status "resolved" }}RESOLVED{{ else }}{{ (index .alerts 0).labels.severity | upper }}{{ end }}: {{ (index .alerts 0).labels.alertname }}{{ if gt (len .alerts) 1 }} (+{{ sub (len .alerts) 1 }}){{ end }}
+message: |
+  {{- range .alerts }}
+  {{ if eq .status "resolved" }}[ok]{{ else }}[!!]{{ end }} {{ .annotations.summary }}
+  {{- if and (ne .status "resolved") .annotations.fix }}
+  Fix: {{ .annotations.fix }}
+  {{- end }}
+  {{ end }}
