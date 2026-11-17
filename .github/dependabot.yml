@@ -72,7 +72,10 @@ updates:
       interval: weekly
 
   # Git submodules (forge-std, openzeppelin-contracts): minor/patch only.
-  # OpenZeppelin v5 breaks the LayerZero v2 OApp Ownable pattern.
+  # Submodules track commits, not semver, so the semver-major rule alone does
+  # not stop the OpenZeppelin submodule from jumping to v5 master. The project
+  # stays on OpenZeppelin v4.9.6 on purpose: LayerZero v2 OApp depends on the
+  # v4 Ownable semantics. Bump it by hand when that migration is planned.
   - package-ecosystem: gitsubmodule
     directory: /
     schedule:
@@ -80,3 +83,4 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "contracts/evm/lib/openzeppelin-contracts"
