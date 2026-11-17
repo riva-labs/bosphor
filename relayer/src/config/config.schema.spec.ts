@@ -185,3 +185,39 @@ describe('config schema network presets', () => {
     });
   });
 });
+
+describe('config schema: RPC failover lists (#524)', () => {
+  it('accepts a single RPC URL unchanged', () => {
+    const { error, value } = validate({ ...BASE, SOLANA_RPC_URL: 'https://api.devnet.solana.com' });
+    expect(error).toBeUndefined();
+    expect(value.EVM_RPC_URL).toBe('https://rpc.example.org');
+    expect(value.SOLANA_RPC_URL).toBe('https://api.devnet.solana.com');
+  });
+
+  it('accepts comma-separated lists for every RPC key', () => {
+    const { error, value } = validate({
+      ...BASE,
+      EVM_RPC_URL: 'https://a.example.org/v3/KEY, https://b.example.org',
+      SUI_GRPC_URL: 'https://sui-testnet.mystenlabs.com,https://sui-testnet-rpc.example.org',
+      SOLANA_RPC_URL: 'https://api.devnet.solana.com,https://devnet.example.org',
+    });
+    expect(error).toBeUndefined();
+    expect(value.EVM_RPC_URL).toBe('https://a.example.org/v3/KEY, https://b.example.org');
+  });
+
+  it('rejects a list with a malformed entry', () => {
+    expect(
+      validate({ ...BASE, EVM_RPC_URL: 'https://a.example.org,not a url' }).error,
+    ).toBeDefined();
+    expect(validate({ ...BASE, SUI_GRPC_URL: ' , ' }).error).toBeDefined();
+  });
+
+  it('flags a testnet fallback hidden in a mainnet list', () => {
+    const { error } = validate({
+      ...BASE,
+      ...MAINNET_REQUIRED,
+      SUI_GRPC_URL: 'https://fullnode.mainnet.sui.io,https://sui-testnet.mystenlabs.com',
+    });
+    expect(error?.message).toMatch(/SUI_GRPC_URL \(host sui-testnet\.mystenlabs\.com\)/);
+  });
+});
