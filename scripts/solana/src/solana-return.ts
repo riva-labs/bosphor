@@ -68,6 +68,7 @@ import {
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
 import { RateLimitStreak, pollDelay, sendPolled } from "./rpc.ts";
 import { returnDeliveryState, type EndpointNonceState } from "./return-delivery.ts";
+import { isCommittedHash } from "./return-heal.ts";
 import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
@@ -330,7 +331,10 @@ async function readNonceState(
     const inboundNonce = nonceAccount
       ? BigInt(EndpointProgram.accounts.Nonce.fromAccountInfo(nonceAccount as never)[0].inboundNonce.toString())
       : 0n;
-    return { inboundNonce, payloadHashExists: hashAccount !== null };
+    const payloadHashCommitted = hashAccount
+      ? isCommittedHash(EndpointProgram.accounts.PayloadHash.fromAccountInfo(hashAccount as never)[0].hash)
+      : false;
+    return { inboundNonce, payloadHashExists: hashAccount !== null, payloadHashCommitted };
   } catch (e) {
     rpcRateLimits.note(e);
     return null;
@@ -354,6 +358,9 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | 
     console.log(`  delivery state unreadable (nonce ${pkt.nonce}); retry next tick`);
     return "skipped";
   }
+  // Verified + committed under the frontier (a healed or stranded nonce): only
+  // lz_receive is left, so skip building and sending verify and commit.
+  const committed = state === "committed";
   const uln = new UlnProgram.Uln(ULN_ID);
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const bytes = packetBytes(pkt);
@@ -372,36 +379,38 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | 
   //    receiver/srcEid/sender/nonce). commitVerification's endpoint Verify CPI and
   //    lz_receive's Clear CPI both require it to already exist. Idempotent (null if
   //    present). sender = the Sui OApp bytes32 as a pubkey; receiver = our Store.
-  let epInitVerifyIx: TransactionInstruction | null = null;
-  try {
-    const raw = await endpoint.initVerify(
-      conn as never,
-      worker.publicKey as never,
-      new PublicKey(hexToBytes(pkt.sender)) as never,
-      storePda() as never,
-      SUI_EID,
-      pkt.nonce.toString(),
-    );
-    epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
-  } catch (e) {
-    rpcRateLimits.note(e);
-    console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
-  }
-
   // 1) uln initVerify: creates the ULN Confirmations PDA if absent (idempotent,
   //    returns null when present). payer==dvn==our worker.
+  // A committed nonce needs neither, so it costs no extra RPC reads.
+  let epInitVerifyIx: TransactionInstruction | null = null;
   let initVerifyIx: TransactionInstruction | null = null;
-  try {
-    const raw = await uln.initVerify(
-      conn as never,
-      worker.publicKey as never,
-      worker.publicKey as never,
-      bytes,
-    );
-    initVerifyIx = raw ? normalizeIx(raw as never) : null;
-  } catch (e) {
-    rpcRateLimits.note(e);
-    console.log(`  uln.initVerify build skipped (${errText(e)})`);
+  if (!committed) {
+    try {
+      const raw = await endpoint.initVerify(
+        conn as never,
+        worker.publicKey as never,
+        new PublicKey(hexToBytes(pkt.sender)) as never,
+        storePda() as never,
+        SUI_EID,
+        pkt.nonce.toString(),
+      );
+      epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
+    }
+    try {
+      const raw = await uln.initVerify(
+        conn as never,
+        worker.publicKey as never,
+        worker.publicKey as never,
+        bytes,
+      );
+      initVerifyIx = raw ? normalizeIx(raw as never) : null;
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  uln.initVerify build skipped (${errText(e)})`);
+    }
   }
 
   // 2) verify (our DVN attests; the dvn keypair is the sole signer). RETURN_CONF
@@ -422,6 +431,10 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | 
     );
   }
 
+  if (!RUN && committed) {
+    console.log(`  [dry] nonce ${pkt.nonce} already committed; only lz_receive is left. Set RUN=1 to deliver.`);
+    return "dry";
+  }
   if (!RUN) {
     // DRY RUN: simulate initVerify+verify (read-only) and print the resolved
     // lz_receive account metas. Nothing is broadcast.
@@ -462,31 +475,35 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | 
 
   // --- REAL SEND PATH (RUN=1). Each step is revert-tolerant/idempotent. ---
 
-  // 1+2) initVerify + verify in one tx (signer = worker keypair).
-  try {
-    const tx = new Transaction();
-    if (epInitVerifyIx) tx.add(epInitVerifyIx);
-    if (initVerifyIx) tx.add(initVerifyIx);
-    tx.add(verifyIx);
-    const sig = await sendPolled(conn, tx, worker);
-    console.log(`  verify   ${sig}`);
-  } catch (e) {
-    rpcRateLimits.note(e);
-    console.log(
-      `  verify   skipped (${String((e as Error).message).split("\n")[0]})`,
-    );
-  }
+  if (committed) {
+    console.log("  verify+commit already committed");
+  } else {
+    // 1+2) initVerify + verify in one tx (signer = worker keypair).
+    try {
+      const tx = new Transaction();
+      if (epInitVerifyIx) tx.add(epInitVerifyIx);
+      if (initVerifyIx) tx.add(initVerifyIx);
+      tx.add(verifyIx);
+      const sig = await sendPolled(conn, tx, worker);
+      console.log(`  verify   ${sig}`);
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(
+        `  verify   skipped (${String((e as Error).message).split("\n")[0]})`,
+      );
+    }
 
-  // 3) commitVerification (permissionless finalize; reads the on-chain receive config).
-  try {
-    const commitIx = normalizeIx(
-      (await uln.commitVerification(conn as never, ENDPOINT_ID as never, bytes)) as never,
-    );
-    const sig = await sendPolled(conn, new Transaction().add(commitIx), worker);
-    console.log(`  commit   ${sig}`);
-  } catch (e) {
-    rpcRateLimits.note(e);
-    console.log(`  commit   skipped (${errText(e)})`);
+    // 3) commitVerification (permissionless finalize; reads the on-chain receive config).
+    try {
+      const commitIx = normalizeIx(
+        (await uln.commitVerification(conn as never, ENDPOINT_ID as never, bytes)) as never,
+      );
+      const sig = await sendPolled(conn, new Transaction().add(commitIx), worker);
+      console.log(`  commit   ${sig}`);
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  commit   skipped (${errText(e)})`);
+    }
   }
 
   // 4) lz_receive -> escrow released, intent.executed = true.
