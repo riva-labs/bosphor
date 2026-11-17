@@ -98,6 +98,47 @@ services:
     mem_limit: 512m
     restart: unless-stopped
 
+  # Pushes Prometheus alerts to the operator's phone through ntfy. Routing and
+  # repeat policy live in monitoring/alertmanager.yml. The ntfy access token is
+  # read from monitoring/secrets/ntfy_token (gitignored, created at setup).
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      # Directory mounts (not single files) so edits are seen on reload.
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/secrets:/etc/alertmanager/secrets:ro
+      - bosphor-amdata:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # Self-hosted push notifications (ntfy.bosphor.xyz via the cloudflared tunnel,
+  # host port 3020). Private: deny-all by default, operator user + token only.
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    command: ["serve"]
+    volumes:
+      - ./monitoring/ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ./monitoring/ntfy/templates:/etc/ntfy/templates:ro
+      - bosphor-ntfydata:/var/lib/ntfy
+    ports:
+      - "127.0.0.1:3020:80"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # HTTP probes of the public endpoints (targets in monitoring/prometheus.yml).
+  blackbox:
+    image: prom/blackbox-exporter:latest
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    mem_limit: 64m
+    restart: unless-stopped
+
 # status.bosphor.xyz is served by Kener (see kener/), routed through the
 # Cloudflare tunnel to host port 3008. Uptime Kuma was retired at cutover.
 
@@ -105,3 +146,5 @@ volumes:
   bosphor-pgdata:
   bosphor-promdata:
   bosphor-grafanadata:
+  bosphor-amdata:
+  bosphor-ntfydata:
