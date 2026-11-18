@@ -405,11 +405,17 @@ export class BosphorEvmClient {
         if (!isTransientRpcError(err)) throw err;
       }
       if (done) {
-        const blobId = await this.adapter.committedBlobId(intentId);
-        const endEpoch = await this.readEndEpoch(intentId);
-        return { blobId, endEpoch };
+        // A load-balanced RPC can report executed() from one backend while the
+        // getLogs for the proof hits another that is a block behind. Keep polling
+        // for the proof instead of failing on the first empty read.
+        const endEpoch = await this.tryReadEndEpoch(intentId);
+        if (endEpoch !== null) {
+          const blobId = await this.adapter.committedBlobId(intentId);
+          return { blobId, endEpoch };
+        }
       }
       if (Date.now() >= deadline) {
+        if (done) throw missingProofError(intentId);
         throw new ProofTimeoutError(intentId, timeoutMs);
       }
       await sleep(pollMs, opts.signal);
@@ -547,13 +553,25 @@ export class BosphorEvmClient {
       );
     }
     const proof = await this.adapter.queryProof(intentId);
-    if (!proof) {
-      throw new Error(
-        `Intent ${intentId} is executed but no proof was found via queryProof; ` +
-          `refusing to return a fabricated endEpoch.`,
-      );
-    }
+    if (!proof) throw missingProofError(intentId);
     return decodeProofEndEpoch(proof);
+  }
+
+  /**
+   * Like {@link readEndEpoch}, but returns null while the proof log is not yet
+   * visible (empty read or a transient RPC error) so the caller can poll again.
+   * A missing queryProof source is a configuration error and still throws.
+   */
+  private async tryReadEndEpoch(intentId: Hex): Promise<bigint | null> {
+    if (!this.adapter.queryProof) return this.readEndEpoch(intentId);
+    let proof: Hex | null | undefined;
+    try {
+      proof = await this.adapter.queryProof(intentId);
+    } catch (err) {
+      if (isTransientRpcError(err)) return null;
+      throw err;
+    }
+    return proof ? decodeProofEndEpoch(proof) : null;
   }
 
   /** Pull the intent id out of an `IntentSubmitted` log in the receipt. */
@@ -577,4 +595,11 @@ export class BosphorEvmClient {
 /** Factory mirror of `new BosphorEvmClient(opts)`. */
 export function createBosphorClient(opts: BosphorEvmClientOptions): BosphorEvmClient {
   return new BosphorEvmClient(opts);
+}
+
+function missingProofError(intentId: Hex): Error {
+  return new Error(
+    `Intent ${intentId} is executed but no proof was found via queryProof; ` +
+      `refusing to return a fabricated endEpoch.`,
+  );
 }
