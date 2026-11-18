@@ -310,6 +310,43 @@ test("awaitProof rides out a transient RPC reset instead of failing the wait", a
   assert.ok(calls.executed >= 1);
 });
 
+test("awaitProof keeps polling while the proof log lags behind executed()", async () => {
+  const { adapter } = makeFakeAdapter();
+  let reads = 0;
+  adapter.queryProof = async () => {
+    reads += 1;
+    return reads < 3 ? null : encodeProof(BLOB_ID, END_EPOCH);
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+
+  const { endEpoch } = await client.awaitProof(INTENT_ID, { timeoutMs: 1000, pollMs: 1 });
+  assert.equal(endEpoch, END_EPOCH);
+  assert.equal(reads, 3);
+});
+
+test("awaitProof still refuses to fabricate an epoch when the proof never appears", async () => {
+  const { adapter } = makeFakeAdapter();
+  adapter.queryProof = async () => null;
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch: makeFetch(200).fetch,
+  });
+
+  await assert.rejects(
+    () => client.awaitProof(INTENT_ID, { timeoutMs: 20, pollMs: 5 }),
+    /executed but no proof was found/,
+  );
+});
+
 test("awaitProof still fails fast on a non-transient error", async () => {
   const { adapter } = makeFakeAdapter();
   adapter.executed = async () => {
