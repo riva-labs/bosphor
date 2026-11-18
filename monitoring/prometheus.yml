@@ -84,6 +84,8 @@ scrape_configs:
     static_configs:
       - targets: ['pg-backup:9310']
     metrics_path: /metrics
+    # busybox httpd serves the file without a Content-Type.
+    fallback_scrape_protocol: PrometheusText0.0.4
 
   # The alerting pipeline itself.
   - job_name: alertmanager
