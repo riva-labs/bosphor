@@ -8,6 +8,10 @@ route:
   group_interval: 5m
   repeat_interval: 24h
   routes:
+    # Mainnet is paused until after M5 (#535): its relayer is unfunded on
+    # purpose. Drop its alerts until launch, then delete this route.
+    - matchers: [deployment="mainnet"]
+      receiver: blackhole
     # Daily proof the alert pipeline itself is alive. If this stops arriving,
     # Prometheus or Alertmanager is down.
     - matchers: [alertname="Watchdog"]
@@ -24,6 +28,7 @@ inhibit_rules:
     equal: [job]
 
 receivers:
+  - name: blackhole
   - name: ntfy-critical
     webhook_configs:
       - url: http://ntfy/bosphor-alerts?template=bosphor&priority=urgent&tags=rotating_light
