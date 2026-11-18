@@ -105,14 +105,17 @@ confirming.
 | `breakdown` | Every component in USD, plus `totalUsd`. |
 
 Amounts are `bigint`s in the chain's smallest unit (wei or lamports). As a guide,
-a 1 KB file for 5 epochs on testnet costs about 0.0013 ETH or 0.028 SOL today
+a 1 KB file for 5 epochs on testnet costs about 0.0015 ETH or 0.033 SOL today
 (plus about 0.003 SOL of account rent on Solana).
 
 On Solana the LayerZero fee is read with a read-only simulation of the LayerZero
-endpoint, which needs the optional peer `@layerzerolabs/lz-solana-sdk-v2`. Without
-it, `forwardNative` is the preset's fee cap (0.01 SOL) and `forwardIsUpperBound`
-is `true`: the endpoint charges only the live fee, so the actual cost is lower
-than `totalNative`. Install the peer to show users an exact price.
+endpoint. With the optional peer `@layerzerolabs/lz-solana-sdk-v2` installed the
+SDK runs it locally; without it (a browser, for example) the relayer runs the same
+simulation for you (`GET /lz-fee/solana`, from `@bosphor/sdk` 0.14.0). Either way
+the quote is exact and `forwardIsUpperBound` is `false`. Only a relayer without
+that endpoint leaves the preset's fee cap (0.01 SOL), flagged
+`forwardIsUpperBound: true`: the endpoint charges only the live fee, so the actual
+cost is then lower than `totalNative`.
 Most of the cost is the LayerZero return leg, so the price grows slowly with size.
 
 ## Where the money goes

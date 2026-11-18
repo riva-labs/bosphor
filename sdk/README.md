@@ -200,6 +200,13 @@ network, set `network: "mainnet"` on the client for a mainnet adapter (the defau
 is `"testnet"`), or pass a custom `computeBlob`. Tests pass a stub and never load
 the Walrus SDK.
 
+In a browser, pass `computeBlob: "relayer"` instead: the client asks its relayer's
+`POST /blob/encode` for the id (the same Walrus encoder, byte for byte), so no WASM
+is bundled. The standalone form is `relayerComputeBlob(relayerUrl, { appId })`. The
+bytes are sent to the relayer to be encoded (nothing is stored); the endpoint is
+limited to 30 requests per minute per IP and 10 MiB per blob, and a 429 surfaces as
+a `RelayerRequestError` with `retryAfterMs`.
+
 See `examples/store-file.evm.ts` for a runnable end-to-end script.
 
 ### Identifying your app (`appId`)
@@ -243,10 +250,34 @@ const client = await createBosphorSolanaClientFromKeypair({ connection, wallet: 
 const { intentId, blobId, endEpoch } = await client.store(fileBytes, { epochs: 5 });
 ```
 
-For an exact LayerZero fee in `priceQuote()`, also install the optional peer
-`@layerzerolabs/lz-solana-sdk-v2`: the helper then reads the live fee with a
-read-only simulation (`quoteSolanaLzFee`). Without it, the quote uses the preset
-fee cap and sets `forwardIsUpperBound: true`.
+`priceQuote()` uses the live LayerZero fee. With the optional peer
+`@layerzerolabs/lz-solana-sdk-v2` installed, the helper reads it locally with a
+read-only simulation (`quoteSolanaLzFee`); without it (for example in a browser) it
+asks the relayer, which runs the same simulation (`fetchSolanaLzFee`, `GET
+/lz-fee/solana`). Only a relayer without that endpoint leaves the preset fee cap,
+flagged `forwardIsUpperBound: true`.
+
+### Signing with a browser wallet
+
+`wallet` can also be a wallet-adapter style signer, `{ publicKey, signTransaction }`,
+as Phantom, Solflare and `@solana/wallet-adapter` expose. The SDK builds each
+transaction, the wallet signs it (the user approves), and the SDK sends and
+confirms it. `createBosphorSolanaClientFromWallet` is the same helper under a
+wallet-friendly name:
+
+```ts
+import * as web3 from "@solana/web3.js";
+import { createBosphorSolanaClientFromWallet } from "@bosphor/sdk/solana";
+
+const client = await createBosphorSolanaClientFromWallet({
+  connection,
+  wallet, // useWallet() from @solana/wallet-adapter-react, or window.phantom.solana
+  web3, // injected so the bundler does not have to resolve a lazy import
+  computeBlob: "relayer",
+  appId: "my-dapp",
+});
+const { intentId, txHash } = await client.storePriced(fileBytes);
+```
 
 `submit_intent` makes a CPI into the LayerZero endpoint, which needs a fixed list
 of "send" accounts. The helper uses `testnetEndpointAccounts(payer)`, a published
@@ -313,20 +344,43 @@ machine-readable `code` string (the message may change; the code will not) and a
 
 | Error | `code` | Thrown by | Fields | `retryable` |
 |-------|--------|-----------|--------|-------------|
-| `RelayerUploadError` | `RELAYER_UPLOAD_FAILED` | `upload`, `store` | `status`, `reason`, `intentId` | `true` for a 404 (watch-lag race) or 5xx; `false` for a terminal 4xx (already executed, expired, bad blob). |
+| `RelayerUploadError` | `RELAYER_UPLOAD_FAILED` | `upload`, `store` | `status`, `reason`, `intentId`, `retryAfterMs` | `true` for a 404 (watch-lag race), 429 or 5xx; `false` for a terminal 4xx (already executed, expired, bad blob). The SDK already retried these with backoff (see below). |
+| `RelayerRequestError` | `RELAYER_REQUEST_FAILED` | `fetchQuote`, `priceQuote`, `relayerComputeBlob`, `fetchSolanaLzFee` | `status`, `body`, `operation`, `retryAfterMs` | `true` for 408, 429 and 5xx. |
 | `ProofTimeoutError` | `PROOF_TIMEOUT` | `awaitProof`, `store` | `intentId`, `timeoutMs` | `true`. The intent may still execute; re-poll with `awaitProof(intentId)`. |
 | `BosphorError` | `BOSPHOR_ERROR` | base class | `code`, `retryable` | `false` by default. Superclass of every SDK error. |
 
 The errors are exported from the core `@bosphor/sdk` and from both chain subpaths.
 
+`retryAfterMs` (on every `BosphorError`) is the relayer's `Retry-After`, parsed from
+seconds or an HTTP date, when it sent one (429 rate limit, 503 backpressure):
+
+```ts
+try {
+  await fetchQuote(TESTNET.relayerUrl, { sizeBytes, originToken: "ETH" });
+} catch (e) {
+  if (e instanceof BosphorError && e.retryable) {
+    await new Promise((r) => setTimeout(r, e.retryAfterMs ?? 5_000));
+    // retry
+  }
+}
+```
+
+The blob upload retries on its own: right after a submit the relayer can answer
+404 "no pending intent" for a few seconds while it catches up with the chain, and a
+busy relayer answers 429 or 503. `upload` and `store` retry those (and network
+errors) with exponential backoff that honors `Retry-After` and the `signal`, for up
+to 2 minutes (`DEFAULT_UPLOAD_RETRY`), then throw the last `RelayerUploadError`.
+Tune it with the client option `uploadRetry: { maxElapsedMs, maxAttempts,
+baseDelayMs, maxDelayMs }`, or `uploadRetry: false` for a single attempt.
+
 ## API surface
 
 | Import | Exports |
 |--------|---------|
-| `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`; `fetchQuote`; `TESTNET`, `networks`, `walrusBlobUrl`, `blobIdToBase64Url`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `Hex`, `PricedQuote`, `QuoteRequest`, `QuoteBreakdown`, `BosphorNetwork` |
+| `@bosphor/sdk` | `encodeCommitment`, `decodeCommitment`, `deriveIntentId`, `COMMITMENT_BYTES`/`BLOB_ID_BYTES`/`SENDER_BYTES`; `BosphorError`/`ProofTimeoutError`/`RelayerUploadError`/`RelayerRequestError`; `fetchQuote`; `relayerComputeBlob`, `MAX_RELAYER_ENCODE_BYTES`; `parseRetryAfter`, `DEFAULT_UPLOAD_RETRY`; `TESTNET`, `networks`, `walrusBlobUrl`, `blobIdToBase64Url`; types `Commitment`, `BlobEncoding`, `ComputeBlob`, `ComputeBlobOption`, `StoreResult`, `EncodeOptions`, `AwaitProofOptions`, `EncodedIntent`, `FetchLike`, `FetchLikeResponse`, `RetryPolicy`, `UploadRetryOptions`, `Hex`, `PricedQuote`, `QuoteRequest`, `QuoteBreakdown`, `BosphorNetwork` |
 | `@bosphor/sdk/commitment` | The commitment codec on its own. |
 | `@bosphor/sdk/evm` | `createBosphorClientFromSigner`, `connectAdapter`, `quoteEvmStore`, `ADAPTER_ABI`, `EscrowStatus`, `BosphorEvmClient`, `createBosphorClient`, `fromEthersContract`, `decodeProofEndEpoch`, `defaultComputeBlob`, `createDefaultComputeBlob`; the preset, errors, and core codec re-exported; types `AdapterContract`, `BosphorEvmClientOptions`, `MessagingFee`, `EthersContractLike`, `CreateClientFromSignerOptions` |
-| `@bosphor/sdk/solana` | `createBosphorSolanaClientFromKeypair`, `quoteSolanaStore`, `quoteSolanaLzFee`, `testnetEndpointAccounts`, `resolveEndpointAccounts`, `TESTNET_SEND_ACCOUNTS`, `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the preset, errors, and core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions`, `CreateSolanaClientFromKeypairOptions` |
+| `@bosphor/sdk/solana` | `createBosphorSolanaClientFromKeypair`, `createBosphorSolanaClientFromWallet`, `quoteSolanaStore`, `quoteSolanaLzFee`, `fetchSolanaLzFee`, `testnetEndpointAccounts`, `resolveEndpointAccounts`, `TESTNET_SEND_ACCOUNTS`, `BosphorSolanaClient`, `createBosphorSolanaClient`, `createDefaultSolanaChain`, `decodeIntentState`, `readSolanaProof`, `BOSPHOR_PROGRAM_ID`; the preset, errors, and core codec re-exported; types `SolanaChain`, `BosphorSolanaClientOptions`, `SubmitOptions`, `CreateSolanaClientFromKeypairOptions` |
 
 ## For Solidity integrators
 
@@ -366,6 +420,27 @@ try {
   package needed.
 - **Tree-shaking:** `"sideEffects": false`, so bundlers drop the subpaths you do not
   import. A codec-only consumer never pulls a chain SDK.
+
+### Browser bundles
+
+The optional peers (`ethers`, `@solana/web3.js`, `@mysten/walrus`, `@mysten/sui`,
+`@layerzerolabs/lz-solana-sdk-v2`) are loaded lazily in Node, through imports a
+bundler deliberately does not follow (they carry `webpackIgnore` / `@vite-ignore`
+hints). That keeps them optional: a static import would make every bundler fail on
+an app that does not install them. In a browser, hand the SDK what it needs instead:
+
+- `ethers`: pass the module, `ethers` option of `createBosphorClientFromSigner`,
+  `connectAdapter` and `quoteEvmStore`.
+- `@solana/web3.js`: pass it as `web3` to `createBosphorSolanaClientFromWallet` /
+  `FromKeypair`, `createDefaultSolanaChain` and `quoteSolanaStore`.
+- Blob ids: `computeBlob: "relayer"` (no Walrus WASM), or inject the modules with
+  `createDefaultComputeBlob(network, { walrus, suiGrpc })`.
+- Solana LayerZero fee: nothing to install; without the LayerZero SDK the quote
+  asks the relayer for the live fee.
+
+The package test suite bundles a sample browser app with esbuild
+(`platform: "browser"`) to keep this true: no Node built-in, and no Walrus, Sui or
+LayerZero SDK in the bundle.
 
 ## Versioning & stability
 

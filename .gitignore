@@ -14,10 +14,10 @@ contracts/evm/foundry.lock
 
 # sui (under contracts/)
 contracts/sui/executor/build/
-contracts/sui/executor/deps/
-contracts/sui/executor/Published.toml
+# executor/ and lz-receiver/Published.toml are tracked: they record the package
+# ids and upgrade caps an upgrade from a clean clone needs (the executor links
+# bosphor_lz through lz-receiver's entry).
 contracts/sui/lz-receiver/build/
-contracts/sui/lz-receiver/Published.toml
 contracts/sui/lz-receiver/traces/
 
 # dependencies

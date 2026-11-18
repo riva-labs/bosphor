@@ -31,12 +31,13 @@ export function configureHttp(
   });
   app.enableCors(cors);
 
-  // Per-IP (and per-app) rate limits on the integrator routes. Registered BEFORE
+  // Per-IP (and per-app) rate limits on the integrator routes (GET /lz-fee too:
+  // it can trigger Solana RPC calls). Registered BEFORE
   // the raw-body parser below, so an over-limit client is turned away with a 429
   // before the relayer reads (up to 10 MiB of) its body.
   const trustProxy = config.get<boolean>('TRUST_PROXY') ?? false;
   app.use(
-    ['/blob', '/quote'],
+    ['/blob', '/quote', '/lz-fee'],
     createRateLimitMiddleware(
       {
         enabled: config.get<boolean>('RATE_LIMIT_ENABLED') ?? true,

@@ -10,6 +10,8 @@ groups:
           severity: critical
         annotations:
           summary: "Bosphor canary is down (not scrapable)"
+          fix: >-
+            docker logs --tail 100 bosphor-canary-1, then: docker compose -f docker-compose.yml -f docker-compose.hosting.yml -f docker-compose.canary-testnet.yml up -d --build --no-deps canary
           description: >-
             Prometheus cannot scrape the canary at {{ $labels.instance }} for 2m.
             No synthetic round-trips are running, so an end-to-end outage would go
@@ -17,16 +19,23 @@ groups:
 
       # Early warning: repeated round-trip failures before staleness trips.
       # The canary increments result="failure" on submit errors and return
-      # timeouts; two in 20m means the cross-chain path is degraded, not a blip.
+      # timeouts; two in a window that holds at least two probes means the
+      # cross-chain path is degraded, not a blip. Solana probes run every 30m
+      # (CANARY_SOLANA_INTERVAL_MS), so a 20m window could never see two of them.
       - alert: BosphorCanaryRoundTripFailing
-        expr: increase(bosphor_canary_roundtrip_total{result="failure"}[20m]) >= 2
+        expr: >-
+          increase(bosphor_canary_roundtrip_total{result="failure",chain!="solana"}[20m]) >= 2
+          or increase(bosphor_canary_roundtrip_total{result="failure",chain="solana"}[70m]) >= 2
         for: 0m
         labels:
           severity: warning
         annotations:
           summary: "Bosphor synthetic round-trips are failing"
+          fix: >-
+            docker logs --tail 200 bosphor-canary-1 to see which leg fails, then check bosphor-relayer-testnet and the DVN logs for the same intent id.
           description: >-
-            {{ $value | printf "%.0f" }} canary round-trips failed in the last 20m.
+            {{ $value | printf "%.0f" }} {{ $labels.chain }} canary round-trips failed
+            recently (20m window for EVM, 70m for Solana).
             The forward (submitIntent) or return (executed proof on EVM) leg is
             broken. Check the relayer return path and LayerZero delivery.
 
@@ -41,6 +50,8 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor canary wallet is low on gas"
+          fix: >-
+            Send Sepolia ETH to the canary 0x8C6B35a020e3B930ff3E577607eC2Db40007Bf1C (burns ~0.04 ETH/day). The treasury 0x9665322fa22589Bf1d8612007717647819F3B290 can fund it with cast send.
           description: >-
             The canary sender has {{ $value | printf "%.4f" }} ETH left. Refill it
             before it drains, or synthetic round-trips will stop and every submit
@@ -55,6 +66,8 @@ groups:
           severity: critical
         annotations:
           summary: "Bosphor canary wallet is nearly empty"
+          fix: >-
+            Send Sepolia ETH to the canary 0x8C6B35a020e3B930ff3E577607eC2Db40007Bf1C now. Probes resume on the next tick, no restart needed.
           description: >-
             The canary sender has {{ $value | printf "%.4f" }} ETH left and is
             below the probe floor. Probes are being skipped (reason=low_balance)
@@ -70,6 +83,8 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor canary is skipping probes due to a gas spike"
+          fix: >-
+            Usually nothing: wait for Sepolia gas to drop. Raise CANARY_MAX_GAS_GWEI in .env.canary-testnet only if it persists for hours.
           description: >-
             {{ $value | printf "%.0f" }} probes were skipped in the last 30m
             because gas exceeded CANARY_MAX_GAS_GWEI. Funds are protected, but the
@@ -86,6 +101,8 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor relayer WAL is low and not auto-refilling"
+          fix: >-
+            Send WAL (or SUI so the auto swap can buy WAL) to the relayer Sui address 0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366 on the network named in the deployment label.
           description: >-
             The relayer has {{ $value | printf "%.4f" }} WAL and has stayed below
             the floor for 15m. The SUI->WAL auto top-up may be failing. Check the
@@ -100,29 +117,55 @@ groups:
           severity: critical
         annotations:
           summary: "Bosphor relayer cannot refill WAL (SUI too low)"
+          fix: >-
+            Send SUI to the relayer Sui address 0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366. WAL refills automatically once SUI is available.
           description: >-
             The relayer WAL top-up could not swap because SUI is below the swap +
             reserve threshold. Storage payments will fail. Fund the relayer's Sui
             address with SUI.
 
+      # Relayer SUI exhaustion: every store pays Sui gas (~0.005 SUI budget), so
+      # an empty wallet blocks every store. The WAL top-up swaps SUI for WAL, so
+      # an empty SUI wallet also stops WAL refills: watch SUI directly.
+      - alert: BosphorRelayerSuiLow
+        expr: bosphor_relayer_sui_balance_sui < 0.5
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer SUI is low ({{ $labels.job }})"
+          fix: >-
+            Send SUI to the relayer Sui address 0xa11070a3877b77355a0afbc402559cae7501c666819f05491f0337016c219366 on the network named in the deployment label. Stores resume automatically.
+          description: >-
+            The relayer has {{ $value | printf "%.4f" }} SUI. Stores need Sui gas
+            and will fail with "insufficient SUI balance" then dead-letter. Fund
+            the relayer's Sui address with SUI.
+
       # Dead-man's switch -- the catch-all. Fires whether round-trips are failing,
       # the relayer stopped fulfilling, or the canary itself died mid-flight. The
       # second clause suppresses the alert during the canary's first 40m of
       # uptime so a cold start (last_success still 0) does not page; after that,
-      # a never-succeeding canary correctly alerts.
+      # a never-succeeding canary correctly alerts. Solana probes run every 30m,
+      # so its limit is 70m (two missed probes) instead of 40m.
       - alert: BosphorCanaryRoundTripStale
         expr: >-
-          (time() - bosphor_canary_last_success_timestamp_seconds > 2400)
+          (
+            (time() - bosphor_canary_last_success_timestamp_seconds{chain!="solana"} > 2400)
+            or (time() - bosphor_canary_last_success_timestamp_seconds{chain="solana"} > 4200)
+          )
           and on(instance) (time() - process_start_time_seconds{job="bosphor-canary"} > 2400)
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "No successful Bosphor round-trip in over 40m"
+          summary: "No successful Bosphor {{ $labels.chain }} round-trip in too long"
+          fix: >-
+            Check in order: canary wallet balances, docker logs bosphor-relayer-testnet (store errors), DVN logs (delivery). The first red alert in that chain is the cause.
           description: >-
-            The last successful end-to-end round-trip was
-            {{ $value | printf "%.0f" }}s ago. The EVM -> Sui -> EVM path is not
-            completing. This is the primary end-to-end health signal.
+            The last successful {{ $labels.chain }} end-to-end round-trip was
+            {{ $value | printf "%.0f" }}s ago (limit 40m for EVM, 70m for Solana).
+            The origin -> Sui -> origin path is not completing. This is the primary
+            end-to-end health signal.
 
   - name: bosphor-dvn
     rules:
@@ -131,31 +174,39 @@ groups:
       # goes dark (the exact outage this DVN was built to fix). Per instance, so it
       # names which pathway (evm_sui / solana_sui) is down.
       - alert: BosphorDvnDown
-        expr: up{job="bosphor-dvn"} == 0
+        expr: up{job=~"bosphor-dvn|bosphor-dvn-return"} == 0
         for: 3m
         labels:
           severity: critical
         annotations:
           summary: "Bosphor DVN worker is down ({{ $labels.instance }})"
+          fix: >-
+            docker logs --tail 100 on the DVN container for this instance, then: docker compose -f docker-compose.yml -f docker-compose.dvn.yml up -d --no-deps <service>
           description: >-
             Prometheus cannot scrape the DVN at {{ $labels.instance }} for 3m. No
             packets are being verified+committed on this pathway, so cross-chain
             delivery has stalled. Check the DVN worker container/process.
 
       # Dead-man's switch: the DVN is up but has not delivered a packet in over
-      # 40m. With the canary heart-beating both legs every 15m, a healthy DVN
-      # commits well within that window; staleness means it is stuck (bad RPC,
+      # 40m (70m on Solana pathways). The canary heartbeats EVM every 10-15m and
+      # Solana every 30m, so a healthy DVN commits well within that window, and
+      # one skipped Solana probe does not page; staleness means it is stuck (bad RPC,
       # object-version conflict, exhausted gas). The second clause suppresses the
       # first 40m of uptime so a cold start does not page.
       - alert: BosphorDvnDeliveryStale
         expr: >-
-          (time() - bosphor_dvn_last_success_timestamp_seconds > 2400)
+          (
+            (time() - bosphor_dvn_last_success_timestamp_seconds{pathway!~".*solana.*"} > 2400)
+            or (time() - bosphor_dvn_last_success_timestamp_seconds{pathway=~".*solana.*"} > 4200)
+          )
           and on(instance) (time() - process_start_time_seconds{job="bosphor-dvn"} > 2400)
         for: 5m
         labels:
           severity: critical
         annotations:
-          summary: "Bosphor DVN has not delivered in over 40m ({{ $labels.pathway }})"
+          summary: "Bosphor DVN has not delivered in too long ({{ $labels.pathway }})"
+          fix: >-
+            docker logs --tail 200 on the DVN for this pathway. Check its gas wallet (Sui DVN 0x2be6623b17d5e22c4acc615ee2a190a0a9993db6c617f5079decc1eae56c887c, Solana BQvCCQQj6Cd1ErZRrezaQJAAetExkGzAE3TKZAHpSn1E). For a stuck nonce use the diag-nonce / recover tooling in bosphor-dvn.
           description: >-
             The last verify+commit+execute on pathway {{ $labels.pathway }} was
             {{ $value | printf "%.0f" }}s ago. The DVN is up but not making
@@ -171,6 +222,8 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor DVN is hitting delivery errors ({{ $labels.pathway }})"
+          fix: >-
+            docker logs --tail 200 on the DVN for this pathway and look for the failing stage (RPC, object version conflict, gas).
           description: >-
             {{ $value | printf "%.0f" }} verify+commit/execute errors on pathway
             {{ $labels.pathway }} in the last 20m. Check the worker logs for the
@@ -189,11 +242,30 @@ groups:
           severity: critical
         annotations:
           summary: "Bosphor relayer dead-lettered a store"
+          fix: >-
+            psql bosphor_testnet: select intent_id,last_error from staged_intent where state='dead' order by updated_at desc. The bytes are gone; the intent refunds at its deadline.
           description: >-
             {{ $value | printf "%.0f" }} intent(s) dead-lettered in the durable
             store queue in the last 15m (pre-store attempts exhausted or a
             terminal error). The blob was never stored. Inspect staged_intent rows
             in state='dead' and their last_error.
+
+      # The relayer's own Sui wallet cannot pay for stores (no SUI for gas or no
+      # WAL for storage). Rows are kept and retried, never dead-lettered, but no
+      # intent can complete until the operator funds the wallet.
+      - alert: BosphorRelayerStoreBlocked
+        expr: increase(bosphor_relayer_store_blocked_total[15m]) >= 1
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer stores blocked by an unfunded wallet ({{ $labels.reason }})"
+          description: >-
+            {{ $value | printf "%.0f" }} store attempt(s) in the last 15m were
+            blocked because the relayer Sui wallet could not pay
+            ({{ $labels.reason }}). Intents stay queued with their bytes intact
+            and do not consume store attempts.
+          fix: "Fund the relayer Sui address (SUI for gas, WAL for storage). Intents resume automatically once funded."
 
       # The blob is safe on Walrus and recorded on Sui, but its return proof could
       # not be delivered within the return-leg budget. Storage is not lost, but
@@ -205,6 +277,8 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor relayer stored a blob but could not deliver its proof"
+          fix: >-
+            Storage is safe. Check LayerZero delivery for the intent on layerzeroscan and the relayer logs for confirmExecution errors.
           description: >-
             {{ $value | printf "%.0f" }} intent(s) exceeded the return-leg budget
             in the last 15m. The storage is safe (Walrus + Sui), but the proof has
@@ -215,9 +289,6 @@ groups:
       # owner-gated confirmExecution fallback instead of the canonical LayerZero
       # proof path. The min-count clause (>= 3 returns in the hour) is the
       # cold-start guard: a fresh relayer with one unlucky return does not page.
-      # NOTE: 100% fallback is the CURRENT known state until #337 repairs the
-      # lz_send_proof path, so this alert will scream by design until then. Do
-      # not silence it permanently; it is the signal that #337 is still open.
       - alert: BosphorRelayerReturnFallbackHigh
         expr: >-
           (
@@ -232,13 +303,14 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor relayer returns are mostly falling back to confirmExecution"
+          fix: >-
+            Check lz_send errors in the relayer logs (quote/send failures on Sui). Returns still settle via confirmExecution, so this is degradation, not an outage.
           description: >-
             {{ $value | humanizePercentage }} of return legs on {{ $labels.job }}
             settled via the owner-gated confirmExecution fallback (instead of the
             LayerZero proof path) over the last hour. The proof path is degraded.
             Check lz_send_total{result="failure"} and the Sui LZ send quote/send
-            errors in the relayer logs. Known state: this stays at 100% until
-            #337 lands the proof-path fix.
+            errors in the relayer logs.
 
       # Backpressure headroom: staged bytes are approaching MAX_STAGED_BYTES
       # (default 256 MiB). At the ceiling, ingest sheds new blobs with a 503, so
@@ -250,8 +322,146 @@ groups:
           severity: warning
         annotations:
           summary: "Bosphor relayer staged bytes near the backpressure ceiling"
+          fix: >-
+            Check the relayer logs for slow or failing Walrus uploads and the dead-letter rate. Ingest returns 503 at the ceiling.
           description: >-
             The durable queue holds {{ $value | printf "%.0f" }} bytes, over 80%
             of the 256 MiB MAX_STAGED_BYTES ceiling, for 5m. The store queue is
             not draining fast enough; at the ceiling ingest returns 503. Check
             Walrus/Sui throughput and the dead-letter rate.
+
+  - name: bosphor-ops
+    rules:
+      # Always firing. Alertmanager routes it to a daily low-priority ntfy
+      # heartbeat: if that stops arriving, the alert pipeline itself is broken.
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Bosphor alert pipeline heartbeat (daily)"
+
+      # A relayer process is gone. The canary only notices after 40m; this pages
+      # within minutes and names which relayer.
+      - alert: BosphorRelayerDown
+        expr: up{job=~"bosphor-relayer|bosphor-relayer-testnet"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor relayer is down ({{ $labels.job }})"
+          fix: >-
+            docker ps -a | grep relayer, then docker logs --tail 100 on the
+            container. Testnet: docker restart bosphor-relayer-testnet. Mainnet:
+            docker restart bosphor-relayer-1.
+
+      # User-facing endpoints: the demo dApp, its Drive index and the public
+      # relayer APIs. Down means users cannot upload or see their files.
+      - alert: BosphorEndpointDown
+        expr: probe_success{job="blackbox",target=~".*(demo|api|supabase)\\.bosphor\\.xyz.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.target }} is unreachable"
+          fix: >-
+            curl -sv {{ $labels.target }}. All of bosphor.xyz down at once means
+            the tunnel: docker restart bosphor-cloudflared (never SIGHUP it).
+            Only demo down: check the Cloudflare Workers deploy of bosphor-dapp.
+            api or supabase: check the relayer or bosphor-dapp-index-rest container.
+
+      # Informational sites (docs, landing, status, waitlist).
+      - alert: BosphorSiteDown
+        expr: probe_success{job="blackbox",target!~".*(demo|api|supabase)\\.bosphor\\.xyz.*"} == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.target }} is unreachable"
+          fix: >-
+            curl -sv {{ $labels.target }}. status.bosphor.xyz is the Kener
+            container (docker restart bosphor-kener); docs and landing are
+            Cloudflare deploys; waitlist is bosphor-waitlist-web-1.
+
+      # Balance runway: the early signal for every wallet, independent of its
+      # fixed floor. A linear fit over 3 days predicts the balance hits zero
+      # within 14 days (warning) or 3 days (critical).
+      - alert: BosphorWalletRunwayShort
+        expr: >-
+          predict_linear({__name__=~"bosphor_relayer_sui_balance_sui|bosphor_relayer_wal_balance_wal|bosphor_canary_wallet_balance_eth|bosphor_canary_wallet_balance_sol|bosphor_wallet_balance"}[3d], 14 * 86400) < 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.__name__ }} {{ $labels.role }} {{ $labels.job }} runs out within 14 days"
+          fix: >-
+            Top up this wallet now, before it becomes critical. Address and
+            per-day burn are on the Grafana wallet panels.
+
+      - alert: BosphorWalletRunwayCritical
+        expr: >-
+          predict_linear({__name__=~"bosphor_relayer_sui_balance_sui|bosphor_relayer_wal_balance_wal|bosphor_canary_wallet_balance_eth|bosphor_canary_wallet_balance_sol|bosphor_wallet_balance"}[1d], 3 * 86400) < 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.__name__ }} {{ $labels.role }} {{ $labels.job }} runs out within 3 days"
+          fix: >-
+            Top up this wallet today. When it hits zero, stores, deliveries or
+            probes on that chain stop.
+
+      # The Solana canary has its own wallet and floor (SOLANA_MIN_BALANCE_SOL).
+      - alert: BosphorCanarySolanaWalletLow
+        expr: bosphor_canary_wallet_balance_sol < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor Solana canary wallet is low ({{ $value | printf \"%.3f\" }} SOL)"
+          fix: >-
+            Send devnet SOL to HnooBvpx8pSebZxaZx4GUq1vGQCfggjU9HLsaCQM58UA
+            (faucet.solana.com, or solana transfer from a funded devnet wallet).
+            Below 0.05 SOL the Solana probe stops.
+
+      # Service wallet watcher (canary, WALLET_WATCH). A failed read leaves
+      # bosphor_wallet_balance stale rather than faking a value, so a balance
+      # alert cannot fire on a wallet we can no longer read. This catches that.
+      - alert: BosphorWalletBalanceReadErrors
+        expr: sum by(chain, role) (increase(bosphor_wallet_balance_read_errors_total[30m])) >= 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bosphor cannot read the {{ $labels.role }} wallet balance on {{ $labels.chain }}"
+          description: >-
+            {{ $value | printf "%.0f" }} balance read(s) for the {{ $labels.role }}
+            wallet on {{ $labels.chain }} failed in the last 30m. Its
+            bosphor_wallet_balance gauge is stale, so low-balance alerts for it
+            are blind.
+          fix: >-
+            Run `docker logs bosphor-canary-1 2>&1 | grep "\[wallets\] balance read failed"`
+            to see the error. If the RPC is down or rate limited, point
+            WALLET_SUI_GRPC_URL / WALLET_EVM_RPC_URL / WALLET_SOLANA_RPC_URL at a
+            working endpoint in .env.canary-testnet; if the address or coin type
+            is wrong, correct the WALLET_WATCH entry. Then recreate the canary
+            container.
+
+      # Testnet auto top-up is broken: a wallet is below its floor and the
+      # treasury send keeps failing, so it will drain to zero unattended.
+      - alert: BosphorWalletTopUpFailing
+        expr: sum by(chain, role) (increase(bosphor_wallet_topup_total{result="error"}[1h])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor testnet top-up failing for {{ $labels.role }} on {{ $labels.chain }}"
+          description: >-
+            {{ $value | printf "%.0f" }} top-up attempt(s) for the {{ $labels.role }}
+            wallet on {{ $labels.chain }} failed in the last hour. The wallet is
+            below its floor and is not being refilled.
+          fix: >-
+            Run `docker logs bosphor-canary-1 2>&1 | grep "\[wallets\]"` to find the
+            failing send. Most often the {{ $labels.chain }} treasury
+            (SUI_TREASURY_KEY / EVM_TREASURY_KEY / SOLANA_TREASURY_KEYPAIR) is out
+            of gas or near its floor: fund it from a faucet. Meanwhile refill the
+            {{ $labels.role }} wallet by hand from the treasury.

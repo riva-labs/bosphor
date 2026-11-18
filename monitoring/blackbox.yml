@@ -1,0 +1,9 @@
+# blackbox_exporter modules for the public endpoint probes in prometheus.yml.
+modules:
+  http_2xx:
+    prober: http
+    timeout: 15s
+    http:
+      preferred_ip_protocol: ip4
+      follow_redirects: true
+      valid_status_codes: []  # any 2xx

@@ -100,6 +100,10 @@ test("store() runs encode -> submit -> upload -> awaitProof and returns verified
   assert.equal(result.intentId, INTENT_ID);
   assert.equal(result.blobId, BLOB_ID);
   assert.equal(result.endEpoch, END_EPOCH);
+  // Typed as a required string: this line does not compile if txHash is optional.
+  const signature: string = result.txHash;
+  assert.equal(typeof signature, "string");
+  assert.ok(signature.length > 0);
 
   assert.equal(calls.submit, 1);
   assert.equal(fetchCalls.length, 1);
@@ -128,6 +132,52 @@ test("store() surfaces a relayer non-2xx as a RelayerUploadError with the reason
       return true;
     },
   );
+});
+
+test('computeBlob: "relayer" derives the blob id through the client relayer /blob/encode', async () => {
+  const { chain } = makeFakeChain();
+  const urls: string[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    urls.push(url);
+    return {
+      ok: true,
+      status: 201,
+      text: async () =>
+        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body!.length }),
+    };
+  };
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: "relayer",
+    fetch,
+  });
+  const encoded = await client.encode(new TextEncoder().encode("hello"));
+  assert.equal(urls[0], "https://relayer.test/blob/encode");
+  assert.equal(encoded.blobId, "0x1e22bae5f11b1257cefe82ebdb3c3c130e237d733702604105b5477453dd2154");
+});
+
+test("store() retries the relayer's watch-lag 404 on upload, then completes", async () => {
+  const { chain } = makeFakeChain();
+  const statuses = [404, 503, 200];
+  const seen: number[] = [];
+  const fetch: FetchLike = async () => {
+    const status = statuses.shift() ?? 200;
+    seen.push(status);
+    return { ok: status === 200, status, text: async () => "" };
+  };
+  const client = new BosphorSolanaClient({
+    chain,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    uploadRetry: { baseDelayMs: 1, maxDelayMs: 1 },
+  });
+  const result = await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+  assert.equal(result.intentId, INTENT_ID);
+  assert.deepEqual(seen, [404, 503, 200]);
 });
 
 test("awaitProof throws a typed ProofTimeoutError when the intent never executes", async () => {

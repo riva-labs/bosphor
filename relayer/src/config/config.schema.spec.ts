@@ -28,6 +28,30 @@ function validate(env: Record<string, string>) {
   return configValidationSchema.validate(env, { allowUnknown: true, abortEarly: false });
 }
 
+describe('config schema: Solana LayerZero fee endpoint', () => {
+  it('defaults to the testnet Sui eid, peer, canonical LZ programs and a 30s cache', () => {
+    const { error, value } = validate(BASE);
+    expect(error).toBeUndefined();
+    expect(value.SUI_EID).toBe(40378);
+    expect(value.SOLANA_LZ_SUI_PEER).toBe(TESTNET_PRESET.SOLANA_LZ_SUI_PEER);
+    expect(value.SOLANA_LZ_ENDPOINT_PROGRAM).toBe('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6');
+    expect(value.SOLANA_LZ_ULN_PROGRAM).toBe('7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH');
+    expect(value.SOLANA_LZ_OPTIONS).toBe('0x00030100110100000000000000000000000000030d40');
+    expect(value.SOLANA_LZ_FEE_CACHE_MS).toBe(30_000);
+  });
+
+  it('borrows no testnet peer on mainnet, and uses the canonical Sui mainnet eid', () => {
+    const { error, value } = validate({ ...BASE, ...MAINNET_REQUIRED });
+    expect(error).toBeUndefined();
+    expect(value.SUI_EID).toBe(30378);
+    expect(value.SOLANA_LZ_SUI_PEER).toBeUndefined();
+  });
+
+  it('rejects a malformed Sui peer', () => {
+    expect(validate({ ...BASE, SOLANA_LZ_SUI_PEER: '0x1234' }).error).toBeDefined();
+  });
+});
+
 describe('config schema network presets', () => {
   describe('testnet (default)', () => {
     it('keeps the historical testnet defaults when NETWORK is unset', () => {
@@ -159,5 +183,41 @@ describe('config schema network presets', () => {
       expect(error?.message).toMatch(/EVM_RPC_URL/);
       expect(error?.message).not.toMatch(/SECRETKEY123/);
     });
+  });
+});
+
+describe('config schema: RPC failover lists (#524)', () => {
+  it('accepts a single RPC URL unchanged', () => {
+    const { error, value } = validate({ ...BASE, SOLANA_RPC_URL: 'https://api.devnet.solana.com' });
+    expect(error).toBeUndefined();
+    expect(value.EVM_RPC_URL).toBe('https://rpc.example.org');
+    expect(value.SOLANA_RPC_URL).toBe('https://api.devnet.solana.com');
+  });
+
+  it('accepts comma-separated lists for every RPC key', () => {
+    const { error, value } = validate({
+      ...BASE,
+      EVM_RPC_URL: 'https://a.example.org/v3/KEY, https://b.example.org',
+      SUI_GRPC_URL: 'https://sui-testnet.mystenlabs.com,https://sui-testnet-rpc.example.org',
+      SOLANA_RPC_URL: 'https://api.devnet.solana.com,https://devnet.example.org',
+    });
+    expect(error).toBeUndefined();
+    expect(value.EVM_RPC_URL).toBe('https://a.example.org/v3/KEY, https://b.example.org');
+  });
+
+  it('rejects a list with a malformed entry', () => {
+    expect(
+      validate({ ...BASE, EVM_RPC_URL: 'https://a.example.org,not a url' }).error,
+    ).toBeDefined();
+    expect(validate({ ...BASE, SUI_GRPC_URL: ' , ' }).error).toBeDefined();
+  });
+
+  it('flags a testnet fallback hidden in a mainnet list', () => {
+    const { error } = validate({
+      ...BASE,
+      ...MAINNET_REQUIRED,
+      SUI_GRPC_URL: 'https://fullnode.mainnet.sui.io,https://sui-testnet.mystenlabs.com',
+    });
+    expect(error?.message).toMatch(/SUI_GRPC_URL \(host sui-testnet\.mystenlabs\.com\)/);
   });
 });

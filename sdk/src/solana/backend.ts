@@ -54,12 +54,54 @@ export interface SolanaAccountMetaInput {
   isWritable: boolean;
 }
 
+/** A `@solana/web3.js` `Keypair`: signs locally with its secret key (scripts, servers). */
+export interface SolanaKeypairLike {
+  /** The keypair's public key. */
+  publicKey: { toBase58(): string };
+  /** The 64-byte secret key. */
+  secretKey: Uint8Array;
+}
+
+/**
+ * A browser wallet signer in the shape Phantom, Solflare, Backpack and
+ * `@solana/wallet-adapter` expose: the SDK builds the transaction, the wallet
+ * signs it (the user approves in the wallet), and the SDK sends and confirms it.
+ * The secret key never reaches the SDK.
+ */
+export interface SolanaWalletSigner {
+  /** The connected account, or `null` while the wallet is disconnected. */
+  publicKey: { toBase58(): string } | null;
+  /**
+   * Sign a legacy `Transaction` and resolve with the signed transaction. Typed
+   * loosely so any wallet's generic `signTransaction<T>` fits without a cast.
+   * `undefined` is accepted because `useWallet()` exposes it that way when the
+   * selected wallet cannot sign; the SDK then throws a clear error.
+   */
+  signTransaction: ((transaction: never) => Promise<unknown>) | undefined;
+  /** Optional batch signing. Accepted for wallet-adapter parity; not needed today. */
+  signAllTransactions?: ((transactions: never) => Promise<unknown>) | undefined;
+}
+
+/** Who signs and pays Solana transactions: a {@link SolanaKeypairLike} or a {@link SolanaWalletSigner}. */
+export type SolanaSigner = SolanaKeypairLike | SolanaWalletSigner;
+
 /** Options for {@link createDefaultSolanaChain}. */
 export interface DefaultSolanaChainOptions {
   /** A `@solana/web3.js` `Connection` (any commitment). */
   connection: unknown;
-  /** A funded `@solana/web3.js` `Keypair` (the payer and submitter). */
-  wallet: unknown;
+  /**
+   * The payer and submitter: a funded `Keypair`, or a browser wallet signer
+   * (`{ publicKey, signTransaction }`, as Phantom and `@solana/wallet-adapter`
+   * expose). With a wallet, the SDK sets the fee payer and a recent blockhash,
+   * asks the wallet to sign, then sends and confirms the transaction itself.
+   */
+  wallet: SolanaSigner;
+  /**
+   * Inject the `@solana/web3.js` module. Needed in a browser bundle, where the
+   * SDK's lazy import of the optional peer cannot be resolved; pass
+   * `await import("@solana/web3.js")` (or `import * as web3`).
+   */
+  web3?: object;
   /** Program id override; defaults to {@link BOSPHOR_PROGRAM_ID}. */
   programId?: string;
   /**
@@ -87,6 +129,24 @@ function toHex(bytes: Uint8Array): Hex {
   return ("0x" + bytesToHex(bytes)) as Hex;
 }
 
+/**
+ * Instruction data as a Node `Buffer` where one exists (what web3.js declares),
+ * else the plain bytes: browsers have no global `Buffer`, and web3.js only
+ * reads the data as bytes.
+ */
+function ixData(bytes: Uint8Array): Uint8Array {
+  const B = (globalThis as { Buffer?: { from(b: Uint8Array): Uint8Array } }).Buffer;
+  return B ? B.from(bytes) : bytes;
+}
+
+function isWalletSigner(w: unknown): w is SolanaWalletSigner {
+  return typeof (w as { signTransaction?: unknown } | null)?.signTransaction === "function";
+}
+
+function isKeypair(w: unknown): w is SolanaKeypairLike {
+  return (w as { secretKey?: unknown } | null)?.secretKey instanceof Uint8Array;
+}
+
 function bytes32(hex: Hex): Uint8Array {
   const b = hexToBytes(hex.startsWith("0x") ? hex.slice(2) : hex);
   if (b.length !== 32) throw new Error(`expected 32 bytes, got ${b.length}`);
@@ -102,18 +162,39 @@ function bytes32(hex: Hex): Uint8Array {
 export async function createDefaultSolanaChain(
   opts: DefaultSolanaChainOptions,
 ): Promise<SolanaChain> {
-  const web3Spec = "@solana/web3.js";
+  const payer = opts.wallet;
+  if (!payer?.publicKey) {
+    throw new Error("the Solana wallet is not connected (publicKey is null); connect it first");
+  }
+  const walletSigner = isWalletSigner(payer);
+  if (!walletSigner && !isKeypair(payer)) {
+    if ("signTransaction" in payer) {
+      throw new Error(
+        "the connected Solana wallet cannot sign transactions (signTransaction is " +
+          "undefined); pick a wallet that supports signTransaction",
+      );
+    }
+    throw new Error(
+      "createDefaultSolanaChain needs a wallet: a Keypair, or a wallet signer with " +
+        "{ publicKey, signTransaction } (Phantom, @solana/wallet-adapter)",
+    );
+  }
+  const publicKey = payer.publicKey;
 
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  let web3: any;
-  try {
-    web3 = await import(web3Spec);
-  } catch (err) {
-    throw new Error(
-      "the default Solana backend requires the optional peer dependency " +
-        "'@solana/web3.js'. Install it (npm install @solana/web3.js) or implement the " +
-        `SolanaChain interface yourself. Underlying error: ${String(err)}`,
-    );
+  let web3: any = opts.web3;
+  if (!web3) {
+    const web3Spec = "@solana/web3.js";
+    try {
+      web3 = await import(/* webpackIgnore: true */ /* @vite-ignore */ web3Spec);
+    } catch (err) {
+      throw new Error(
+        "the default Solana backend requires the optional peer dependency " +
+          "'@solana/web3.js'. Install it (npm install @solana/web3.js), pass the module as " +
+          "`web3` (needed in browser bundles), or implement the SolanaChain interface " +
+          `yourself. Underlying error: ${String(err)}`,
+      );
+    }
   }
 
   const {
@@ -126,9 +207,37 @@ export async function createDefaultSolanaChain(
   } = web3;
   const programId = new PublicKey(opts.programId ?? BOSPHOR_PROGRAM_ID);
   const connection: any = opts.connection;
-  const payer: any = opts.wallet;
-  const payerKey: any = payer.publicKey ?? payer;
+  // Normalized to this web3.js copy's PublicKey: a wallet may hand over a key
+  // built by another copy of the library, and mixing classes breaks encoding.
+  const payerKey: any = new PublicKey(publicKey.toBase58());
   const enc = new TextEncoder();
+
+  /**
+   * Sign, send and confirm. A Keypair signs locally (the historical path); a
+   * wallet gets a transaction with fee payer and blockhash set, signs it, and the
+   * SDK sends the raw bytes and waits for confirmation. A failed transaction
+   * throws with its on-chain error rather than returning a signature.
+   */
+  async function signAndSend(tx: any): Promise<string> {
+    if (!walletSigner) {
+      return sendAndConfirmTransaction(connection, tx, [payer]);
+    }
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+    tx.feePayer = payerKey;
+    tx.recentBlockhash = blockhash;
+    const signed: any = await (payer as SolanaWalletSigner).signTransaction!(tx as never);
+    const signature: string = await connection.sendRawTransaction(signed.serialize());
+    const result = await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      "confirmed",
+    );
+    if (result?.value?.err) {
+      throw new Error(
+        `Solana transaction ${signature} failed: ${JSON.stringify(result.value.err)}`,
+      );
+    }
+    return signature;
+  }
 
   const pda = (seeds: Array<Uint8Array>): any =>
     PublicKey.findProgramAddressSync(seeds, programId)[0];
@@ -172,7 +281,7 @@ export async function createDefaultSolanaChain(
       );
       const intentId = toHex(intentIdBytes);
 
-      const data = Buffer.from(
+      const data = ixData(
         encodeSubmitIntentData({
           blobId: fields.blobId,
           size: fields.size,
@@ -214,7 +323,7 @@ export async function createDefaultSolanaChain(
       }
       tx.add(ix);
 
-      const signature: string = await sendAndConfirmTransaction(connection, tx, [payer]);
+      const signature: string = await signAndSend(tx);
 
       // Cross-check the predicted id against the IntentSubmitted event.
       const txInfo = await connection.getTransaction(signature, {
@@ -257,9 +366,9 @@ export async function createDefaultSolanaChain(
           { pubkey: new PublicKey(vault.payer), isSigner: false, isWritable: true },
           { pubkey: escrowPda(intentId), isSigner: false, isWritable: true },
         ],
-        data: Buffer.from(encodeRefundEscrowData(intentId)),
+        data: ixData(encodeRefundEscrowData(intentId)),
       });
-      const signature: string = await sendAndConfirmTransaction(connection, new Transaction().add(ix), [payer]);
+      const signature: string = await signAndSend(new Transaction().add(ix));
       return { signature };
     },
 

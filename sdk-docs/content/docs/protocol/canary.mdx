@@ -25,6 +25,7 @@ A skipped tick still refreshes the balance and gas gauges, so monitoring always 
 | `CANARY_MIN_BALANCE_ETH` | `0.005` | Skip a probe when the sender balance is below this (roughly ten probes of runway). |
 | `CANARY_MAX_GAS_GWEI` | `50` | Skip a probe when network gas exceeds this. Normal Sepolia gas is ~2 gwei. |
 | `CANARY_INTERVAL_MS` | `900000` | Interval between round-trips (15 min). |
+| `CANARY_SOLANA_INTERVAL_MS` | `CANARY_INTERVAL_MS` | Solana-only interval override. Testnet runs Solana every 30 min (`1800000`) because each probe pays LZ fees from a hand-funded devnet wallet. |
 | `CANARY_PORT` | `9300` | Port for the `/metrics` and `/health` endpoints. |
 
 ## Metrics endpoint
@@ -48,8 +49,8 @@ The provided `monitoring/alerts.yml` ships these canary rules:
 | Alert | Severity | Fires when |
 |-------|----------|-----------|
 | `BosphorCanaryDown` | critical | The canary is not scrapable for 2m |
-| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m |
-| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m |
+| `BosphorCanaryRoundTripFailing` | warning | Two or more round-trips fail in 20m (70m for Solana) |
+| `BosphorCanaryRoundTripStale` | critical | No successful round-trip in over 40m (70m for Solana) |
 | `BosphorCanaryWalletLow` | warning | Wallet balance below 0.05 ETH (refill soon) |
 | `BosphorCanaryWalletCritical` | critical | Wallet balance below 0.01 ETH (probes skipping) |
 | `BosphorCanaryGasSpikeSkipping` | warning | Three or more probes skipped for high gas in 30m |
@@ -59,6 +60,59 @@ When a `high_gas` skip alert is active, treat a following staleness alert as a g
 ## Refilling the wallet
 
 When `BosphorCanaryWalletLow` or `BosphorCanaryWalletCritical` fires, top up the canary sender with Sepolia ETH (and Sui testnet gas on the destination side). No restart is needed. The preflight guard clears on the next tick once the balance is back above `CANARY_MIN_BALANCE_ETH`.
+
+## Service wallet watcher
+
+The canary also watches every Bosphor service wallet on every chain (relayer, DVN, operator, canary, treasury) and exports one balance gauge for all of them. Set `WALLET_WATCH` to a JSON array (inline, or a path to a JSON file):
+
+```json
+[
+  { "chain": "sui", "network": "testnet", "address": "0x...", "role": "relayer", "floor": 5, "target": 20, "dailyCap": 40 },
+  { "chain": "sui", "network": "testnet", "address": "0x...", "role": "relayer", "coin": "0x...::wal::WAL" },
+  { "chain": "evm", "network": "sepolia", "address": "0x...", "role": "operator" },
+  { "chain": "solana", "network": "devnet", "address": "...", "role": "relayer", "floor": 1, "target": 3 }
+]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `chain` | `sui`, `evm` or `solana` |
+| `network` | `testnet`, `devnet`, `sepolia` or `mainnet`. One network per chain. |
+| `address`, `role` | The wallet and what it does, used as metric labels |
+| `coin` | Sui only: full coin type for a non-SUI coin such as WAL. Defaults to SUI. |
+| `floor`, `target` | Optional, whole tokens. Opt the wallet into the testnet top-up. |
+| `dailyCap` | Optional, whole tokens per rolling 24h. Defaults to `target`. |
+
+Balances are read every `WALLET_WATCH_INTERVAL_MS` (default 5 min). Sui is read over gRPC, and the reported balance includes both coin objects and the address balance. A failed read never writes a placeholder value: the gauge keeps its last real reading and the error counter goes up.
+
+### Testnet auto top-up
+
+When a wallet with `floor` and `target` falls below its floor, the canary sends `target - balance` from that chain's treasury, capped by the wallet's `dailyCap` and never drawing the treasury below its own floor. It runs only when all of these hold:
+
+- `TOPUP_ENABLED=true`
+- the entry's `network` is `testnet`, `devnet` or `sepolia`
+- the RPC itself reports a test network (Sui chain identifier, EVM chain id, Solana genesis hash)
+- a treasury key is configured for that chain
+
+On mainnet it never moves funds; it only logs and the balance alerts fire.
+
+| Variable | Meaning |
+|----------|---------|
+| `TOPUP_ENABLED` | `true` to allow top-ups (test networks only) |
+| `SUI_TREASURY_KEY` / `SUI_TREASURY_FLOOR` | Sui treasury (`suiprivkey1...`) and the SUI it must keep |
+| `EVM_TREASURY_KEY` / `EVM_TREASURY_FLOOR` | EVM treasury private key and the ETH it must keep |
+| `SOLANA_TREASURY_KEYPAIR` / `SOLANA_TREASURY_FLOOR` | Solana treasury keypair (path or inline JSON array) and the SOL it must keep |
+| `WALLET_SUI_GRPC_URL`, `WALLET_EVM_RPC_URL`, `WALLET_SOLANA_RPC_URL` | Optional RPC overrides. EVM falls back to `EVM_RPC_URL`, Solana to `SOLANA_RPC_URL`. |
+
+A treasury key without its floor is a startup error.
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `bosphor_wallet_balance` | gauge | `chain`, `network`, `role`, `address`, `coin` (whole tokens) |
+| `bosphor_wallet_balance_read_errors_total` | counter | `chain`, `role` |
+| `bosphor_wallet_topup_total` | counter | `chain`, `role`, `result` (`success`, `error`, `daily_cap`, `treasury_floor`) |
+
+Two alerts cover the watcher: `BosphorWalletBalanceReadErrors` (warning, repeated failed reads, so the gauge is stale) and `BosphorWalletTopUpFailing` (critical, a top-up send failed in the last hour).
 
 ## Error tracking (Sentry)
 

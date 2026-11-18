@@ -22,7 +22,7 @@ services:
     build: ./relayer
     env_file: .env
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     # Internal Prometheus scrape port (METRICS_PORT). Reachable by prometheus over
     # the compose network only; deliberately not published on the host.
     expose:
@@ -62,7 +62,7 @@ services:
       # Metric history survives container recreates (post-mortems need it).
       - bosphor-promdata:/prometheus
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     # Lets Prometheus scrape host-published services (e.g. the testnet relayer's
     # metrics port :9465, which runs in a separate compose project) via
     # host.docker.internal.
@@ -92,10 +92,51 @@ services:
       # recreates keep it.
       - bosphor-grafanadata:/var/lib/grafana
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     depends_on:
       - prometheus
     mem_limit: 512m
+    restart: unless-stopped
+
+  # Pushes Prometheus alerts to the operator's phone through ntfy. Routing and
+  # repeat policy live in monitoring/alertmanager.yml. The ntfy access token is
+  # read from monitoring/secrets/ntfy_token (gitignored, created at setup).
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      # Directory mounts (not single files) so edits are seen on reload.
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./monitoring/secrets:/etc/alertmanager/secrets:ro
+      - bosphor-amdata:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # Self-hosted push notifications (ntfy.bosphor.xyz via the cloudflared tunnel,
+  # host port 3020). Private: deny-all by default, operator user + token only.
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    command: ["serve"]
+    volumes:
+      - ./monitoring/ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ./monitoring/ntfy/templates:/etc/ntfy/templates:ro
+      - bosphor-ntfydata:/var/lib/ntfy
+    ports:
+      - "127.0.0.1:3020:80"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  # HTTP probes of the public endpoints (targets in monitoring/prometheus.yml).
+  blackbox:
+    image: prom/blackbox-exporter:latest
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    mem_limit: 64m
     restart: unless-stopped
 
 # status.bosphor.xyz is served by Kener (see kener/), routed through the
@@ -105,3 +146,5 @@ volumes:
   bosphor-pgdata:
   bosphor-promdata:
   bosphor-grafanadata:
+  bosphor-amdata:
+  bosphor-ntfydata:

@@ -3,7 +3,7 @@ title: SDK releases
 description: Notable changes to @bosphor/sdk, newest first.
 ---
 
-The latest published release is **`@bosphor/sdk` 0.13.1**. The full, authoritative
+The latest published release is **`@bosphor/sdk` 0.14.0**. The full, authoritative
 changelog lives in the repo:
 [CHANGELOG.md](https://github.com/riva-labs/bosphor/blob/main/sdk/CHANGELOG.md),
 and each release is tagged
@@ -14,6 +14,27 @@ and each release is tagged
 The SDK is pre-1.0. `feat` bumps the minor version and `fix` bumps the patch;
 breaking changes bump the minor while pre-1.0. Pin a version in production.
 </Callout>
+
+## 0.14.0
+
+Browser support.
+
+**Breaking changes** (compile level and behavior):
+
+- **`StoreResult.txHash` is required** (`string`). Code that builds a `StoreResult` itself must set it.
+- **`FetchLike` `init.body` is optional**: it is `undefined` on `GET /lz-fee/solana`. A custom fetch that forwards `init.body` keeps working; one that reads it must handle `undefined`.
+- **Solana quotes without the LayerZero SDK ask the relayer** for the live fee. A relayer `503` or a network error now throws a retryable error with `retryAfterMs`; only a relayer without the endpoint (`404`/`501`) falls back to the flagged cap. `relayerLzFee: false` restores the old behavior.
+- **`client.upload()` retries**: an upload for an intent the relayer never sees now waits up to about 2 minutes before throwing. `uploadRetry: false` makes a single attempt.
+- **`fetchQuote` throws `RelayerRequestError`** (a `BosphorError`, same message), `retryable` on 408/429/5xx.
+
+**Features:**
+
+- **feat:** `computeBlob: "relayer"` and `relayerComputeBlob()`: blob ids from the relayer's `POST /blob/encode`, no Walrus WASM in the browser.
+- **feat:** browser wallet signing on Solana (`{ publicKey, signTransaction }`, including `useWallet()`), with `createBosphorSolanaClientFromWallet`.
+- **feat:** exact Solana quotes in the browser via the relayer's `GET /lz-fee/solana` (`fetchSolanaLzFee`).
+- **feat:** `retryAfterMs` on errors, and upload retries with backoff that honor `Retry-After`.
+- **feat:** bundler-friendly optional peers: pass `ethers` / `web3` / Walrus modules in instead of lazy imports.
+- **fix:** a `409` answering an upload retry counts as success (an earlier attempt was ingested).
 
 ## 0.13.1
 

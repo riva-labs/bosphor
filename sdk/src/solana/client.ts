@@ -19,7 +19,8 @@
  */
 
 import type { ComputeBlob, Hex, StoreResult } from "../types.js";
-import { createDefaultComputeBlob, type WalrusNetwork } from "../blob.js";
+import type { WalrusNetwork } from "../blob.js";
+import { resolveComputeBlob, type ComputeBlobOption } from "../relayer-blob.js";
 import { ProofTimeoutError } from "../errors.js";
 import { fetchQuote, type PricedQuote } from "../quote.js";
 import {
@@ -37,6 +38,7 @@ import {
   type ProgressOptions,
   type EncodedIntent,
   type FetchLike,
+  type UploadRetryOptions,
   isTransientRpcError,
 } from "../store-flow.js";
 
@@ -155,8 +157,13 @@ export interface BosphorSolanaClientOptions {
    * `"testnet"`.
    */
   network?: WalrusNetwork;
-  /** Blob-id computation seam; defaults to the `@mysten/walrus`-backed impl. */
-  computeBlob?: ComputeBlob;
+  /**
+   * How to derive the Walrus blob id. `"local"` (the default) uses the
+   * `@mysten/walrus` WASM encoder; `"relayer"` asks this client's relayer
+   * (`POST /blob/encode`), which needs no WASM and is the easy choice in a
+   * browser; or pass your own {@link ComputeBlob}.
+   */
+  computeBlob?: ComputeBlobOption;
   /** `fetch` implementation; defaults to the global `fetch`. */
   fetch?: FetchLike;
   /**
@@ -166,6 +173,11 @@ export interface BosphorSolanaClientOptions {
    * Validated at construction: letters, digits, `-`, `_`, `.`, max 64 chars.
    */
   appId?: string;
+  /**
+   * Retry bounds of the blob upload, or `false` for a single attempt. Defaults to
+   * `DEFAULT_UPLOAD_RETRY` (up to 2 minutes, honoring `Retry-After`).
+   */
+  uploadRetry?: UploadRetryOptions;
 }
 
 /** Per-call overrides for `submit()`, `submitPaid()` and the one-call store methods. */
@@ -197,6 +209,7 @@ export class BosphorSolanaClient {
   private readonly computeBlobFn: ComputeBlob;
   private readonly fetchFn: FetchLike;
   private readonly appId: string | undefined;
+  private readonly uploadRetry: UploadRetryOptions | undefined;
 
   constructor(opts: BosphorSolanaClientOptions) {
     if (!opts.chain) throw new Error("BosphorSolanaClient requires a chain backend");
@@ -211,9 +224,15 @@ export class BosphorSolanaClient {
     this.quoteLzFee = opts.quoteLzFee;
     this.defaultEpochs = opts.defaultEpochs ?? DEFAULT_EPOCHS;
     this.deadlineSeconds = opts.deadlineSeconds ?? DEFAULT_DEADLINE_SECONDS;
-    this.computeBlobFn = opts.computeBlob ?? createDefaultComputeBlob(opts.network ?? "testnet");
     this.fetchFn = resolveFetch(opts.fetch);
     this.appId = validateAppId(opts.appId);
+    this.computeBlobFn = resolveComputeBlob(opts.computeBlob, {
+      network: opts.network ?? "testnet",
+      relayerUrl: this.relayerUrl,
+      fetch: this.fetchFn,
+      appId: this.appId,
+    });
+    this.uploadRetry = opts.uploadRetry;
   }
 
   /**
@@ -259,15 +278,21 @@ export class BosphorSolanaClient {
 
   /**
    * Upload the raw blob bytes out-of-band to the relayer:
-   * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body. Throws a
-   * `RelayerUploadError` carrying the relayer's reason on any non-2xx.
+   * `POST {relayerUrl}/blob/{intentId}` with the bytes as the raw body. Retries
+   * the watch-lag 404, 429, 5xx and network errors with bounded backoff (the
+   * client's `uploadRetry`, or `opts.retry` for this call), then throws a
+   * `RelayerUploadError` carrying the relayer's reason.
    */
   async upload(
     intentId: Hex,
     data: Uint8Array,
-    opts: { signal?: AbortSignal | undefined } = {},
+    opts: { signal?: AbortSignal | undefined; retry?: UploadRetryOptions | undefined } = {},
   ): Promise<void> {
-    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, opts.signal, this.appId);
+    await uploadBlob(this.fetchFn, this.relayerUrl, intentId, data, {
+      signal: opts.signal,
+      appId: this.appId,
+      retry: opts.retry ?? this.uploadRetry,
+    });
   }
 
   /**

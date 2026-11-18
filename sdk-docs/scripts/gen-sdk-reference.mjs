@@ -13,6 +13,7 @@
 // documented once, where it is defined, and linked from the others.
 //
 // Run: node scripts/gen-sdk-reference.mjs
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -301,8 +302,12 @@ function moduleIndex(area, mod, rendered, router) {
 }
 
 async function main() {
+  // TypeDoc type-checks sdk/src, so the SDK's dependencies must be installed. CI
+  // installs them explicitly; a build that only installed the portal (the
+  // Cloudflare Workers Build, a fresh clone) installs them here.
   if (!fs.existsSync(path.join(sdkRoot, 'node_modules'))) {
-    throw new Error('gen-sdk-reference: run `npm ci` in sdk/ first (TypeDoc type-checks sdk/src)');
+    console.log('gen-sdk-reference: installing sdk/ dependencies (npm ci)');
+    execFileSync('npm', ['ci', '--no-audit', '--no-fund'], { cwd: sdkRoot, stdio: 'inherit' });
   }
 
   const app = await Application.bootstrapWithPlugins(

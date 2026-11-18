@@ -7,8 +7,10 @@ import { resolveStoreSize } from "./quote.js";
 import { TESTNET } from "./networks.js";
 import type { FetchLike } from "./store-flow.js";
 
+/** A relayer fake for POST /quote. GET /lz-fee/solana is absent, as on a relayer before 0.17. */
 function relayer(seen: { url?: string; body?: Record<string, string | number> }): FetchLike {
   return async (url, init) => {
+    if (url.includes("/lz-fee/solana")) return { ok: false, status: 404, text: async () => "" };
     seen.url = url;
     seen.body = JSON.parse(new TextDecoder().decode(init.body));
     const fwd = BigInt((seen.body?.forwardLzFeeNative as string) ?? "0");
@@ -65,7 +67,7 @@ test("quoteEvmStore reads the LZ fee with a provider only and prices via the rel
   assert.equal(quote.forwardIsUpperBound, false);
 });
 
-test("quoteSolanaStore falls back to the flagged fee cap without the LZ Solana SDK", async () => {
+test("quoteSolanaStore falls back to the flagged fee cap without the LZ Solana SDK or relayer fee", async () => {
   const seen: { url?: string; body?: Record<string, string | number> } = {};
   const quote = await quoteSolanaStore({
     connection: {},

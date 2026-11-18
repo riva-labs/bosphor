@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { base64UrlToBytes32Hex } from "./blob.js";
+import { base64UrlToBytes32Hex, createDefaultComputeBlob } from "./blob.js";
 
 // Ground truth: a Walrus blob id is a u256 whose base64url string encodes it
 // LITTLE-endian. The canonical Bosphor commitment field is the BIG-endian encoding
@@ -33,4 +33,26 @@ test("base64UrlToBytes32Hex encodes the Walrus blob-id u256 big-endian", () => {
 
 test("base64UrlToBytes32Hex rejects ids that are not 32 bytes", () => {
   assert.throws(() => base64UrlToBytes32Hex("AAAA"), /32-byte Walrus blob id/);
+});
+
+test("createDefaultComputeBlob uses injected modules instead of the lazy import", async () => {
+  const seen: { network?: string } = {};
+  const suiGrpc = {
+    SuiGrpcClient: class {
+      constructor(o: { network: string }) {
+        seen.network = o.network;
+      }
+      $extend() {
+        return {
+          walrus: { encodeBlob: async () => ({ blobId: "qineIE9eC8z5CTaTsILV-LL_8VwRVCK-lKZftG7B4ik" }) },
+        };
+      }
+    },
+  };
+  const walrus = { walrus: () => ({}) };
+  const encode = createDefaultComputeBlob("mainnet", { walrus, suiGrpc });
+  const out = await encode(new Uint8Array([1, 2]));
+  assert.equal(seen.network, "mainnet");
+  assert.equal(out.blobId, base64UrlToBytes32Hex("qineIE9eC8z5CTaTsILV-LL_8VwRVCK-lKZftG7B4ik"));
+  assert.equal(out.size, 2);
 });

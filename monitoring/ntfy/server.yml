@@ -1,0 +1,17 @@
+# Self-hosted ntfy for Bosphor operator alerts (ntfy.bosphor.xyz via the tunnel).
+# Alertmanager publishes over the compose network; phones subscribe over HTTPS.
+base-url: https://ntfy.bosphor.xyz
+listen-http: ":80"
+behind-proxy: true
+cache-file: /var/lib/ntfy/cache.db
+cache-duration: 72h
+# Private by default: only the operator user and the Alertmanager token can
+# read or write. Users and tokens live in auth.db on the ntfy volume.
+auth-file: /var/lib/ntfy/auth.db
+auth-default-access: deny-all
+enable-login: true
+# iOS gets instant pushes only through the ntfy.sh upstream (it forwards a
+# message id, never the content). Android works without it.
+upstream-base-url: https://ntfy.sh
+# Renders Alertmanager webhooks (?template=bosphor), see templates/bosphor.yml.
+template-dir: /etc/ntfy/templates

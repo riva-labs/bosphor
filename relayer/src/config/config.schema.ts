@@ -30,6 +30,24 @@ function presetString(base: Joi.StringSchema, testnet: string, mainnet?: string)
   });
 }
 
+/**
+ * An RPC endpoint setting: one URL, or a comma-separated failover list whose
+ * first URL is the primary (#524). Every entry must be a valid URI.
+ */
+function rpcUrlList(): Joi.StringSchema {
+  return Joi.string().custom((value: string, helpers) => {
+    const urls = value
+      .split(',')
+      .map((u) => u.trim())
+      .filter((u) => u !== '');
+    if (urls.length === 0) return helpers.error('string.uri');
+    for (const url of urls) {
+      if (Joi.string().uri().validate(url).error) return helpers.error('string.uri');
+    }
+    return value;
+  }, 'RPC URL list');
+}
+
 export const configValidationSchema = Joi.object({
   // Network preset. testnet keeps every historical default (no behavior change
   // for a deployment that never sets NETWORK); mainnet has no testnet fallbacks,
@@ -39,7 +57,8 @@ export const configValidationSchema = Joi.object({
     .default('testnet'),
 
   // EVM
-  EVM_RPC_URL: Joi.string().uri().required(),
+  // One RPC URL, or a comma-separated failover list (first = primary, #524).
+  EVM_RPC_URL: rpcUrlList().required(),
   // Private key for the EVM relayer wallet (EVM_PRIVATE_KEY)
   EVM_RELAYER_KEY: Joi.string().required(),
   EVM_ADAPTER_ADDRESS: Joi.string().required(),
@@ -61,7 +80,8 @@ export const configValidationSchema = Joi.object({
     MAINNET_PRESET.SUI_NETWORK,
   ),
   // Sui fullnode gRPC endpoint. Public testnet node on testnet; required on mainnet.
-  SUI_GRPC_URL: presetString(Joi.string().uri(), TESTNET_PRESET.SUI_GRPC_URL),
+  // Accepts a comma-separated failover list (first = primary, #524).
+  SUI_GRPC_URL: presetString(rpcUrlList(), TESTNET_PRESET.SUI_GRPC_URL),
   SUI_RELAYER_KEY: Joi.string().required(),
   SUI_PACKAGE_ID: Joi.string().required(),
   SUI_CONFIG_ID: Joi.string().required(),
@@ -96,7 +116,8 @@ export const configValidationSchema = Joi.object({
   // IntentSubmitted events and records their commitment, so ingest and
   // execute_store work for Solana-origin intents. Unset on the EVM-only
   // deployment, where the Solana watcher stays inert.
-  SOLANA_RPC_URL: Joi.string().uri().optional().allow(''),
+  // Accepts a comma-separated failover list (first = primary, #524).
+  SOLANA_RPC_URL: rpcUrlList().optional().allow(''),
   SOLANA_PROGRAM_ID: Joi.string().optional().allow(''),
   // Sui address that receives the stored blob for a Solana-origin intent. A
   // Solana pubkey cannot own a Sui object, so the M3 single-relayer model routes
@@ -109,6 +130,29 @@ export const configValidationSchema = Joi.object({
   // Store-admin keypair (inline JSON secret-key array or a path to one) used to
   // sign the Solana return leg confirm_execution. Unset disables the return leg.
   SOLANA_RELAYER_KEYPAIR: Joi.string().optional().allow(''),
+  // Live Solana -> Sui LayerZero fee (GET /lz-fee/solana). Served when the
+  // Solana origin is configured and SOLANA_LZ_SUI_PEER is set. The endpoint and
+  // ULN302 program ids are LayerZero's canonical Solana deployments (the same on
+  // devnet and mainnet).
+  SUI_EID: presetNumber(TESTNET_PRESET.SUI_EID, MAINNET_PRESET.SUI_EID),
+  SOLANA_LZ_ENDPOINT_PROGRAM: Joi.string().default('76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6'),
+  SOLANA_LZ_ULN_PROGRAM: Joi.string().default('7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH'),
+  // The Sui OApp peer the Solana adapter sends to (bytes32). Testnet preset; on
+  // mainnet set it explicitly to enable the fee endpoint.
+  SOLANA_LZ_SUI_PEER: Joi.string()
+    .pattern(/^0x[0-9a-fA-F]{64}$/)
+    .allow('')
+    .when('NETWORK', {
+      ...isMainnet,
+      otherwise: Joi.string().default(TESTNET_PRESET.SOLANA_LZ_SUI_PEER),
+    }),
+  // Executor options priced by the fee quote: must match what the SDK submits
+  // (type-3, lzReceive gas 200k).
+  SOLANA_LZ_OPTIONS: Joi.string()
+    .pattern(/^0x([0-9a-fA-F]{2})*$/)
+    .default('0x00030100110100000000000000000000000000030d40'),
+  // How long one fee simulation is reused (ms).
+  SOLANA_LZ_FEE_CACHE_MS: Joi.number().integer().min(0).default(30_000),
 
   // Walrus
   WALRUS_RELAY_URL: Joi.string().uri().required(),
@@ -203,6 +247,14 @@ export const configValidationSchema = Joi.object({
   // rows older than this so the queue table does not grow without bound; the
   // durable evidence they carry lives in the intent_lifecycle feed regardless.
   STAGED_RETENTION_MS: Joi.number().integer().default(86400000), // 24 h
+  // Backstop for active rows that buffered bytes but never got their Sui
+  // IntentReceived (a lost or skipped forward delivery) AND carry no deadline
+  // (ingest normally records the committed deadline, so expireDue settles those
+  // on time). Without it they would stay active forever. An expired row refuses
+  // re-uploads and ignores a late IntentReceived until it is purged, so keep this
+  // well above the longest forward outage we expect to recover from (61h in
+  // 2026-09). Floor 1h: forward delivery normally takes minutes.
+  STAGED_UNRECEIVED_TTL_MS: Joi.number().integer().min(3600000).default(604800000), // 7 d
   // Graceful-shutdown drain budget. On SIGTERM the processor waits up to this
   // long for in-flight stores to settle before exiting; anything still active
   // resumes idempotently on next boot (no re-upload / re-record).

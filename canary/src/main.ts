@@ -9,6 +9,15 @@ import { CanaryMetrics, type CanaryChain } from './metrics.ts';
 import { runProbe, type ChainProbe, type PreflightOutcome } from './probe.ts';
 import { createEvmProbe } from './probes/evm.ts';
 import { initSentry, reportProbeFailure } from './error-report.ts';
+import { probeIntervalMs } from './schedule.ts';
+import { loadWalletWatch, type WalletChain } from './wallet-config.ts';
+import {
+  createEvmAdapter,
+  createSolanaAdapter,
+  createSuiAdapter,
+  type ChainAdapter,
+} from './wallet-chains.ts';
+import { WalletWatcher } from './wallet-watch.ts';
 
 if (initSentry(process.env.SENTRY_DSN, process.env.SENTRY_ENVIRONMENT || 'production')) {
   console.log('[canary] Sentry error reporting enabled');
@@ -16,8 +25,10 @@ if (initSentry(process.env.SENTRY_DSN, process.env.SENTRY_ENVIRONMENT || 'produc
 
 // --- shared config ---
 const PORT = Number(process.env.CANARY_PORT) || 9300;
-const INTERVAL_MS = Number(process.env.CANARY_INTERVAL_MS) || 15 * 60 * 1000;
-// Must stay below INTERVAL_MS. If a probe is allowed to run as long as the
+// Probe interval is per chain: CANARY_INTERVAL_MS, overridable per chain (e.g.
+// CANARY_SOLANA_INTERVAL_MS). See schedule.ts.
+//
+// Must stay below every chain's interval. If a probe is allowed to run as long as the
 // interval, a single slow round-trip overruns into the next tick, which is then
 // skipped ("previous probe still in flight") -- so exactly when the return path
 // is degraded we collect half the samples. A round-trip normally takes ~4 min,
@@ -29,15 +40,10 @@ const LZ_OPTIONS = process.env.LZ_OPTIONS || '0x00030100110100000000000000000000
 const RELAYER_URL = process.env.RELAYER_URL || 'http://relayer:3000';
 // Wallet balances are refreshed on this fast cadence, decoupled from the probe
 // interval, so Grafana shows near-live balances instead of a value that only
-// moves once per round-trip (every CANARY_INTERVAL_MS).
+// moves once per round-trip (every probe interval).
 const BALANCE_REFRESH_MS = Number(process.env.CANARY_BALANCE_REFRESH_MS) || 60 * 1000;
-
-if (MAX_WAIT_MS >= INTERVAL_MS) {
-  console.warn(
-    `[canary] CANARY_MAX_WAIT_MS (${MAX_WAIT_MS}) >= CANARY_INTERVAL_MS (${INTERVAL_MS}); ` +
-      'a slow probe will overrun the next tick and skip a sample',
-  );
-}
+// Service-wallet watcher cadence (every watched wallet, every chain).
+const WALLET_WATCH_INTERVAL_MS = Number(process.env.WALLET_WATCH_INTERVAL_MS) || 5 * 60 * 1000;
 
 const metrics = new CanaryMetrics();
 
@@ -96,6 +102,12 @@ async function runCycle(probe: ChainProbe): Promise<void> {
  * the EVM leg.
  */
 function scheduleChain(probe: ChainProbe, intervalMs: number): void {
+  if (MAX_WAIT_MS >= intervalMs) {
+    console.warn(
+      `[canary:${probe.chain}] CANARY_MAX_WAIT_MS (${MAX_WAIT_MS}) >= probe interval (${intervalMs}); ` +
+        'a slow probe will overrun the next tick and skip a sample',
+    );
+  }
   let running = false;
   const tick = async (): Promise<void> => {
     if (running) {
@@ -199,8 +211,89 @@ async function buildProbes(): Promise<ChainProbe[]> {
   return probes;
 }
 
+function optionalFloat(name: string): number | undefined {
+  const raw = process.env[name];
+  return raw === undefined || raw.trim() === '' ? undefined : Number(raw);
+}
+
+/**
+ * Build the service-wallet watcher from WALLET_WATCH (inline JSON or a file
+ * path). Returns undefined when no watch list is configured. One RPC per
+ * chain, so every entry for a chain must share one network label.
+ */
+function buildWalletWatcher(): WalletWatcher | undefined {
+  const wallets = loadWalletWatch(process.env.WALLET_WATCH);
+  if (wallets.length === 0) return undefined;
+
+  const networkOf = (chain: WalletChain): string | undefined => {
+    const nets = [...new Set(wallets.filter((w) => w.chain === chain).map((w) => w.network))];
+    if (nets.length > 1) throw new Error(`WALLET_WATCH mixes networks for ${chain}: ${nets.join(', ')}`);
+    return nets[0];
+  };
+
+  const adapters: Partial<Record<WalletChain, ChainAdapter>> = {};
+  const suiNet = networkOf('sui');
+  if (suiNet) {
+    adapters.sui = createSuiAdapter({
+      network: suiNet,
+      grpcUrl: process.env.WALLET_SUI_GRPC_URL,
+      treasuryKey: process.env.SUI_TREASURY_KEY || undefined,
+      treasuryFloor: optionalFloat('SUI_TREASURY_FLOOR'),
+    });
+  }
+  if (networkOf('evm')) {
+    const rpcUrl = process.env.WALLET_EVM_RPC_URL || process.env.EVM_RPC_URL;
+    if (!rpcUrl) throw new Error('WALLET_WATCH has EVM wallets but no WALLET_EVM_RPC_URL / EVM_RPC_URL');
+    adapters.evm = createEvmAdapter({
+      rpcUrl,
+      treasuryKey: process.env.EVM_TREASURY_KEY || undefined,
+      treasuryFloor: optionalFloat('EVM_TREASURY_FLOOR'),
+    });
+  }
+  const solNet = networkOf('solana');
+  if (solNet) {
+    adapters.solana = createSolanaAdapter({
+      network: solNet,
+      rpcUrl: process.env.WALLET_SOLANA_RPC_URL || process.env.SOLANA_RPC_URL,
+      treasuryKeypair: process.env.SOLANA_TREASURY_KEYPAIR || undefined,
+      treasuryFloor: optionalFloat('SOLANA_TREASURY_FLOOR'),
+    });
+  }
+
+  const topUpEnabled = process.env.TOPUP_ENABLED === 'true';
+  const treasuries = Object.values(adapters)
+    .filter((a) => a.treasury)
+    .map((a) => `${a.chain}=${a.treasury!.address}`);
+  console.log(
+    `[wallets] watching ${wallets.length} wallet(s); top-up ${topUpEnabled ? 'enabled' : 'disabled'}` +
+      ` (test networks only), treasuries: ${treasuries.join(', ') || 'none'}`,
+  );
+  return new WalletWatcher({ wallets, adapters, metrics, topUpEnabled });
+}
+
+/** Run the wallet watcher on its own cadence with a single-flight guard. Never throws. */
+function scheduleWalletWatch(watcher: WalletWatcher, intervalMs: number): void {
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      await watcher.tick();
+    } catch (err) {
+      Sentry.captureException(err);
+      console.error(`[wallets] unexpected error: ${err}`);
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  setInterval(() => void tick(), intervalMs);
+}
+
 async function main(): Promise<void> {
   const probes = await buildProbes();
+  // Built before serving so a malformed watch list fails the start loudly.
+  const walletWatcher = buildWalletWatcher();
 
   createServer((req, res) => {
     if (req.url === '/health') {
@@ -225,14 +318,16 @@ async function main(): Promise<void> {
     res.end('not found');
   }).listen(PORT, () => {
     console.log(
-      `[canary] /metrics on :${PORT}, interval ${INTERVAL_MS / 1000}s, ` +
-        `chains: ${probes.map((p) => p.chain).join(', ')}`,
+      `[canary] /metrics on :${PORT}, chains: ` +
+        probes.map((p) => `${p.chain} every ${probeIntervalMs(p.chain) / 1000}s`).join(', '),
     );
   });
 
-  for (const probe of probes) scheduleChain(probe, INTERVAL_MS);
+  for (const probe of probes) scheduleChain(probe, probeIntervalMs(probe.chain));
   // Keep wallet balances fresh between round-trips (near-live in Grafana).
   for (const probe of probes) scheduleBalanceRefresh(probe, BALANCE_REFRESH_MS);
+  // Every service wallet on every chain (and the testnet-only top-up).
+  if (walletWatcher) scheduleWalletWatch(walletWatcher, WALLET_WATCH_INTERVAL_MS);
 }
 
 main().catch((err) => {

@@ -29,6 +29,7 @@ import { blobIdMatches, fieldToWalrusBlobId, walrusBlobIdToField } from '../comm
 import { BYTES_RECOVERY_INTERVAL_MS, CLAIM_INTERVAL_MS } from '../common/constants';
 import { StoreQueueWaker } from '../common/store-queue-waker';
 import { IoClock } from './io-clock';
+import { classifyFundingFault } from './funding-fault';
 import { BreakEvenGuardService } from '../settlement/break-even-guard.service';
 import { SettlementReconciler } from '../settlement/settlement-reconciler.service';
 import { EscrowReader, ESCROW_READER } from '../settlement/escrow-reader';
@@ -230,13 +231,27 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
   async onReceived(event: SuiLzEvent): Promise<void> {
     if (!this.staged) return;
     try {
-      await this.staged.markReceived(event.intentId, {
+      const outcome = await this.staged.markReceived(event.intentId, {
         srcEid: event.srcEid,
         committedBlobId: u256ToHex(event.committedBlobId),
         deadline: Number(event.deadline) * 1000, // seconds -> ms
         deliveryDigest: event.deliveryDigest || undefined,
         storageEpochs: event.storageEpochs,
       });
+      if (!outcome.recorded) {
+        // The row is terminal, so the event is a no-op. On `expired` the forward
+        // delivery landed after the orphan TTL: the store will never run and the
+        // dApp stepper stays stuck, so say so loudly (#494). A `done` row is a
+        // backfilled duplicate and only counted.
+        this.metrics.recordLateReceived(outcome.state);
+        if (outcome.state === 'expired') {
+          this.logger.warn(
+            `[${event.intentId}] IntentReceived arrived after the staged row expired ` +
+              `(src_eid ${event.srcEid}); the intent will not be stored`,
+          );
+        }
+        return;
+      }
       this.logger.log(`[${event.intentId}] IntentReceived recorded (src_eid ${event.srcEid})`);
       // The row may now be ready (bytes already ingested): drain without waiting
       // for the poll. If bytes are not in yet, the drain is a cheap no-op and the
@@ -405,6 +420,22 @@ export class IntentProcessor implements OnModuleInit, OnModuleDestroy {
       const attempts = row.attempts + 1;
       const backoff = Math.min(this.backoffBaseMs * 2 ** attempts, this.backoffCapMs);
       const nextAt = Date.now() + backoff;
+
+      // Operator funding fault (relayer wallet out of SUI gas or WAL): not the
+      // intent's fault, so never consume an attempt or dead-letter (which would
+      // drop the user's bytes). Keep the row, back off, and page via the metric.
+      // Nothing was submitted on-chain, so a retry cannot mint an extra nonce.
+      const fundingFault = classifyFundingFault(err);
+      if (fundingFault) {
+        await this.staged!.reschedule(intentId, row.attempts, nextAt, String(err));
+        this.metrics.recordStoreBlocked(fundingFault);
+        this.logger.warn(
+          `[${intentId}] Store blocked by relayer funding (${fundingFault}); ` +
+            `not counted as an attempt, retrying in ${backoff}ms. ` +
+            `Fund the relayer Sui address (SUI for gas, WAL for storage): ${err}`,
+        );
+        return;
+      }
 
       if (err instanceof StoreError && err.phase === 'post') {
         // The blob is safe on Walrus + Sui. Retry the return leg, but CAP it:

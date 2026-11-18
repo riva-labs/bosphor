@@ -77,6 +77,8 @@ The `/health` endpoint returns `"degraded"` when one or both chain connections f
 2. `SUI_GRPC_URL` is responding
 3. Network connectivity from the relayer host
 
+To ride out a single flaky provider, give the relayer a comma-separated list of endpoints for each RPC variable. It fails over to the next one automatically and counts each hop in `bosphor_relayer_rpc_failover_total` (see [RPC failover](/docs/protocol/relayer#rpc-failover)).
+
 ## Cross-chain debugging
 
 ### How to check LayerZero message status
@@ -107,6 +109,12 @@ The relayer may not be running, or it may have missed the event. Check:
 2. Relayer health endpoint (`GET /health`)
 3. Sui wallet balance (relayer needs SUI for gas and LZ fees)
 4. That all `SUI_LZ_*` environment variables are set
+
+### `execute_store` aborts with `MoveAbort` code 1 in `system::inner`
+
+Walrus has upgraded its on-chain package and the executor still links the old one. Every store fails until the executor is relinked. To confirm, run `npx tsx scripts/util/walrus-drift.ts` (add `NETWORK=mainnet` for mainnet). It exits non-zero and names both versions. The scheduled **Walrus Drift** workflow runs the same check every 6 hours.
+
+To fix it, bump the `walrus` and `wal` `rev` in `contracts/sui/executor/Move.toml` to the upstream MystenLabs/walrus commit whose `Published.toml` matches the new package. Then upgrade the executor with the pinned Sui CLI.
 
 ### Sui transaction fails with "object version conflict"
 

@@ -1,19 +1,28 @@
 /**
- * Wallet-free price quote for a Solana-origin store. Needs only a `Connection`:
- * the live LayerZero fee is read by simulating the endpoint's `quote` instruction
- * (see {@link quoteSolanaLzFee}) and the storage (escrow) part comes from the
- * relayer.
+ * Wallet-free price quote for a Solana-origin store. The live LayerZero fee is
+ * read by simulating the endpoint's `quote` instruction, locally (see
+ * `quoteSolanaLzFee`) or by the relayer (`GET /lz-fee/solana`), and the storage
+ * (escrow) part comes from the relayer.
  */
 
-import { LzSolanaSdkMissingError, quoteSolanaLzFee } from "./lz-fee.js";
+import { resolveSolanaLzFee } from "./relayer-lz-fee.js";
 import { TESTNET, type BosphorNetwork } from "../networks.js";
 import { fetchQuote, resolveStoreSize, type PricedQuote, type StoreSize } from "../quote.js";
 import { DEFAULT_EPOCHS, type FetchLike } from "../store-flow.js";
 
 /** Options for {@link quoteSolanaStore}: the file (bytes or size), a connection, and the storage terms. */
 export type QuoteSolanaStoreOptions = StoreSize & {
-  /** A `@solana/web3.js` `Connection` to the network's cluster. */
-  connection: object;
+  /**
+   * A `@solana/web3.js` `Connection` to the network's cluster, for the local
+   * LayerZero fee quote. Optional: without it (or without the LayerZero Solana
+   * SDK) the live fee comes from the relayer.
+   */
+  connection?: object;
+  /**
+   * Ask the relayer (`GET /lz-fee/solana`) for the live LayerZero fee when the
+   * local quote is unavailable. Defaults to true; `false` prices the preset cap.
+   */
+  relayerLzFee?: boolean;
   /** Storage duration in Walrus epochs; defaults to 5. */
   epochs?: number;
   /** Network preset; defaults to {@link TESTNET}. */
@@ -32,9 +41,11 @@ export type QuoteSolanaStoreOptions = StoreSize & {
 
 /**
  * Price a Solana-origin store without a wallet. Returns the same
- * {@link PricedQuote} as `client.priceQuote()`. If the optional peer
- * `@layerzerolabs/lz-solana-sdk-v2` is not installed, the LayerZero part is the
- * preset's fee cap and the quote is flagged `forwardIsUpperBound: true`.
+ * {@link PricedQuote} as `client.priceQuote()`. The LayerZero part is the live
+ * fee: simulated locally when the optional peer `@layerzerolabs/lz-solana-sdk-v2`
+ * is installed, otherwise read from the relayer (`GET /lz-fee/solana`), so a
+ * browser gets an exact quote too. Only a relayer without that endpoint leaves
+ * the preset's fee cap, flagged `forwardIsUpperBound: true`.
  *
  * @example
  * ```ts
@@ -52,16 +63,16 @@ export async function quoteSolanaStore(opts: QuoteSolanaStoreOptions): Promise<P
   const size = resolveStoreSize(opts);
   const epochs = opts.epochs ?? DEFAULT_EPOCHS;
 
-  let live: bigint | null;
-  try {
-    const feeOpts: Parameters<typeof quoteSolanaLzFee>[0] = { connection: opts.connection, network };
-    if (opts.lzSdk) feeOpts.lzSdk = opts.lzSdk;
-    if (opts.web3) feeOpts.web3 = opts.web3;
-    live = await quoteSolanaLzFee(feeOpts);
-  } catch (err) {
-    if (!(err instanceof LzSolanaSdkMissingError)) throw err;
-    live = null;
-  }
+  const live = await resolveSolanaLzFee({
+    network,
+    connection: opts.connection,
+    lzSdk: opts.lzSdk,
+    web3: opts.web3,
+    relayer:
+      opts.relayerLzFee === false
+        ? false
+        : { url: network.relayerUrl, fetch: opts.fetch, signal: opts.signal, appId: opts.appId },
+  });
 
   const fetchOpts: { fetch?: FetchLike; signal?: AbortSignal; appId?: string } = {};
   if (opts.fetch) fetchOpts.fetch = opts.fetch;

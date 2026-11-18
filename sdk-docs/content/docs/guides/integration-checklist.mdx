@@ -27,7 +27,7 @@ your own. Every address and endpoint id is in the SDK `TESTNET` preset and on th
 ## 2. Run one store end to end
 
 - [ ] Install `@bosphor/sdk` and the peers for your chain (see [Quickstart](/docs/quickstart#2-install))
-- [ ] Build a client: `createBosphorClientFromSigner(signer)` (EVM) or `createBosphorSolanaClientFromKeypair({ connection, wallet })` (Solana)
+- [ ] Build a client: `createBosphorClientFromSigner(signer)` (EVM) or `createBosphorSolanaClientFromKeypair({ connection, wallet })` or, in a browser, `createBosphorSolanaClientFromWallet({ connection, wallet, web3, computeBlob: 'relayer' })` (Solana)
 - [ ] Call `client.storePriced(bytes, { epochs: 5 })` and keep the returned `intentId`, `blobId`, `endEpoch`, and `txHash`
 
 ## 3. Verify the result

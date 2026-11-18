@@ -34,11 +34,21 @@
  *                            ../../relayer/.env.testnet; no default on mainnet)
  *   SUI_ENDPOINT_V2 | SUI_LZ_ENDPOINT_V2   Sui endpoint id (for the event type)
  *   SUI_LZ_PACKAGE_ID        Sui OApp package id (packet sender bytes32)
- *   SUI_JSONRPC_URL          Sui JSON-RPC (testnet default publicnode; required on mainnet)
+ *   SUI_GRAPHQL_URL          Sui GraphQL (testnet default graphql.testnet.sui.io; required on mainnet)
  *   SUI_RELAYER_ADDR         the Sui sender to filter queryEvents by (required on mainnet)
  *   RETURN_CONFIRMATIONS     DVN confirmations to attest (default 1)
  *   RETURN_MIN_NONCE         skip return packets below this nonce in loop mode
  *   RETURN_POLL_MS           loop poll interval (default 15000)
+ *   RETURN_METRICS_PORT      Prometheus /metrics + /health port in loop mode (default 9304)
+ *   RETURN_HEAL_MAX_DELIVER  gap nonces healed per tick (default 10)
+ *   RETURN_HEAL_HISTORY_PAGES  Sui event pages (50 events each) read to find a gap packet (default 40)
+ *   RETURN_SWEEP_BATCH       nonces under the frontier scanned per sweep (default 100, one RPC call)
+ *   RETURN_SWEEP_LOOKBACK    how far under the frontier the sweep starts on boot (default 1000)
+ *   RETURN_SWEEP_FROM        start the sweep at this nonce instead, to reach an old backlog
+ *   RETURN_SWEEP_EVERY_TICKS ticks between sweeps (default 4)
+ *   RETURN_SWEEP_HISTORY_PAGES  Sui event pages read to find a stranded packet (default 40)
+ *   RETURN_SWEEP_MAX_DELIVER stranded nonces executed per sweep (default 10)
+ *   RETURN_SWEEP_MAX_ATTEMPTS failed sweeps before a stranded nonce is abandoned (default 5)
  *   SOLANA_RPC_URL, SOLANA_KEYPAIR   see config.ts
  */
 
@@ -48,7 +58,6 @@ import {
   PublicKey,
   Transaction,
   TransactionInstruction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { EndpointProgram, UlnProgram } from "@layerzerolabs/lz-solana-sdk-v2";
 import * as dotenv from "dotenv";
@@ -67,6 +76,21 @@ import {
   storePda,
 } from "./config.ts";
 import { decodePacket, type LzPacket } from "./lz-packet.ts";
+import { RateLimitStreak, pollDelay, sendPolled } from "./rpc.ts";
+import { returnDeliveryState, type EndpointNonceState } from "./return-delivery.ts";
+import {
+  healRange,
+  healResult,
+  initialSweptThrough,
+  isCommittedHash,
+  nextStranded,
+  positiveInt,
+  settleSweepBatch,
+  sweepExecuted,
+  sweepRange,
+} from "./return-heal.ts";
+import { createReturnMetrics } from "./metrics.ts";
+import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
 // /home/arb/bosphor/sdk/src/solana/program.ts (KNOWN_DISCRIMINATORS.instruction).
@@ -89,6 +113,22 @@ const RUN = process.env.RUN === "1";
 const RETURN_CONF = BigInt(process.env.RETURN_CONFIRMATIONS ?? "1");
 const POLL_MS = Number(process.env.RETURN_POLL_MS ?? 15_000);
 const MIN_NONCE = BigInt(process.env.RETURN_MIN_NONCE ?? "0");
+const METRICS_PORT = positiveInt("RETURN_METRICS_PORT", process.env.RETURN_METRICS_PORT, 9304);
+// Nonce self-heal (bosphor#525), mirroring the EVM return worker. Invalid values
+// (empty, zero, NaN) fail at boot instead of silently disabling a heal.
+const HEAL_MAX_DELIVER = BigInt(positiveInt("RETURN_HEAL_MAX_DELIVER", process.env.RETURN_HEAL_MAX_DELIVER, 10));
+const HEAL_HISTORY_PAGES = positiveInt("RETURN_HEAL_HISTORY_PAGES", process.env.RETURN_HEAL_HISTORY_PAGES, 40);
+const SWEEP_BATCH = BigInt(positiveInt("RETURN_SWEEP_BATCH", process.env.RETURN_SWEEP_BATCH, 100));
+const SWEEP_LOOKBACK = BigInt(positiveInt("RETURN_SWEEP_LOOKBACK", process.env.RETURN_SWEEP_LOOKBACK, 1000));
+const SWEEP_FROM = process.env.RETURN_SWEEP_FROM
+  ? BigInt(positiveInt("RETURN_SWEEP_FROM", process.env.RETURN_SWEEP_FROM, 1))
+  : undefined;
+const SWEEP_EVERY_TICKS = positiveInt("RETURN_SWEEP_EVERY_TICKS", process.env.RETURN_SWEEP_EVERY_TICKS, 4);
+const SWEEP_HISTORY_PAGES = positiveInt("RETURN_SWEEP_HISTORY_PAGES", process.env.RETURN_SWEEP_HISTORY_PAGES, 40);
+const SWEEP_MAX_DELIVER = positiveInt("RETURN_SWEEP_MAX_DELIVER", process.env.RETURN_SWEEP_MAX_DELIVER, 10);
+const SWEEP_MAX_ATTEMPTS = positiveInt("RETURN_SWEEP_MAX_ATTEMPTS", process.env.RETURN_SWEEP_MAX_ATTEMPTS, 5);
+// Same names and pathway label as the bosphor-dvn workers, so the DVN alerts apply.
+const metrics = createReturnMetrics("sui_solana");
 
 const SUI_ENDPOINT_V2 =
   process.env.SUI_ENDPOINT_V2 ?? process.env.SUI_LZ_ENDPOINT_V2;
@@ -106,9 +146,13 @@ if (!SUI_OAPP_PACKAGE_ID) {
 
 const PACKET_SENT_EVENT = `${SUI_ENDPOINT_V2}::messaging_channel::PacketSentEvent`;
 
-// Sui JSON-RPC. On testnet the official fullnode rate-limits JSON-RPC hard and
-// often returns empty bodies, so the preset uses publicnode. Required on mainnet.
-const SUI_JSONRPC = setting("SUI_JSONRPC_URL", PRESET.suiJsonRpcUrl);
+// RPC 429s are mostly caught inside deliver()/heal and turned into "skipped",
+// so the loop's backoff reads them from here rather than from tick errors.
+const rpcRateLimits = new RateLimitStreak();
+
+// Sui GraphQL. JSON-RPC was shut off on the public testnet endpoints in 2026-10.
+// Required on mainnet.
+const SUI_GRAPHQL = setting("SUI_GRAPHQL_URL", PRESET.suiGraphqlUrl);
 // The Sui relayer that sends the return proof. Filtering queryEvents by this
 // sender returns a small, recent set the public RPCs serve reliably.
 const SUI_RELAYER_ADDR = setting("SUI_RELAYER_ADDR", PRESET.suiRelayerAddr);
@@ -301,10 +345,59 @@ function packetBytes(pkt: LzPacket): Uint8Array {
   ]);
 }
 
+/**
+ * Read the endpoint's delivery state for one return nonce: the inbound frontier
+ * and whether the nonce's payload hash PDA still exists. Both accounts come from
+ * one getMultipleAccountsInfo call so they are read at the same slot; two calls
+ * to a load-balanced RPC could pair a fresh frontier with a stale "absent" PDA
+ * and misread a verified-but-unexecuted nonce as delivered. Null on an RPC error.
+ */
+async function readNonceState(
+  conn: ReturnType<typeof connection>,
+  nonce: bigint,
+): Promise<EndpointNonceState | null> {
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
+  const sender = hexToBytes(SUI_OAPP_SENDER_B32);
+  const [noncePda] = endpoint.deriver.nonce(storePda() as never, SUI_EID, sender);
+  const [hashPda] = endpoint.deriver.payloadHash(storePda() as never, SUI_EID, sender, Number(nonce));
+  try {
+    const [nonceAccount, hashAccount] = await conn.getMultipleAccountsInfo([
+      new PublicKey(noncePda.toBase58()),
+      new PublicKey(hashPda.toBase58()),
+    ]);
+    const inboundNonce = nonceAccount
+      ? BigInt(EndpointProgram.accounts.Nonce.fromAccountInfo(nonceAccount as never)[0].inboundNonce.toString())
+      : 0n;
+    const payloadHashCommitted = hashAccount
+      ? isCommittedHash(EndpointProgram.accounts.PayloadHash.fromAccountInfo(hashAccount as never)[0].hash)
+      : false;
+    return { inboundNonce, payloadHashExists: hashAccount !== null, payloadHashCommitted };
+  } catch (e) {
+    rpcRateLimits.note(e);
+    return null;
+  }
+}
+
 /** verify -> commit -> lz_receive for one return packet. Idempotent + revert-tolerant. */
-async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
+async function deliver(pkt: LzPacket): Promise<"sent" | "already" | "skipped" | "dry"> {
   const conn = connection();
   const worker = payer();
+
+  // Check delivery on chain before building or simulating anything: a delivered
+  // nonce fails every preflight, and re-simulating it each tick only adds load
+  // on the rate-limited devnet RPC (bosphor#493).
+  const state = returnDeliveryState(pkt.nonce, await readNonceState(conn, pkt.nonce));
+  if (state === "delivered") {
+    console.log(`  already delivered (nonce ${pkt.nonce}) -> skip-ok`);
+    return "already";
+  }
+  if (state === "unknown") {
+    console.log(`  delivery state unreadable (nonce ${pkt.nonce}); retry next tick`);
+    return "skipped";
+  }
+  // Verified + committed under the frontier (a healed or stranded nonce): only
+  // lz_receive is left, so skip building and sending verify and commit.
+  const committed = state === "committed";
   const uln = new UlnProgram.Uln(ULN_ID);
   const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
   const bytes = packetBytes(pkt);
@@ -323,34 +416,38 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   //    receiver/srcEid/sender/nonce). commitVerification's endpoint Verify CPI and
   //    lz_receive's Clear CPI both require it to already exist. Idempotent (null if
   //    present). sender = the Sui OApp bytes32 as a pubkey; receiver = our Store.
-  let epInitVerifyIx: TransactionInstruction | null = null;
-  try {
-    const raw = await endpoint.initVerify(
-      conn as never,
-      worker.publicKey as never,
-      new PublicKey(hexToBytes(pkt.sender)) as never,
-      storePda() as never,
-      SUI_EID,
-      pkt.nonce.toString(),
-    );
-    epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
-  } catch (e) {
-    console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
-  }
-
   // 1) uln initVerify: creates the ULN Confirmations PDA if absent (idempotent,
   //    returns null when present). payer==dvn==our worker.
+  // A committed nonce needs neither, so it costs no extra RPC reads.
+  let epInitVerifyIx: TransactionInstruction | null = null;
   let initVerifyIx: TransactionInstruction | null = null;
-  try {
-    const raw = await uln.initVerify(
-      conn as never,
-      worker.publicKey as never,
-      worker.publicKey as never,
-      bytes,
-    );
-    initVerifyIx = raw ? normalizeIx(raw as never) : null;
-  } catch (e) {
-    console.log(`  uln.initVerify build skipped (${errText(e)})`);
+  if (!committed) {
+    try {
+      const raw = await endpoint.initVerify(
+        conn as never,
+        worker.publicKey as never,
+        new PublicKey(hexToBytes(pkt.sender)) as never,
+        storePda() as never,
+        SUI_EID,
+        pkt.nonce.toString(),
+      );
+      epInitVerifyIx = raw ? normalizeIx(raw as never) : null;
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  endpoint.initVerify build skipped (${errText(e)})`);
+    }
+    try {
+      const raw = await uln.initVerify(
+        conn as never,
+        worker.publicKey as never,
+        worker.publicKey as never,
+        bytes,
+      );
+      initVerifyIx = raw ? normalizeIx(raw as never) : null;
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  uln.initVerify build skipped (${errText(e)})`);
+    }
   }
 
   // 2) verify (our DVN attests; the dvn keypair is the sole signer). RETURN_CONF
@@ -365,11 +462,16 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
   try {
     lzReceiveMetas = await resolveLzReceiveAccounts(conn, worker.publicKey, params);
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(
       `  lz_receive_types resolve failed (${String((e as Error).message).split("\n")[0]})`,
     );
   }
 
+  if (!RUN && committed) {
+    console.log(`  [dry] nonce ${pkt.nonce} already committed; only lz_receive is left. Set RUN=1 to deliver.`);
+    return "dry";
+  }
   if (!RUN) {
     // DRY RUN: simulate initVerify+verify (read-only) and print the resolved
     // lz_receive account metas. Nothing is broadcast.
@@ -392,6 +494,7 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
         );
       }
     } catch (e) {
+      rpcRateLimits.note(e);
       console.log(
         `  [dry] nonce ${pkt.nonce} verify simulate error: ${String((e as Error).message).split("\n")[0]}`,
       );
@@ -409,36 +512,35 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
 
   // --- REAL SEND PATH (RUN=1). Each step is revert-tolerant/idempotent. ---
 
-  // 1+2) initVerify + verify in one tx (signer = worker keypair).
-  try {
-    const tx = new Transaction();
-    if (epInitVerifyIx) tx.add(epInitVerifyIx);
-    if (initVerifyIx) tx.add(initVerifyIx);
-    tx.add(verifyIx);
-    const sig = await sendAndConfirmTransaction(conn, tx, [worker], {
-      commitment: "confirmed",
-    });
-    console.log(`  verify   ${sig}`);
-  } catch (e) {
-    console.log(
-      `  verify   skipped (${String((e as Error).message).split("\n")[0]})`,
-    );
-  }
+  if (committed) {
+    console.log("  verify+commit already committed");
+  } else {
+    // 1+2) initVerify + verify in one tx (signer = worker keypair).
+    try {
+      const tx = new Transaction();
+      if (epInitVerifyIx) tx.add(epInitVerifyIx);
+      if (initVerifyIx) tx.add(initVerifyIx);
+      tx.add(verifyIx);
+      const sig = await sendPolled(conn, tx, worker);
+      console.log(`  verify   ${sig}`);
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(
+        `  verify   skipped (${String((e as Error).message).split("\n")[0]})`,
+      );
+    }
 
-  // 3) commitVerification (permissionless finalize; reads the on-chain receive config).
-  try {
-    const commitIx = normalizeIx(
-      (await uln.commitVerification(conn as never, ENDPOINT_ID as never, bytes)) as never,
-    );
-    const sig = await sendAndConfirmTransaction(
-      conn,
-      new Transaction().add(commitIx),
-      [worker],
-      { commitment: "confirmed" },
-    );
-    console.log(`  commit   ${sig}`);
-  } catch (e) {
-    console.log(`  commit   skipped (${errText(e)})`);
+    // 3) commitVerification (permissionless finalize; reads the on-chain receive config).
+    try {
+      const commitIx = normalizeIx(
+        (await uln.commitVerification(conn as never, ENDPOINT_ID as never, bytes)) as never,
+      );
+      const sig = await sendPolled(conn, new Transaction().add(commitIx), worker);
+      console.log(`  commit   ${sig}`);
+    } catch (e) {
+      rpcRateLimits.note(e);
+      console.log(`  commit   skipped (${errText(e)})`);
+    }
   }
 
   // 4) lz_receive -> escrow released, intent.executed = true.
@@ -454,47 +556,19 @@ async function deliver(pkt: LzPacket): Promise<"sent" | "skipped" | "dry"> {
     const tx = new Transaction()
       .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }))
       .add(lzReceiveIx);
-    const sig = await sendAndConfirmTransaction(conn, tx, [worker], {
-      commitment: "confirmed",
-    });
+    const sig = await sendPolled(conn, tx, worker);
     console.log(`  lzReceive ${sig} -> escrow released`);
     return "sent";
   } catch (e) {
+    rpcRateLimits.note(e);
     console.log(`  lzReceive skipped (${errText(e)})`);
     return "skipped";
   }
 }
 
-/**
- * Resilient Sui JSON-RPC call: retries on network errors, non-2xx, and empty /
- * non-JSON bodies (the public fullnode returns these under load).
- */
-async function suiRpc(method: string, params: unknown[], attempts = 4): Promise<any> {
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch(SUI_JSONRPC, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-      });
-      const text = await res.text();
-      if (!res.ok || !text) throw new Error(`sui rpc ${res.status} (${text.length} bytes)`);
-      const d = JSON.parse(text);
-      if (d.error) throw new Error(`sui rpc error: ${JSON.stringify(d.error)}`);
-      return d.result;
-    } catch (e) {
-      lastErr = e;
-      await new Promise((r) => setTimeout(r, 500 * (i + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-function packetFromEvent(ev: any): LzPacket | null {
-  const ep = ev?.parsedJson?.encoded_packet;
-  if (!ep) return null;
-  const hex = Array.isArray(ep) ? "0x" + Buffer.from(ep).toString("hex") : ep;
+function packetFromEvent(ev: SuiEvent): LzPacket | null {
+  const hex = bytesFieldToHex(ev?.parsedJson?.encoded_packet);
+  if (!hex) return null;
   try {
     return decodePacket(hex);
   } catch {
@@ -502,21 +576,11 @@ function packetFromEvent(ev: any): LzPacket | null {
   }
 }
 
-/** Pull recent PacketSentEvents (from our relayer's txs), newest first. */
+/** Pull our relayer's most recent PacketSentEvents, newest first. */
 async function querySuiPacketSent(limit = 15): Promise<LzPacket[]> {
-  let result: any;
-  for (let l = limit; l >= 2; l = Math.floor(l / 2)) {
-    try {
-      result = await suiRpc("suix_queryEvents", [{ Sender: SUI_RELAYER_ADDR }, null, l, true]);
-      break;
-    } catch (e: any) {
-      if (!String(e?.message).includes("referenced transaction events")) throw e;
-      // window includes an unresolvable tx; try a smaller (newer-only) window
-    }
-  }
+  const page = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, { type: PACKET_SENT_EVENT, limit });
   const out: LzPacket[] = [];
-  for (const ev of result?.data ?? []) {
-    if (ev.type !== PACKET_SENT_EVENT) continue;
+  for (const ev of page.data) {
     const pkt = packetFromEvent(ev);
     if (pkt && isOurReturn(pkt)) out.push(pkt);
   }
@@ -524,45 +588,80 @@ async function querySuiPacketSent(limit = 15): Promise<LzPacket[]> {
 }
 
 /**
- * Paginate the relayer's PacketSent history for our-return packets in [from..to].
- * Used to backfill a gap of older return nonces that scrolled out of the
- * newest-window before this worker delivered them.
+ * Paginate the relayer's PacketSent history for our-return packets with the
+ * given nonces. Used for older return nonces that scrolled out of the
+ * newest-window before this worker delivered them (gap heal and stranded
+ * sweep). `complete` is false when an RPC error cut the search short, so a
+ * missing nonce is retried instead of being treated as past the history.
  */
-async function findReturnPacketsInRange(from: bigint, to: bigint): Promise<Map<bigint, LzPacket>> {
-  const want = new Set<bigint>();
-  for (let n = from; n <= to; n++) want.add(n);
+async function findReturnPackets(
+  nonces: bigint[],
+  maxPages: number,
+): Promise<{ found: Map<bigint, LzPacket>; complete: boolean }> {
+  const want = new Set(nonces);
   const found = new Map<bigint, LzPacket>();
-  let cursor: unknown = null;
-  for (let page = 0; page < 40 && want.size; page++) {
-    let res: any;
+  let cursor: string | null = null;
+  for (let page = 0; page < maxPages && want.size; page++) {
+    let res;
     try {
-      res = await suiRpc("suix_queryEvents", [{ Sender: SUI_RELAYER_ADDR }, cursor, 50, true]);
-    } catch {
-      break;
+      res = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, { type: PACKET_SENT_EVENT, limit: 50, cursor });
+    } catch (e) {
+      rpcRateLimits.note(e);
+      return { found, complete: false };
     }
-    for (const ev of res?.data ?? []) {
-      if (ev.type !== PACKET_SENT_EVENT) continue;
+    for (const ev of res.data) {
       const pkt = packetFromEvent(ev);
       if (pkt && isOurReturn(pkt) && want.has(pkt.nonce)) {
         found.set(pkt.nonce, pkt);
         want.delete(pkt.nonce);
       }
     }
-    if (!res?.hasNextPage) break;
+    if (!res.hasNextPage) break;
     cursor = res.nextCursor;
   }
-  return found;
+  return { found, complete: true };
+}
+
+/** Every nonce in [from..to]. */
+function nonceRange(from: bigint, to: bigint): bigint[] {
+  const out: bigint[] = [];
+  for (let n = from; n <= to; n++) out.push(n);
+  return out;
+}
+
+/** The endpoint's inbound frontier (gapless verified nonce) for our pathway; null on an RPC error. */
+async function readInboundNonce(): Promise<bigint | null> {
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
+  try {
+    const nonce = await endpoint.getNonce(
+      connection() as never,
+      storePda() as never,
+      SUI_EID,
+      hexToBytes(SUI_OAPP_SENDER_B32),
+    );
+    return nonce ? BigInt(nonce.inboundNonce.toString()) : 0n;
+  } catch (e) {
+    rpcRateLimits.note(e);
+    return null;
+  }
+}
+
+/** Re-read whether a nonce is delivered on chain. An unreadable state counts as not delivered. */
+async function deliveredNow(nonce: bigint): Promise<boolean> {
+  return returnDeliveryState(nonce, await readNonceState(connection(), nonce)) === "delivered";
 }
 
 /**
  * Self-heal a nonce gap. LZ requires gapless inbound order, so if this worker
  * fell behind its newest-window and an older return nonce never delivered, every
  * later nonce reverts InvalidNonce and all escrow releases stall. Each tick we
- * read the endpoint's inbound frontier; if it lags the visible tip, backfill the
- * missing packets from history and deliver them in order so the frontier advances
- * (which also cascades through any already-delivered run). A recoverable gap
- * self-clears; a gap whose packet predates the queryable window needs the manual
- * skip-return-nonce tool (logged, then we stop so we don't spin).
+ * read the endpoint's inbound frontier; if it lags the visible tip, backfill up
+ * to RETURN_HEAL_MAX_DELIVER missing packets from history and deliver them in
+ * order so the frontier advances (which also cascades through any
+ * already-delivered run). A nonce whose lz_receive fails after it was committed
+ * is left to the stranded sweep. A gap whose packet predates the queryable
+ * window needs the manual skip-return-nonce tool (logged, then we stop so we
+ * don't spin); the worker never skips a nonce on its own.
  */
 // The frontier at which the last heal hit an unrecoverable gap. While the
 // frontier stays here, re-paginating history every tick is pure waste (and RPC
@@ -572,33 +671,28 @@ let healBlockedAt: bigint | null = null;
 
 async function healReturnGap(tip: bigint): Promise<void> {
   if (!RUN) return;
-  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
-  const sender = hexToBytes(SUI_OAPP_SENDER_B32);
-  let frontier: bigint;
-  try {
-    const nonce = await endpoint.getNonce(
-      connection() as never,
-      storePda() as never,
-      SUI_EID,
-      sender,
-    );
-    if (!nonce) return;
-    frontier = BigInt(nonce.inboundNonce.toString());
-  } catch {
-    return;
-  }
-  if (tip <= frontier + 1n) return; // no gap below the tip
-  if (healBlockedAt === frontier) return; // known-unrecoverable here; wait for progress
-  console.log(`heal: return frontier ${frontier} lags tip ${tip}; backfilling ${frontier + 1n}..${tip}`);
-  const packets = await findReturnPacketsInRange(frontier + 1n, tip);
-  for (let n = frontier + 1n; n <= tip; n++) {
-    const pkt = packets.get(n);
+  const frontier = await readInboundNonce();
+  if (frontier === null) return;
+  const range = healRange(frontier, tip, HEAL_MAX_DELIVER, healBlockedAt);
+  if (!range) return;
+  console.log(`heal: return frontier ${frontier} lags tip ${tip}; backfilling ${range.from}..${range.to}`);
+  const { found, complete } = await findReturnPackets(nonceRange(range.from, range.to), HEAL_HISTORY_PAGES);
+  for (let n = range.from; n <= range.to; n++) {
+    const pkt = found.get(n);
     if (!pkt) {
+      if (!complete) {
+        console.log(`heal: Sui history read failed before nonce ${n} was found; retry next tick`);
+        return;
+      }
       console.log(`heal: nonce ${n} not in queryable history; run skip-return-nonce ${n} manually. Pausing heal until the frontier advances.`);
+      metrics.selfHeal.inc({ kind: "gap", result: "missing" });
+      metrics.errors.inc({ stage: "heal" });
       healBlockedAt = frontier;
       return;
     }
     const r = await deliver(pkt);
+    metrics.selfHeal.inc({ kind: "gap", result: healResult(r) });
+    if (r === "sent") metrics.lastSuccess.set(Math.floor(Date.now() / 1000));
     if (r === "skipped") {
       console.log(`heal: nonce ${n} delivery failed; retry next tick`);
       return;
@@ -607,10 +701,110 @@ async function healReturnGap(tip: bigint): Promise<void> {
   }
 }
 
+interface SweepState {
+  /** Highest nonce scanned; null until the first sweep reads the frontier. */
+  sweptThrough: bigint | null;
+  stranded: bigint[];
+  attempts: Record<string, number>;
+}
+
+/**
+ * Which nonces in [from..to] hold a committed payload hash. One
+ * getMultipleAccountsInfo call per 100 nonces. Null on an RPC error.
+ */
+async function scanCommitted(from: bigint, to: bigint): Promise<{ nonce: bigint; committed: boolean }[] | null> {
+  const conn = connection();
+  const endpoint = new EndpointProgram.Endpoint(ENDPOINT_ID);
+  const sender = hexToBytes(SUI_OAPP_SENDER_B32);
+  const out: { nonce: bigint; committed: boolean }[] = [];
+  for (let start = from; start <= to; start += 100n) {
+    const nonces = nonceRange(start, start + 99n < to ? start + 99n : to);
+    const keys = nonces.map((n) => {
+      const [pda] = endpoint.deriver.payloadHash(storePda() as never, SUI_EID, sender, Number(n));
+      return new PublicKey(pda.toBase58());
+    });
+    let infos;
+    try {
+      infos = await conn.getMultipleAccountsInfo(keys);
+    } catch (e) {
+      rpcRateLimits.note(e);
+      return null;
+    }
+    infos.forEach((info, i) => {
+      const committed = info
+        ? isCommittedHash(EndpointProgram.accounts.PayloadHash.fromAccountInfo(info as never)[0].hash)
+        : false;
+      out.push({ nonce: nonces[i], committed });
+    });
+  }
+  return out;
+}
+
+/**
+ * Execute return nonces that are verified + committed but never executed and sit
+ * at or below the inbound frontier (the Solana port of bosphor#495). The main
+ * loop only sees the newest 15 packets, and the gap heal moves on once a nonce
+ * is committed, so without this sweep such a nonce is never executed: its
+ * escrow is never released and the intent is never marked executed.
+ *
+ * Scans RETURN_SWEEP_BATCH nonces per call from `state.sweptThrough` up to the
+ * frontier, then executes up to RETURN_SWEEP_MAX_DELIVER queued nonces. Each
+ * outcome is read from chain state. Mutates `state`.
+ */
+async function sweepStranded(state: SweepState): Promise<void> {
+  const inbound = await readInboundNonce();
+  if (inbound === null) return;
+  if (state.sweptThrough === null) {
+    state.sweptThrough = initialSweptThrough(inbound, SWEEP_LOOKBACK, SWEEP_FROM);
+    console.log(`sweep: scanning for stranded return nonces from ${state.sweptThrough} (inbound frontier ${inbound})`);
+  }
+  const range = sweepRange(state.sweptThrough, inbound, SWEEP_BATCH);
+  if (range) {
+    const scanned = await scanCommitted(range.from, range.to);
+    if (!scanned) return; // RPC error: rescan this range next sweep
+    state.stranded = nextStranded(state.stranded, scanned);
+    state.sweptThrough = range.to;
+  }
+  if (!state.stranded.length || !RUN) return;
+
+  const batch = state.stranded.slice(0, SWEEP_MAX_DELIVER);
+  console.log(
+    `sweep: ${state.stranded.length} stranded return nonce(s), executing ${batch.join(",")} (inbound frontier ${inbound})`,
+  );
+  const { found, complete } = await findReturnPackets(batch, SWEEP_HISTORY_PAGES);
+  const executed = new Map<bigint, boolean>();
+  for (const n of batch) {
+    const pkt = found.get(n);
+    if (!pkt) {
+      // An RPC error is not the nonce's fault: leave it queued without an attempt.
+      if (!complete) continue;
+      console.log(`sweep: nonce ${n} not within ${SWEEP_HISTORY_PAGES} history pages`);
+      metrics.selfHeal.inc({ kind: "stranded", result: "missing" });
+      executed.set(n, false);
+      continue;
+    }
+    const r = await deliver(pkt);
+    const done = sweepExecuted(r, r !== "sent" && (await deliveredNow(n)));
+    console.log(`sweep: nonce ${n} -> ${r}${done ? "" : " (still unexecuted)"}`);
+    metrics.selfHeal.inc({ kind: "stranded", result: done ? "delivered" : "failed" });
+    if (r === "sent") metrics.lastSuccess.set(Math.floor(Date.now() / 1000));
+    executed.set(n, done);
+  }
+
+  const settled = settleSweepBatch(state.stranded, executed, state.attempts, SWEEP_MAX_ATTEMPTS);
+  state.stranded = settled.queue;
+  state.attempts = settled.attempts;
+  for (const n of settled.abandoned) {
+    console.log(`sweep: nonce ${n} still unexecuted after ${SWEEP_MAX_ATTEMPTS} sweeps; abandoning it`);
+    metrics.selfHeal.inc({ kind: "stranded", result: "abandoned" });
+    metrics.errors.inc({ stage: "sweep" });
+  }
+}
+
 /** Fetch the PacketSentEvent from a single Sui transaction digest. */
 async function packetFromDigest(digest: string): Promise<LzPacket> {
-  const result = await suiRpc("sui_getTransactionBlock", [digest, { showEvents: true }]);
-  const ev = (result?.events ?? []).find((e: any) => e.type === PACKET_SENT_EVENT);
+  const events = await transactionEvents(SUI_GRAPHQL, digest);
+  const ev = events.find((e) => e.type === PACKET_SENT_EVENT);
   const pkt = ev && packetFromEvent(ev);
   if (!pkt) throw new Error("no PacketSentEvent in tx");
   return pkt;
@@ -639,8 +833,16 @@ async function runLoop(): Promise<void> {
     `Solana return worker [${NETWORK}]: ${PRESET.suiLabel}(${SUI_EID}) -> ${PRESET.solanaLabel}(${SOLANA_EID}); ` +
       `worker ${worker.publicKey.toBase58()}; store ${storePda().toBase58()}; RUN=${RUN}`,
   );
+  metrics.serve(METRICS_PORT);
   const seen = new Set<string>();
-  for (;;) {
+  // In memory only: a restart rescans RETURN_SWEEP_LOOKBACK nonces under the
+  // frontier, which is a handful of getMultipleAccountsInfo calls.
+  const sweep: SweepState = { sweptThrough: null, stranded: [], attempts: {} };
+  // A transient RPC error is never fatal: it is logged and the tick retried,
+  // backing off with jitter while the RPCs (Solana or Sui) keep answering 429.
+  // A process exit would restart gap-heal from scratch and add even more load on
+  // the limited RPC.
+  for (let tick = 0; ; tick++) {
     try {
       const packets = await querySuiPacketSent();
       // Heal any gap below the visible tip first, so the endpoint's gapless
@@ -651,13 +853,24 @@ async function runLoop(): Promise<void> {
         if (seen.has(pkt.guid)) continue;
         if (pkt.nonce < MIN_NONCE) continue;
         console.log(`[return nonce ${pkt.nonce}] ${pkt.guid}`);
+        metrics.packetsSeen.inc();
         const r = await deliver(pkt);
-        if (r !== "skipped") seen.add(pkt.guid);
+        metrics.execute.inc({ result: r });
+        if (r === "sent") metrics.lastSuccess.set(Math.floor(Date.now() / 1000));
+        if (r === "skipped") metrics.errors.inc({ stage: "deliver" });
+        else seen.add(pkt.guid);
       }
+      if (tick % SWEEP_EVERY_TICKS === 0) await sweepStranded(sweep);
     } catch (e) {
+      rpcRateLimits.note(e);
+      metrics.errors.inc({ stage: "tick" });
       console.error("tick error:", e);
     }
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    const rateLimitedStreak = rpcRateLimits.endTick();
+    if (rateLimitedStreak > 0) {
+      console.log(`rate limited for ${rateLimitedStreak} tick(s); backing off`);
+    }
+    await new Promise((r) => setTimeout(r, pollDelay(POLL_MS, rateLimitedStreak)));
   }
 }
 

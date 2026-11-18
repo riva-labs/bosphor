@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fetchQuote } from "./quote.js";
 import type { FetchLike } from "./store-flow.js";
+import { BosphorError, RelayerRequestError } from "./errors.js";
 
 const RESPONSE = {
   originToken: "ETH",
@@ -96,4 +97,51 @@ describe("fetchQuote", () => {
       /relayer quote failed \(503\)/,
     );
   });
+
+  it("exposes retryAfterMs and retryable on a 429, from Retry-After seconds", async () => {
+    const fetchFn: FetchLike = async () => ({
+      ok: false,
+      status: 429,
+      text: async () => '{"statusCode":429,"message":"rate limit exceeded (ip); retry after 12s"}',
+      headers: { get: (n: string) => (n === "retry-after" ? "12" : null) },
+    });
+    const err = await fetchQuote(
+      "https://relayer.example",
+      { sizeBytes: 1, originToken: "ETH" },
+      { fetch: fetchFn },
+    ).catch((e: unknown) => e);
+    assert.ok(err instanceof RelayerRequestError);
+    assert.ok(err instanceof BosphorError);
+    assert.equal(err.status, 429);
+    assert.equal(err.retryAfterMs, 12_000);
+    assert.equal(err.retryable, true);
+    assert.equal(err.code, "RELAYER_REQUEST_FAILED");
+  });
+
+  it("marks a 400 as not retryable and leaves retryAfterMs undefined", async () => {
+    const fetchFn: FetchLike = async () => ({ ok: false, status: 400, text: async () => "bad" });
+    const err = (await fetchQuote(
+      "https://relayer.example",
+      { sizeBytes: 1, originToken: "ETH" },
+      { fetch: fetchFn },
+    ).catch((e: unknown) => e)) as RelayerRequestError;
+    assert.equal(err.retryable, false);
+    assert.equal(err.retryAfterMs, undefined);
+  });
+
+  for (const status of [200, 201]) {
+    it(`accepts a ${status} quote response (new and old relayers)`, async () => {
+      const fetchFn: FetchLike = async () => ({
+        ok: true,
+        status,
+        text: async () => JSON.stringify(RESPONSE),
+      });
+      const q = await fetchQuote(
+        "https://relayer.example",
+        { sizeBytes: 1, originToken: "ETH" },
+        { fetch: fetchFn },
+      );
+      assert.equal(q.totalNative, 2072242000000000n);
+    });
+  }
 });

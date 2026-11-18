@@ -21,6 +21,11 @@ export const CHAINS: Record<Chain, { label: string; network: string; symbol: str
   solana: { label: 'Solana', network: 'Solana devnet', symbol: 'SOL', decimals: 9 },
 };
 
+/** Solscan link for a Solana devnet transaction or account. */
+export function solscanUrl(kind: 'tx' | 'account', id: string): string {
+  return `https://solscan.io/${kind}/${id}?cluster=devnet`;
+}
+
 export const SIZE_PRESETS: { label: string; bytes: number }[] = [
   { label: '1 KB', bytes: 1024 },
   { label: '100 KB', bytes: 100 * 1024 },
@@ -79,32 +84,31 @@ export function quoteSnippet({ chain, sizeBytes, epochs, fileName }: SnippetInpu
   const size = `  sizeBytes: ${tsNumber(sizeBytes)},${fileName ? ` // ${fileName}` : ''}`;
   if (chain === 'evm') {
     return [
-      "import { JsonRpcProvider } from 'ethers';",
+      "import * as ethers from 'ethers';",
       "import { TESTNET, quoteEvmStore } from '@bosphor/sdk/evm';",
       '',
       'const quote = await quoteEvmStore({',
-      '  provider: new JsonRpcProvider(TESTNET.evm.rpcUrl),',
+      '  provider: new ethers.JsonRpcProvider(TESTNET.evm.rpcUrl),',
       size,
       `  epochs: ${epochs},`,
       "  appId: 'my-app', // optional attribution",
+      '  ethers, // injected so a browser bundler resolves it',
       '});',
       '',
       '// quote.totalNative is the wei to pay; quote.breakdown has the USD parts.',
     ].join('\n');
   }
   return [
-    "import { Connection } from '@solana/web3.js';",
-    "import { TESTNET, quoteSolanaStore } from '@bosphor/sdk/solana';",
+    "import { quoteSolanaStore } from '@bosphor/sdk/solana';",
     '',
+    '// No wallet or connection: the relayer supplies the live LayerZero fee.',
     'const quote = await quoteSolanaStore({',
-    "  connection: new Connection(TESTNET.solana.rpcUrl, 'confirmed'),",
     size,
     `  epochs: ${epochs},`,
     "  appId: 'my-app', // optional attribution",
     '});',
     '',
-    '// quote.totalNative is in lamports. Install @layerzerolabs/lz-solana-sdk-v2',
-    '// for the live LayerZero fee; without it the fee is a cap (forwardIsUpperBound).',
+    '// quote.totalNative is in lamports; quote.breakdown has the USD parts.',
   ].join('\n');
 }
 
@@ -112,11 +116,15 @@ export function quoteSnippet({ chain, sizeBytes, epochs, fileName }: SnippetInpu
 export function storeSnippet({ chain, epochs }: SnippetInput): string {
   if (chain === 'evm') {
     return [
-      "import { BrowserProvider } from 'ethers';",
+      "import * as ethers from 'ethers';",
       "import { createBosphorClientFromSigner, walrusBlobUrl } from '@bosphor/sdk/evm';",
       '',
-      'const signer = await new BrowserProvider(window.ethereum).getSigner();',
-      "const client = await createBosphorClientFromSigner(signer, { appId: 'my-app' });",
+      'const signer = await new ethers.BrowserProvider(window.ethereum).getSigner();',
+      'const client = await createBosphorClientFromSigner(signer, {',
+      "  appId: 'my-app',",
+      '  ethers, // injected so your bundler resolves it',
+      "  computeBlob: 'relayer', // blob id from the relayer, no Walrus WASM",
+      '});',
       '',
       'const { intentId, blobId, txHash } = await client.storePriced(bytes, {',
       `  epochs: ${epochs},`,
@@ -126,15 +134,23 @@ export function storeSnippet({ chain, epochs }: SnippetInput): string {
     ].join('\n');
   }
   return [
-    "import { Connection } from '@solana/web3.js';",
-    "import { TESTNET, createBosphorSolanaClientFromKeypair } from '@bosphor/sdk/solana';",
+    "import * as web3 from '@solana/web3.js';",
+    "import { TESTNET, createBosphorSolanaClientFromWallet, walrusBlobUrl } from '@bosphor/sdk/solana';",
     '',
-    "const connection = new Connection(TESTNET.solana.rpcUrl, 'confirmed');",
-    'const client = await createBosphorSolanaClientFromKeypair({ connection, wallet: keypair });',
-    '',
-    'const { intentId, blobId } = await client.storePriced(bytes, {',
-    `  epochs: ${epochs},`,
-    '  onProgress: (e) => console.log(e.step),',
+    'const phantom = window.phantom.solana;',
+    'await phantom.connect();',
+    'const client = await createBosphorSolanaClientFromWallet({',
+    "  connection: new web3.Connection(TESTNET.solana.rpcUrl, 'confirmed'),",
+    '  wallet: phantom, // { publicKey, signTransaction }',
+    '  web3, // injected so your bundler resolves it',
+    "  computeBlob: 'relayer', // blob id from the relayer, no Walrus WASM",
+    "  appId: 'my-app',",
     '});',
+    '',
+    'const { intentId, blobId, txHash } = await client.storePriced(bytes, {',
+    `  epochs: ${epochs},`,
+    '  onProgress: (e) => console.log(e.step), // encoded, quoted, submitted, uploaded, proven',
+    '});',
+    'console.log(walrusBlobUrl(blobId));',
   ].join('\n');
 }

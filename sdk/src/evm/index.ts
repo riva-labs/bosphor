@@ -34,7 +34,12 @@ export type {
 } from "./client.js";
 
 // Typed error hierarchy (shared across chains).
-export { BosphorError, ProofTimeoutError, RelayerUploadError } from "../errors.js";
+export {
+  BosphorError,
+  ProofTimeoutError,
+  RelayerUploadError,
+  RelayerRequestError,
+} from "../errors.js";
 
 // Shared store-flow types (identical on every chain).
 export type {
@@ -42,14 +47,21 @@ export type {
   AwaitProofOptions,
   EncodedIntent,
   FetchLike,
+  FetchLikeResponse,
+  UploadRetryOptions,
   StoreProgress,
   ProgressOptions,
 } from "../store-flow.js";
 // Integrator attribution header (set via the client `appId` option).
-export { APP_ID_HEADER } from "../store-flow.js";
+export { APP_ID_HEADER, DEFAULT_UPLOAD_RETRY } from "../store-flow.js";
+export { parseRetryAfter } from "../relayer-http.js";
+// Blob-id derivation through the relayer (no Walrus WASM; for browsers).
+export { relayerComputeBlob, MAX_RELAYER_ENCODE_BYTES } from "../relayer-blob.js";
+export type { RelayerComputeBlobOptions, ComputeBlobOption } from "../relayer-blob.js";
+export type { RetryPolicy } from "../relayer-http.js";
 
 export { defaultComputeBlob, createDefaultComputeBlob, base64UrlToBytes32Hex } from "../blob.js";
-export type { WalrusNetwork } from "../blob.js";
+export type { WalrusNetwork, WalrusEncoderModules } from "../blob.js";
 
 // Re-export the core so `@bosphor/sdk/evm` is self-sufficient.
 export {

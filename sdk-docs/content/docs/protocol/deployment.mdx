@@ -9,7 +9,7 @@ description: "Deploy the Bosphor contracts to Sepolia and Sui testnet, wire the 
 
 - **Node.js 22**: pinned via `.nvmrc` (`nvm use`)
 - **Foundry**: `curl -L https://foundry.paradigm.xyz | bash && foundryup`
-- **Sui CLI**: https://docs.sui.io/build/install
+- **Sui CLI**: https://docs.sui.io/build/install. Building or upgrading the executor needs the version pinned in `contracts/sui/executor/sui-toolchain` (currently `testnet-v1.82.1`); older CLIs fail against the current testnet protocol.
 - **Sepolia ETH**: for EVM contract deployment and LZ fees
 - **Sui testnet SUI**: for Sui contract deployment (`sui client faucet` or https://faucet.sui.io)
 

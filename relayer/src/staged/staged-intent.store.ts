@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   ByteRecoveryCandidate,
   ReceivedDetails,
+  ReceivedOutcome,
   StagedBytes,
   StagedIntentRow,
   StagedStats,
@@ -182,8 +183,8 @@ export class StagedIntentStore {
           WHERE bytes IS NOT NULL AND intent_id <> $1
        )
        INSERT INTO ${TABLE}
-         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at, app_id)
-       SELECT $1, $2, $3, $4::bigint, $5, $5, $5, $8
+         (intent_id, bytes, blob_id, size, next_attempt_at, created_at, updated_at, app_id, deadline)
+       SELECT $1, $2, $3, $4::bigint, $5, $5, $5, $8, $9::bigint
          FROM capacity
         WHERE $6 = false OR capacity.staged + $4::bigint <= $7::bigint
        ON CONFLICT (intent_id) DO UPDATE SET
@@ -191,12 +192,24 @@ export class StagedIntentStore {
          blob_id = EXCLUDED.blob_id,
          size = EXCLUDED.size,
          updated_at = EXCLUDED.updated_at,
-         app_id = COALESCE(EXCLUDED.app_id, ${TABLE}.app_id)
+         app_id = COALESCE(EXCLUDED.app_id, ${TABLE}.app_id),
+         -- The Sui-delivered deadline (markReceived) wins over the ingest copy.
+         deadline = COALESCE(${TABLE}.deadline, EXCLUDED.deadline)
        WHERE ${TABLE}.state = 'active'
          AND ($6 = false
               OR (SELECT staged FROM capacity) + EXCLUDED.size <= $7::bigint)
        RETURNING intent_id`,
-      [intentId, blob.bytes, blob.blobId, blob.size, now, capped, cap, blob.appId ?? null],
+      [
+        intentId,
+        blob.bytes,
+        blob.blobId,
+        blob.size,
+        now,
+        capped,
+        cap,
+        blob.appId ?? null,
+        blob.deadline ?? null,
+      ],
     );
     if (rows.length > 0) return 'accepted';
     // No row written. Distinguish "cap would be breached" from "row is terminal"
@@ -222,11 +235,13 @@ export class StagedIntentStore {
   /**
    * Record that the Sui IntentReceived event fired for `intentId`. Creates the
    * row if the bytes have not landed yet, otherwise flags the existing active
-   * row. No-op on a terminal row.
+   * row. No-op on a terminal row: then it reports `recorded: false` with the
+   * row's state, so the caller can surface a forward delivery that landed after
+   * the row was expired (#494) instead of dropping it silently.
    */
-  async markReceived(intentId: string, details: ReceivedDetails): Promise<void> {
+  async markReceived(intentId: string, details: ReceivedDetails): Promise<ReceivedOutcome> {
     const now = Date.now();
-    await this.pool.query(
+    const { rows } = await this.pool.query(
       `INSERT INTO ${TABLE}
          (intent_id, received, src_eid, committed_blob_id, deadline, delivery_digest,
           storage_epochs, next_attempt_at, created_at, updated_at)
@@ -239,7 +254,8 @@ export class StagedIntentStore {
          delivery_digest = COALESCE(EXCLUDED.delivery_digest, ${TABLE}.delivery_digest),
          storage_epochs = COALESCE(EXCLUDED.storage_epochs, ${TABLE}.storage_epochs),
          updated_at = EXCLUDED.updated_at
-       WHERE ${TABLE}.state = 'active'`,
+       WHERE ${TABLE}.state = 'active'
+       RETURNING intent_id`,
       [
         intentId,
         details.srcEid,
@@ -250,6 +266,9 @@ export class StagedIntentStore {
         details.storageEpochs ?? null,
       ],
     );
+    if (rows.length) return { recorded: true };
+    const row = await this.get(intentId);
+    return { recorded: false, state: row?.state ?? 'missing' };
   }
 
   /**
@@ -494,6 +513,25 @@ export class StagedIntentStore {
       [now],
     );
     return rows.length;
+  }
+
+  /**
+   * Expire active rows that buffered bytes before `cutoff` but were never
+   * received from Sui. They have no deadline (it arrives with IntentReceived), so
+   * expireDue() can never settle them: a lost or skipped forward delivery would
+   * otherwise leave them active, holding bytes, forever (#486). Frees bytes.
+   * Returns the expired intent ids so the caller can log them.
+   */
+  async expireUnreceived(cutoff: number, now: number): Promise<string[]> {
+    const { rows } = await this.pool.query(
+      `UPDATE ${TABLE}
+          SET state = 'expired', bytes = NULL, updated_at = $2
+        WHERE state = 'active' AND received = false AND deadline IS NULL
+          AND created_at < $1
+        RETURNING intent_id`,
+      [cutoff, now],
+    );
+    return rows.map((r) => r.intent_id as string);
   }
 
   /**

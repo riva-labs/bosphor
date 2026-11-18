@@ -99,6 +99,8 @@ test("createBosphorSolanaClientFromKeypair wires the preset fee, options, and re
   let quoteBody = "";
   let quoteUrl = "";
   const fetchFn: FetchLike = async (url, init) => {
+    // A relayer before 0.17: no live fee endpoint, so the preset cap is priced.
+    if (url.includes("/lz-fee/solana")) return { ok: false, status: 404, text: async () => "" };
     quoteUrl = url;
     quoteBody = new TextDecoder().decode(init.body);
     return {

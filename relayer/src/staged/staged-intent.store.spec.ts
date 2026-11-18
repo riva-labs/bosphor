@@ -170,6 +170,8 @@ class FakePool implements PgQueryable {
         // COALESCE(EXCLUDED.app_id, existing): a re-ingest without an app id
         // (e.g. byte recovery) never clears one recorded earlier.
         existing.app_id = (params[7] as string | null) ?? existing.app_id;
+        // COALESCE(existing.deadline, EXCLUDED.deadline): the Sui deadline wins.
+        existing.deadline = existing.deadline ?? (params[8] as number | null) ?? null;
         return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
       }
       existing.received = true;
@@ -181,7 +183,7 @@ class FakePool implements PgQueryable {
       // digest never clobbers one already captured.
       existing.delivery_digest = (params[5] as string | null) ?? existing.delivery_digest;
       existing.storage_epochs = (params[6] as number | null) ?? existing.storage_epochs;
-      return { rows: [] };
+      return { rows: [{ intent_id: id }] }; // RETURNING intent_id => recorded
     }
 
     const now = params[4] as number;
@@ -219,6 +221,7 @@ class FakePool implements PgQueryable {
       base.blob_id = params[2] as string;
       base.size = params[3] as number;
       base.app_id = (params[7] as string | null) ?? null;
+      base.deadline = (params[8] as number | null) ?? null;
       this.rows.set(id, base);
       return { rows: [{ intent_id: id }] }; // RETURNING intent_id => accepted
     }
@@ -229,10 +232,30 @@ class FakePool implements PgQueryable {
     base.delivery_digest = (params[5] as string | null) ?? null;
     base.storage_epochs = (params[6] as number | null) ?? null;
     this.rows.set(id, base);
-    return { rows: [] };
+    return { rows: [{ intent_id: id }] }; // RETURNING intent_id => recorded
   }
 
   private update(sql: string, params: unknown[]): { rows: Record<string, unknown>[] } {
+    // Un-received expiry: no deadline exists yet, so it scans by created_at.
+    if (sql.includes("state = 'expired'") && sql.includes('received = false')) {
+      const cutoff = params[0] as number;
+      const expired: Record<string, unknown>[] = [];
+      for (const [id, r] of this.rows) {
+        if (
+          r.state === 'active' &&
+          r.received === false &&
+          r.deadline == null &&
+          (r.created_at as number) < cutoff
+        ) {
+          r.state = 'expired';
+          r.bytes = null;
+          r.updated_at = params[1];
+          expired.push({ intent_id: id });
+        }
+      }
+      return { rows: expired };
+    }
+
     // Bulk expire has no intent_id param - it scans by deadline.
     if (sql.includes("state = 'expired'")) {
       const now = params[0] as number;
@@ -467,6 +490,27 @@ describe('StagedIntentStore', () => {
     expect(row?.received).toBe(true);
     expect(row?.hasBytes).toBe(true);
     expect(row?.blobId).toBe('blob-b');
+  });
+
+  it('reports a fresh or active IntentReceived as recorded', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    expect(await store.markReceived('0xnew', RX)).toEqual({ recorded: true });
+    await store.upsertBytes('0xact', { bytes: bytes('x'), blobId: 'blob-a', size: 1 });
+    expect(await store.markReceived('0xact', RX)).toEqual({ recorded: true });
+  });
+
+  it('reports a late IntentReceived on an expired row as not recorded, with its state', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    clock = 1000;
+    await store.upsertBytes('0xlate', { bytes: bytes('x'), blobId: 'blob-l', size: 1 });
+    clock = 5000;
+    await store.expireUnreceived(2000, 5000); // orphan expiry (#487)
+
+    expect(await store.markReceived('0xlate', RX)).toEqual({ recorded: false, state: 'expired' });
   });
 
   it('is terminal-sticky: a late event cannot resurrect a done intent', async () => {
@@ -784,6 +828,60 @@ describe('StagedIntentStore', () => {
     expect((await store.get('0xexp'))?.state).toBe('expired');
     expect((await store.get('0xexp'))?.hasBytes).toBe(false);
     expect((await store.get('0xlive'))?.state).toBe('active');
+  });
+
+  it('records the committed deadline with the bytes, so expireDue settles an un-received row on time', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.upsertBytes('0xlost', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 1500 });
+    await store.upsertBytes('0xlive', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 9000 });
+
+    expect(await store.expireDue(2000)).toBe(1);
+    expect((await store.get('0xlost'))?.state).toBe('expired');
+    expect((await store.get('0xlost'))?.hasBytes).toBe(false);
+    expect((await store.get('0xlive'))?.state).toBe('active');
+  });
+
+  it('keeps the Sui-delivered deadline when bytes are re-buffered after IntentReceived', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+
+    await store.markReceived('0xrx', { ...RX, deadline: 9000 });
+    await store.upsertBytes('0xrx', { bytes: bytes('z'), blobId: 'b', size: 1, deadline: 1500 });
+
+    expect((await store.get('0xrx'))?.deadline).toBe(9000);
+  });
+
+  it('expires stale un-received rows (no deadline) and frees their bytes, leaving the rest', async () => {
+    const pool = new FakePool();
+    const store = new StagedIntentStore(pool);
+    const at = async (t: number, fn: () => Promise<unknown>) => {
+      const spy = jest.spyOn(Date, 'now').mockReturnValue(t);
+      try {
+        await fn();
+      } finally {
+        spy.mockRestore();
+      }
+    };
+
+    // Bytes arrived at t=1000 but the Sui IntentReceived never did (forward leg lost).
+    await at(1000, () =>
+      store.upsertBytes('0xorphan', { bytes: bytes('z'), blobId: 'b', size: 1 }),
+    );
+    // Same age, but received: has a future deadline and must be left alone.
+    await at(1000, () => store.upsertBytes('0xrx', { bytes: bytes('z'), blobId: 'b', size: 1 }));
+    await store.markReceived('0xrx', { ...RX, deadline: 9_000_000 });
+    // Un-received but younger than the cutoff: still waiting for delivery.
+    await at(5000, () => store.upsertBytes('0xfresh', { bytes: bytes('z'), blobId: 'b', size: 1 }));
+
+    const expired = await store.expireUnreceived(3000, 6000);
+
+    expect(expired).toEqual(['0xorphan']);
+    expect((await store.get('0xorphan'))?.state).toBe('expired');
+    expect((await store.get('0xorphan'))?.hasBytes).toBe(false);
+    expect((await store.get('0xrx'))?.state).toBe('active');
+    expect((await store.get('0xfresh'))?.state).toBe('active');
   });
 
   describe('integrator app id + ops-ledger bookkeeping', () => {

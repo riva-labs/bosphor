@@ -34,6 +34,44 @@ export function backoffDelay(attempt: number, baseMs: number, capMs: number): nu
   return Math.min(baseMs * 2 ** attempt, capMs);
 }
 
+/**
+ * Delay before a long-running worker's next poll. Healthy: exactly `pollMs`.
+ * After `rateLimitedStreak` consecutive rate-limited ticks: an exponential
+ * backoff (capped) with equal jitter, so restarts or sibling workers sharing
+ * one RPC key do not retry in lockstep.
+ */
+export function pollDelay(
+  pollMs: number,
+  rateLimitedStreak: number,
+  random: () => number = Math.random,
+  capMs = 5 * 60_000,
+): number {
+  if (rateLimitedStreak <= 0) return pollMs;
+  const backoff = backoffDelay(rateLimitedStreak, pollMs, capMs);
+  return backoff / 2 + random() * (backoff / 2);
+}
+
+/**
+ * Tracks whether a worker's poll ticks are hitting RPC rate limits, including
+ * errors a tick catches and swallows deep inside a delivery. `note()` every
+ * caught error; `endTick()` returns the consecutive rate-limited tick count
+ * (feed it to pollDelay) and resets for the next tick.
+ */
+export class RateLimitStreak {
+  private hit = false;
+  private streak = 0;
+
+  note(err: unknown): void {
+    if (isRateLimited(err)) this.hit = true;
+  }
+
+  endTick(): number {
+    this.streak = this.hit ? this.streak + 1 : 0;
+    this.hit = false;
+    return this.streak;
+  }
+}
+
 /** Run `fn`, retrying rate-limited failures with capped exponential backoff. */
 export async function withBackoff<T>(fn: () => Promise<T>, o: BackoffOptions = {}): Promise<T> {
   const retries = o.retries ?? 8;
@@ -73,15 +111,25 @@ export async function sendPolled(
   const sig = await withBackoff(() =>
     conn.sendRawTransaction(tx.serialize(), { preflightCommitment: "confirmed" }),
   );
+  // True once confirmed; throws if the tx landed and failed.
+  const landed = async (): Promise<boolean> => {
+    const st = (await withBackoff(() => conn.getSignatureStatuses([sig]))).value[0];
+    if (st?.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}`);
+    return st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized";
+  };
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(pollMs);
-    const st = (await withBackoff(() => conn.getSignatureStatuses([sig]))).value[0];
-    if (st?.err) throw new Error(`tx ${sig} failed: ${JSON.stringify(st.err)}`);
-    if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return sig;
+    if (await landed()) return sig;
     const height = await withBackoff(() => conn.getBlockHeight("confirmed"));
-    if (height > lastValidBlockHeight) throw new Error(`tx ${sig} expired (blockhash too old)`);
+    if (height > lastValidBlockHeight) {
+      // It may have landed in the last valid block, after the status read above.
+      // Calling a landed tx "expired" makes the caller pay to send it again.
+      if (await landed()) return sig;
+      throw new Error(`tx ${sig} expired (blockhash too old)`);
+    }
   }
+  if (await landed()) return sig;
   throw new Error(`tx ${sig} not confirmed within ${timeoutMs}ms`);
 }
 

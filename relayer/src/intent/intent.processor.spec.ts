@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 // IntentProcessor transitively imports SolanaService, which imports
 // @solana/web3.js (heavy transitive ESM). SolanaService is provided as a mock
 // here, so stub the module to keep the spec pure.
@@ -58,7 +59,7 @@ function build(
   } = {},
 ) {
   const staged = {
-    markReceived: jest.fn().mockResolvedValue(undefined),
+    markReceived: jest.fn().mockResolvedValue({ recorded: true }),
     drainDue: jest.fn().mockResolvedValue(rows),
     fetchBytes: jest.fn().mockResolvedValue(Buffer.from('hello')),
     persistUpload: jest.fn().mockResolvedValue(undefined),
@@ -122,6 +123,8 @@ function build(
     recordLzSend: jest.fn(),
     recordReturnMode: jest.fn(),
     recordDeadLetter: jest.fn(),
+    recordStoreBlocked: jest.fn(),
+    recordLateReceived: jest.fn(),
   };
   const lifecycle = {
     getCommitment: jest.fn().mockResolvedValue({
@@ -216,6 +219,42 @@ describe('IntentProcessor durable queue', () => {
       deliveryDigest: '0xdeliver',
       storageEpochs: 5,
     });
+  });
+
+  const LATE_EVENT = {
+    intentId: '0xlate',
+    committedBlobId: BigInt(COMMITTED_HEX).toString(),
+    size: 5,
+    encodingType: 0,
+    storageEpochs: 5,
+    deadline: 1_700_000_000n,
+    srcEid: 40161,
+    nonce: 1n,
+  } as never;
+
+  it('warns and counts a late IntentReceived that lands on an expired row (#494)', async () => {
+    const { proc, staged, metrics } = build();
+    staged.markReceived.mockResolvedValueOnce({ recorded: false, state: 'expired' });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await proc.onReceived(LATE_EVENT);
+
+    expect(metrics.recordLateReceived).toHaveBeenCalledWith('expired');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('0xlate'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('expired'));
+    warn.mockRestore();
+  });
+
+  it('counts a backfilled IntentReceived on a done row without warning', async () => {
+    const { proc, staged, metrics } = build();
+    staged.markReceived.mockResolvedValueOnce({ recorded: false, state: 'done' });
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+
+    await proc.onReceived(LATE_EVENT);
+
+    expect(metrics.recordLateReceived).toHaveBeenCalledWith('done');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('recovers missing bytes by re-fetching the committed blob from Walrus', async () => {
@@ -700,6 +739,68 @@ describe('IntentProcessor durable queue', () => {
     );
     expect(metrics.recordDeadLetter).toHaveBeenCalledWith('pre_store');
     expect(staged.reschedule).not.toHaveBeenCalled(); // dead, not rescheduled
+  });
+
+  describe('operator funding faults (#523)', () => {
+    const GAS_ERR =
+      'Unable to perform gas selection due to insufficient SUI balance (in address balance ' +
+      'or coins) for account 0xrelayer to satisfy required budget 4975277.';
+
+    it('never dead-letters an insufficient-gas error at max attempts, then stores once funded', async () => {
+      // attempts + 1 >= MAX_STORE_ATTEMPTS: a genuine fault would dead-letter here.
+      const { proc, staged, metrics, sui } = build([makeRow({ attempts: 7 })], {
+        MAX_STORE_ATTEMPTS: 8,
+      });
+      sui.executeStore.mockRejectedValue(new Error(GAS_ERR));
+      const now = Date.now();
+      await proc.tick();
+      await proc.tick();
+
+      // Row kept (bytes intact), attempt not consumed, backed off, metric raised.
+      expect(staged.markDead).not.toHaveBeenCalled();
+      expect(staged.freeBytes).not.toHaveBeenCalled();
+      expect(metrics.recordDeadLetter).not.toHaveBeenCalled();
+      expect(staged.reschedule).toHaveBeenCalledTimes(2);
+      const [id, attempts, nextAt, lastErr] = staged.reschedule.mock.calls[0];
+      expect(id).toBe('0xintent');
+      expect(attempts).toBe(7); // unchanged
+      expect(nextAt).toBeGreaterThan(now);
+      expect(lastErr).toContain('gas selection');
+      expect(metrics.recordStoreBlocked).toHaveBeenCalledWith('insufficient_gas');
+
+      // Wallet funded: the same row now stores end to end.
+      sui.executeStore.mockResolvedValue('0xstore');
+      await proc.tick();
+      expect(staged.markDone).toHaveBeenCalledWith('0xintent');
+      expect(staged.markDead).not.toHaveBeenCalled();
+    });
+
+    it('treats an insufficient-WAL storage payment the same way', async () => {
+      const { proc, staged, metrics, walrus } = build([makeRow({ attempts: 2 })], {
+        MAX_STORE_ATTEMPTS: 3,
+      });
+      walrus.upload.mockRejectedValue(
+        new Error('Insufficient balance of 0xabc::wal::WAL for owner 0xrelayer. Required: 9'),
+      );
+      await proc.tick();
+
+      expect(staged.markDead).not.toHaveBeenCalled();
+      expect(staged.reschedule.mock.calls[0][1]).toBe(2);
+      expect(metrics.recordStoreBlocked).toHaveBeenCalledWith('insufficient_wal');
+    });
+
+    it('never caps the return leg on an insufficient-gas error', async () => {
+      const { proc, staged, metrics, suiLz, evm } = build([makeRow({ attempts: 1 })], {
+        RETURN_MAX_ATTEMPTS: 2,
+      });
+      suiLz.lzSendProof.mockRejectedValue(new Error(GAS_ERR));
+      evm.confirmExecution.mockRejectedValue(new Error(GAS_ERR));
+      await proc.tick();
+
+      expect(staged.markDead).not.toHaveBeenCalled();
+      expect(staged.reschedule.mock.calls[0][1]).toBe(1);
+      expect(metrics.recordStoreBlocked).toHaveBeenCalledWith('insufficient_gas');
+    });
   });
 
   it('retries a post-store (return-leg) failure without dead-lettering the storage', async () => {

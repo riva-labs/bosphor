@@ -168,6 +168,55 @@ test("store() surfaces a relayer non-2xx as a RelayerUploadError with the reason
   );
 });
 
+test('computeBlob: "relayer" derives the blob id through the client relayer /blob/encode', async () => {
+  const { adapter } = makeFakeAdapter();
+  const urls: string[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    urls.push(url);
+    assert.equal(init.headers["X-Bosphor-App"], "my-dapp");
+    return {
+      ok: true,
+      status: 201,
+      text: async () =>
+        JSON.stringify({ blobId: "VCHdU3RHtQVBYAI3c30jDhM8PNvrgv7OVxIb8eW6Ih4", size: init.body!.length }),
+    };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test/",
+    dstEid: 40378,
+    computeBlob: "relayer",
+    fetch,
+    appId: "my-dapp",
+  });
+  const encoded = await client.encode(new TextEncoder().encode("hello"));
+  assert.equal(urls[0], "https://relayer.test/blob/encode");
+  assert.equal(encoded.blobId, "0x1e22bae5f11b1257cefe82ebdb3c3c130e237d733702604105b5477453dd2154");
+  assert.equal(encoded.size, 5);
+});
+
+test("store() retries the relayer's watch-lag 404 on upload, then completes", async () => {
+  const { adapter } = makeFakeAdapter();
+  const statuses = [404, 404, 200];
+  const seen: number[] = [];
+  const fetch: FetchLike = async () => {
+    const status = statuses.shift() ?? 200;
+    seen.push(status);
+    return { ok: status === 200, status, text: async () => (status === 404 ? "no pending intent" : "{}") };
+  };
+  const client = new BosphorEvmClient({
+    adapter,
+    relayerUrl: "https://relayer.test",
+    dstEid: 40378,
+    computeBlob: stubComputeBlob,
+    fetch,
+    uploadRetry: { baseDelayMs: 1, maxDelayMs: 1 },
+  });
+  const result = await client.store(new Uint8Array([1, 2, 3]), { pollMs: 1 });
+  assert.equal(result.intentId, INTENT_ID);
+  assert.deepEqual(seen, [404, 404, 200]);
+});
+
 test("awaitProof throws a typed ProofTimeoutError when the intent never executes", async () => {
   const { adapter } = makeFakeAdapter({ neverExecutes: true });
   const { fetch } = makeFetch(200);
@@ -420,6 +469,45 @@ test("fromEthersContract delegates methods and wires queryProof from the event l
   // Optional members the contract does not expose stay undefined.
   assert.equal(adapter.nonces, undefined);
   assert.equal(adapter.getIntentId, undefined);
+});
+
+test("fromEthersContract's default proof lookback stays inside a pruning RPC's history", async () => {
+  // Public Sepolia RPCs (publicnode) reject eth_getLogs ranges that reach into
+  // pruned history: 50k blocks back fails, 10k succeeds.
+  const PRUNED_HISTORY_BLOCKS = 10_000;
+  const contract: EthersContractLike = {
+    async submitIntent() {
+      return { hash: "0xabc", async wait() { return { logs: [] }; } };
+    },
+    async quote() {
+      return { nativeFee: 7n, lzTokenFee: 0n };
+    },
+    async executed() {
+      return true;
+    },
+    async committedBlobId() {
+      return BLOB_ID;
+    },
+    interface: {
+      parseLog() {
+        return null;
+      },
+    },
+    filters: {
+      IntentExecuted(intentId) {
+        return { intentId };
+      },
+    },
+    async queryFilter(_event, fromBlock) {
+      if (-Number(fromBlock) > PRUNED_HISTORY_BLOCKS) {
+        throw new Error("pruned history unavailable");
+      }
+      return [{ args: { proof: encodeProof(BLOB_ID, END_EPOCH) } }];
+    },
+  };
+
+  const proof = await fromEthersContract(contract).queryProof!(INTENT_ID);
+  assert.equal(decodeProofEndEpoch(proof!), END_EPOCH);
 });
 
 // --- Priced store flow (M4) -------------------------------------------------

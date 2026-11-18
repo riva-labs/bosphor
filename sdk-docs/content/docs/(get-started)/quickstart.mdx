@@ -80,12 +80,11 @@ npm install @bosphor/sdk ethers @mysten/walrus @mysten/sui
 
 <Tab value="Solana (devnet)">
 ```bash
-npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui @layerzerolabs/lz-solana-sdk-v2
+npm install @bosphor/sdk @solana/web3.js @mysten/walrus @mysten/sui
 ```
 
-`@layerzerolabs/lz-solana-sdk-v2` is optional. With it, quotes contain the exact
-LayerZero fee; without it they use a 0.01 SOL cap and set
-`quote.forwardIsUpperBound` (you are then charged less than `totalNative`).
+Quotes contain the exact LayerZero fee: the relayer simulates it for you. The
+optional `@layerzerolabs/lz-solana-sdk-v2` runs that simulation locally instead.
 </Tab>
 
 </Tabs>

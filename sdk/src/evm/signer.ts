@@ -57,7 +57,7 @@ export async function loadEthers(injected?: EthersModuleLike): Promise<EthersMod
   if (injected) return injected;
   const spec = "ethers";
   try {
-    return (await import(spec)) as EthersModuleLike;
+    return (await import(/* webpackIgnore: true */ /* @vite-ignore */ spec)) as EthersModuleLike;
   } catch (err) {
     throw new Error(
       "this helper requires the optional peer dependency 'ethers' (v6). Install it " +
@@ -120,6 +120,7 @@ export async function createBosphorClientFromSigner(
   if (opts.computeBlob !== undefined) clientOpts.computeBlob = opts.computeBlob;
   if (opts.fetch !== undefined) clientOpts.fetch = opts.fetch;
   if (opts.appId !== undefined) clientOpts.appId = opts.appId;
+  if (opts.uploadRetry !== undefined) clientOpts.uploadRetry = opts.uploadRetry;
 
   return new BosphorEvmClient(clientOpts);
 }

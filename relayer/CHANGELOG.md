@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.18.0 (2026-11-17)
+
+### Features
+
+- feat(relayer): fail over between Solana RPC endpoints
+- feat(relayer): fail over between Sui gRPC endpoints
+- feat(relayer): fail over between EVM RPC endpoints
+- feat(relayer): add bosphor_relayer_rpc_failover_total metric
+- feat(relayer): accept comma-separated RPC URL lists in config
+- feat(relayer): add RPC endpoint failover pool and failover fetch
+
+## 0.17.3 (2026-11-17)
+
+### Bug Fixes
+
+- fix(relayer): never dead-letter an intent on relayer funding faults
+- fix(relayer): add a store_blocked metric for funding faults
+- fix(relayer): add a classifier for operator funding faults
+
+## 0.17.2 (2026-10-21)
+
+### Bug Fixes
+
+- fix(relayer): count orphan expiries in bosphor_relayer_staged_orphan_expired_total
+- fix(relayer): warn and count a late IntentReceived on an expired row
+- fix(relayer): report whether markReceived recorded the IntentReceived
+
+## 0.17.1 (2026-10-21)
+
+### Bug Fixes
+
+- fix(relayer): floor STAGED_UNRECEIVED_TTL_MS at 1h and document it as a backstop
+- fix(relayer): record the committed deadline when bytes are staged
+- fix(relayer): refuse an upload whose staged row is already settled
+- fix(relayer): reap un-received staged rows after STAGED_UNRECEIVED_TTL_MS
+- fix(relayer): add expireUnreceived to settle bytes that never got a Sui event
+
+## 0.17.0 (2026-09-27)
+
+### Features
+
+- feat(relayer): add GET /lz-fee/solana for browser Solana quotes
+- feat(relayer): quote the live Solana LayerZero fee server-side
+
+### Bug Fixes
+
+- fix(relayer): answer POST /quote with 200 instead of 201
+- fix(relayer): rate limit GET /lz-fee like the POST integrator routes
+- fix(relayer): remember a failed Solana fee simulation for Retry-After
+
 ## 0.16.0 (2026-09-25)
 
 ### Features

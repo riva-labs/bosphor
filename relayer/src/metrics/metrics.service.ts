@@ -91,6 +91,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // Stores held back by an operator funding fault (relayer Sui wallet out of
+  // SUI for gas or WAL for storage). These never consume an attempt or
+  // dead-letter: the row waits until the wallet is funded. Any increase pages.
+  private readonly storeBlocked = new Counter({
+    name: 'bosphor_relayer_store_blocked_total',
+    help: 'Store attempts blocked by an operator funding fault (row kept, retried)',
+    labelNames: ['reason'] as const,
+    registers: [this.registry],
+  });
+
   // Durable store queue depth. `active` is rows still in play (crude queue
   // length), `bytes` the total committed size still held in BYTEA (backpressure
   // headroom vs MAX_STAGED_BYTES), `dead` the count dead-lettered. Set
@@ -110,6 +120,24 @@ export class MetricsService {
   private readonly stagedDead = new Gauge({
     name: 'bosphor_relayer_staged_dead',
     help: 'Durable-queue rows that dead-lettered (pre-store attempts exhausted)',
+    registers: [this.registry],
+  });
+
+  // Forward deliveries the queue could not use (#494). `orphanExpired` counts
+  // rows expired because their Sui IntentReceived never arrived (a lost or
+  // skipped forward delivery); `lateReceived` counts IntentReceived events that
+  // landed on a terminal row, by that row's state (`expired` = arrived after the
+  // orphan TTL; `done` = a backfilled duplicate, benign).
+  private readonly stagedOrphanExpired = new Counter({
+    name: 'bosphor_relayer_staged_orphan_expired_total',
+    help: 'Durable-queue rows expired because their Sui IntentReceived never arrived',
+    registers: [this.registry],
+  });
+
+  private readonly stagedLateReceived = new Counter({
+    name: 'bosphor_relayer_staged_late_received_total',
+    help: 'Sui IntentReceived events that landed on a terminal durable-queue row',
+    labelNames: ['state'] as const,
     registers: [this.registry],
   });
 
@@ -182,6 +210,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // RPC endpoint failovers (#524): one increment per hop from a failing RPC URL
+  // to the next one in a comma-separated EVM_RPC_URL / SUI_GRPC_URL /
+  // SOLANA_RPC_URL list. Flat at zero on a single-URL config.
+  private readonly rpcFailover = new Counter({
+    name: 'bosphor_relayer_rpc_failover_total',
+    help: 'RPC calls re-issued on the next configured endpoint, by chain',
+    labelNames: ['chain'] as const,
+    registers: [this.registry],
+  });
+
   // Durable ops ledger (storage_op_ledger): one increment per op the ledger
   // records for the first time (exactly-once per intent, per process). Labelled
   // by origin chain (LayerZero src EID) and integrator app. The app label is
@@ -238,8 +276,14 @@ export class MetricsService {
     for (const phase of ['pre_store', 'return'] as const) {
       this.storeDeadLetter.inc({ phase }, 0);
     }
+    for (const reason of ['insufficient_gas', 'insufficient_wal'] as const) {
+      this.storeBlocked.inc({ reason }, 0);
+    }
     for (const scope of ['ip', 'app', 'encode'] as const) {
       this.rateLimited.inc({ scope }, 0);
+    }
+    for (const chain of ['evm', 'sui', 'solana'] as const) {
+      this.rpcFailover.inc({ chain }, 0);
     }
     this.ledgerWriteFailures.inc(0);
   }
@@ -275,6 +319,11 @@ export class MetricsService {
   /** Record an integrator API request rejected with 429 by the given budget. */
   recordRateLimited(scope: 'ip' | 'app' | 'encode'): void {
     this.rateLimited.inc({ scope });
+  }
+
+  /** Record one RPC call failing over to the next configured endpoint. */
+  recordRpcFailover(chain: 'evm' | 'sui' | 'solana'): void {
+    this.rpcFailover.inc({ chain });
   }
 
   recordIntentProcessed(path: IntentPath, result: Result): void {
@@ -324,6 +373,11 @@ export class MetricsService {
     this.storeDeadLetter.inc({ phase });
   }
 
+  /** Record a store blocked by an operator funding fault (no attempt consumed). */
+  recordStoreBlocked(reason: 'insufficient_gas' | 'insufficient_wal'): void {
+    this.storeBlocked.inc({ reason });
+  }
+
   /**
    * Record the P&L of a completed intent: its net USD margin (collected - spent).
    * Sets the last-margin gauge, adds to the cumulative counter, and trips the
@@ -359,6 +413,14 @@ export class MetricsService {
   recordWalSpendSkipped(): void {
     this.walSpendSkipped.inc();
     this.intentSettled.inc({ result: 'skipped' });
+  }
+
+  recordOrphanExpired(count: number): void {
+    if (count > 0) this.stagedOrphanExpired.inc(count);
+  }
+
+  recordLateReceived(state: string): void {
+    this.stagedLateReceived.inc({ state });
   }
 
   /** Set the durable-queue depth gauges from a periodic aggregate snapshot. */
