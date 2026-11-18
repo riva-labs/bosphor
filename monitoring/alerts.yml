@@ -465,3 +465,28 @@ groups:
             (SUI_TREASURY_KEY / EVM_TREASURY_KEY / SOLANA_TREASURY_KEYPAIR) is out
             of gas or near its floor: fund it from a faucet. Meanwhile refill the
             {{ $labels.role }} wallet by hand from the treasury.
+
+      # Offsite backups (#345). Stale: a database has not been dumped to R2 in
+      # 30h (the job runs daily). Failed: a dump or upload errored.
+      - alert: BosphorBackupStale
+        expr: time() - bosphor_backup_last_success_timestamp_seconds > 30 * 3600 or absent(bosphor_backup_last_success_timestamp_seconds)
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful Postgres backup of {{ $labels.db }} in over 30h"
+          fix: >-
+            docker logs --tail 50 bosphor-pg-backup-1. If R2 rejects the upload,
+            check the token in monitoring/secrets/backup.env. Restart with
+            docker restart bosphor-pg-backup-1 (it backs up immediately on start).
+
+      - alert: BosphorBackupFailed
+        expr: increase(bosphor_backup_failures_total[1h]) >= 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A Postgres backup attempt failed"
+          fix: >-
+            docker logs --tail 50 bosphor-pg-backup-1 shows which database and
+            whether pg_dump or the R2 upload failed.
