@@ -79,6 +79,12 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox:9115
 
+  # Nightly Postgres backups (monitoring/backup).
+  - job_name: pg-backup
+    static_configs:
+      - targets: ['pg-backup:9310']
+    metrics_path: /metrics
+
   # The alerting pipeline itself.
   - job_name: alertmanager
     static_configs:

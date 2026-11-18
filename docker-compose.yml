@@ -139,6 +139,20 @@ services:
     mem_limit: 64m
     restart: unless-stopped
 
+  # Nightly offsite Postgres backups to Cloudflare R2 (#345). Dumps the relayer
+  # databases and the demo dApp Drive index, keeps 30 days, and exposes
+  # bosphor_backup_* metrics on :9310 for the backup alerts.
+  pg-backup:
+    build: ./monitoring/backup
+    env_file:
+      - ./monitoring/secrets/backup.env
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-bosphor}
+      - DAPP_INDEX_PASSWORD=dapp_index_local
+      - BACKUP_TARGETS=postgres|5432|bosphor|POSTGRES_PASSWORD|bosphor postgres|5432|bosphor|POSTGRES_PASSWORD|bosphor_testnet dapp-index-db|5432|postgres|DAPP_INDEX_PASSWORD|dapp
+    mem_limit: 256m
+    restart: unless-stopped
+
 # status.bosphor.xyz is served by Kener (see kener/), routed through the
 # Cloudflare tunnel to host port 3008. Uptime Kuma was retired at cutover.
 
