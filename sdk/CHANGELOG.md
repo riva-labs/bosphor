@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.2 (2026-11-18)
+
+### Bug Fixes
+
+- fix(sdk): keep polling for the proof log when it lags executed()
+
 ## 0.14.1 (2026-11-04)
 
 ### Bug Fixes
