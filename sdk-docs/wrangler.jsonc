@@ -2,14 +2,22 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bosphor-sdk-docs",
   "compatibility_date": "2026-06-09",
-  // Serves the SDK docs at sdk.bosphor.xyz. The zone bosphor.xyz must be on the
+  // Serves the developer portal at docs.bosphor.xyz. The zone bosphor.xyz must be on the
   // same Cloudflare account; wrangler binds the custom domain on deploy.
   "routes": [
     {
+      "pattern": "docs.bosphor.xyz",
+      "custom_domain": true
+    },
+    {
+      // Former SDK docs host: the Worker 301s every request to docs.bosphor.xyz.
       "pattern": "sdk.bosphor.xyz",
       "custom_domain": true
     }
   ],
+  "vars": {
+    "CANONICAL_ORIGIN": "https://docs.bosphor.xyz"
+  },
   "observability": {
     "enabled": true
   },

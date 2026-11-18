@@ -14,7 +14,7 @@ so the cross-chain fee is flat regardless of file size.
 
 The developer-facing entry point is the TypeScript SDK, `@bosphor/sdk`, with one
 `store()` call for both EVM and Solana. Its guides and API reference live at
-**[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
+**[docs.bosphor.xyz](https://docs.bosphor.xyz)**.
 
 ## How It Works (Two-Step Verification)
 
@@ -40,7 +40,7 @@ flowchart LR
 | Solana Adapter (Devnet) | Deployed (round-trip live) |
 | Sui LZ OApp (Testnet) | Deployed |
 | TypeScript SDK (`@bosphor/sdk`) | Published (EVM + Solana, `store()`) |
-| SDK docs (sdk.bosphor.xyz) | Live (Fumadocs) |
+| Developer portal (docs.bosphor.xyz) | Live |
 | Relayer | Running (NestJS) |
 | LZ Executor | Verified (DELIVERED) |
 | Monitoring stack | Live (Prometheus + Grafana) |
@@ -64,7 +64,7 @@ cd bosphor && nvm use && npm install
 ```
 
 This is not an npm workspace yet: `npm install` at the root only installs the
-root tooling. Each package (`relayer/`, `sdk/`, `canary/`, `website/`,
+root tooling. Each package (`relayer/`, `sdk/`, `canary/`,
 `sdk-docs/`) has its own `package.json`. Install everything in one command:
 
 ```bash
@@ -83,7 +83,7 @@ npm test            # forge + move + relayer + sdk
 `npm run new-deployment` (deploy + wire + e2e) is a maintainer flow: it submits
 real testnet transactions and needs a funded wallet and a running relayer, so
 fill `.env` first (`cp .env.example .env`) and start the relayer. See
-[website/docs/self-hosting.md](website/docs/self-hosting.md) for the full setup.
+[Self-hosting](https://docs.bosphor.xyz/docs/protocol/self-hosting) for the full setup.
 
 ## Using the SDK
 
@@ -109,7 +109,7 @@ Or clone a runnable starter: [bosphor-evm-starter](https://github.com/riva-labs/
 (Sepolia) and [bosphor-solana-starter](https://github.com/riva-labs/bosphor-solana-starter) (Solana devnet).
 
 Full guides, the Solana path, and the API reference are at
-**[sdk.bosphor.xyz](https://sdk.bosphor.xyz)**.
+**[docs.bosphor.xyz](https://docs.bosphor.xyz)**.
 
 ## Architecture
 
@@ -118,11 +118,11 @@ Full guides, the Solana path, and the API reference are at
 - `contracts/sui/executor/sources/walrus_executor.move`: Walrus blob executor
 - `relayer/`: NestJS relayer service with health endpoint
 
-See [website/docs/architecture.md](website/docs/architecture.md) for the full design.
+See [Architecture](https://docs.bosphor.xyz/docs/protocol/architecture) for the full design.
 
 ## Documentation
 
-- [SDK docs (sdk.bosphor.xyz)](https://sdk.bosphor.xyz): the TypeScript SDK, guides for EVM and Solana, and the generated API reference
+- [Developer portal (docs.bosphor.xyz)](https://docs.bosphor.xyz): quickstart, guides for EVM and Solana, the generated SDK and API reference, examples, and a live playground
 - [Architecture](https://docs.bosphor.xyz/architecture): system design and message flow
 - [Contract Interface](https://docs.bosphor.xyz/contract-interface): EVM and Sui function reference
 - [Deployment](https://docs.bosphor.xyz/deployment): setup and deployment guide
@@ -154,7 +154,7 @@ superseded. See [Deployed Contracts](#deployed-contracts-testnet) for the curren
 | Sui package (LayerZero peer) | Sui Testnet (EID 40378) | `0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5` |
 
 Hosted testnet relayer: `https://api.bosphor.xyz/testnet`. The SDK ships all of
-these as the `TESTNET` preset; the [testnet reference](https://sdk.bosphor.xyz/docs/reference/testnet)
+these as the `TESTNET` preset; the [testnet reference](https://docs.bosphor.xyz/docs/reference/testnet)
 is the single up-to-date list.
 
 ## Docker
