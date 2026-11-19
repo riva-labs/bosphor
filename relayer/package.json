@@ -87,6 +87,7 @@
       "minimatch": "^11.0.9"
     },
     "test-exclude": {
+      "glob": "^13.0.6",
       "minimatch": "^11.0.9"
     },
     "@swc/cli": {
