@@ -18,6 +18,14 @@
  * PacketV1 payload, so lz-packet.ts::decodePacket handles it directly. No LZ
  * infra is involved, matching the self-operated design.
  *
+ * Discovery (bosphor#442): the loop pages the relayer's PacketSentEvents
+ * FORWARD from a persisted cursor (see return-cursor.ts), keeps only packets to
+ * the Solana EID and our Store PDA, and delivers each one in stream order. The
+ * same Sui sender also emits every EVM return; those are stepped over, so no
+ * amount of EVM traffic can push a Solana return out of view. The cursor never
+ * moves past a Solana return that is not delivered. The gap heal and stranded
+ * sweep below stay as safety nets.
+ *
  * SAFETY: without RUN=1 this is DRY-RUN only. It simulates the initVerify+verify
  * tx (read-only) and prints the resolved lz_receive account metas (proving the
  * account assembly), but NEVER broadcasts. RUN=1 enables the real send path.
@@ -49,6 +57,17 @@
  *   RETURN_SWEEP_HISTORY_PAGES  Sui event pages read to find a stranded packet (default 40)
  *   RETURN_SWEEP_MAX_DELIVER stranded nonces executed per sweep (default 10)
  *   RETURN_SWEEP_MAX_ATTEMPTS failed sweeps before a stranded nonce is abandoned (default 5)
+ *   DVN_STATE_DIR            where the forward event cursor is saved, as
+ *                            cursor-sui_solana.json (default ./data; without a
+ *                            volume it resets on recreate and re-anchors at the
+ *                            endpoint's inbound frontier)
+ *   RETURN_CURSOR_PAGE_SIZE  Sui events read per forward page (default 50)
+ *   RETURN_CURSOR_PAGES_PER_TICK  forward pages read per tick at most (default 20)
+ *   RETURN_CURSOR_ANCHOR_PAGES  Sui event pages (50 each) read back to anchor a
+ *                            cursor when none is saved (default 40)
+ *   RETURN_CURSOR_MAX_ATTEMPTS failed lz_receive attempts on a verified + committed
+ *                            nonce before the cursor hands it to the stranded
+ *                            sweep instead of waiting on it (default 5)
  *   SOLANA_RPC_URL, SOLANA_KEYPAIR   see config.ts
  */
 
@@ -90,7 +109,28 @@ import {
   sweepRange,
 } from "./return-heal.ts";
 import { createReturnMetrics } from "./metrics.ts";
-import { bytesFieldToHex, queryEventsBySender, transactionEvents, type SuiEvent } from "./sui-events.ts";
+import {
+  anchorFromHistory,
+  cursorAfterEmptyPage,
+  cursorDecision,
+  drainEvents,
+  isCursorRejected,
+  isRouteReturn,
+  parseCursorState,
+  toBytes32Hex,
+  type CursorStep,
+  type ReturnCursorState,
+  type ReturnRoute,
+  type StreamEvent,
+} from "./return-cursor.ts";
+import { loadState, saveState, stateDir } from "./state-file.ts";
+import {
+  bytesFieldToHex,
+  queryEventsBySender,
+  queryEventsForward,
+  transactionEvents,
+  type SuiEvent,
+} from "./sui-events.ts";
 
 // Anchor instruction discriminators for the bosphor-adapter program, pinned in
 // /home/arb/bosphor/sdk/src/solana/program.ts (KNOWN_DISCRIMINATORS.instruction).
@@ -127,6 +167,17 @@ const SWEEP_EVERY_TICKS = positiveInt("RETURN_SWEEP_EVERY_TICKS", process.env.RE
 const SWEEP_HISTORY_PAGES = positiveInt("RETURN_SWEEP_HISTORY_PAGES", process.env.RETURN_SWEEP_HISTORY_PAGES, 40);
 const SWEEP_MAX_DELIVER = positiveInt("RETURN_SWEEP_MAX_DELIVER", process.env.RETURN_SWEEP_MAX_DELIVER, 10);
 const SWEEP_MAX_ATTEMPTS = positiveInt("RETURN_SWEEP_MAX_ATTEMPTS", process.env.RETURN_SWEEP_MAX_ATTEMPTS, 5);
+// Forward event cursor (bosphor#442).
+const STATE_DIR = stateDir();
+const CURSOR_PATHWAY = "sui_solana";
+const CURSOR_PAGE_SIZE = positiveInt("RETURN_CURSOR_PAGE_SIZE", process.env.RETURN_CURSOR_PAGE_SIZE, 50);
+const CURSOR_PAGES_PER_TICK = positiveInt(
+  "RETURN_CURSOR_PAGES_PER_TICK",
+  process.env.RETURN_CURSOR_PAGES_PER_TICK,
+  20,
+);
+const CURSOR_ANCHOR_PAGES = positiveInt("RETURN_CURSOR_ANCHOR_PAGES", process.env.RETURN_CURSOR_ANCHOR_PAGES, 40);
+const CURSOR_MAX_ATTEMPTS = positiveInt("RETURN_CURSOR_MAX_ATTEMPTS", process.env.RETURN_CURSOR_MAX_ATTEMPTS, 5);
 // Same names and pathway label as the bosphor-dvn workers, so the DVN alerts apply.
 const metrics = createReturnMetrics("sui_solana");
 
@@ -157,13 +208,6 @@ const SUI_GRAPHQL = setting("SUI_GRAPHQL_URL", PRESET.suiGraphqlUrl);
 // sender returns a small, recent set the public RPCs serve reliably.
 const SUI_RELAYER_ADDR = setting("SUI_RELAYER_ADDR", PRESET.suiRelayerAddr);
 
-/** Left-pad a 0x hex value to a 32-byte (64 hex char) lowercase bytes32, no 0x. */
-function toBytes32Hex(hex: string): string {
-  const h = (hex.startsWith("0x") ? hex.slice(2) : hex).toLowerCase();
-  if (h.length > 64) throw new Error(`value exceeds 32 bytes: ${hex}`);
-  return h.padStart(64, "0");
-}
-
 function hexToBytes(hex: string): Uint8Array {
   const h = hex.startsWith("0x") ? hex.slice(2) : hex;
   return Uint8Array.from(Buffer.from(h, "hex"));
@@ -174,14 +218,19 @@ const SUI_OAPP_SENDER_B32 = toBytes32Hex(SUI_OAPP_PACKAGE_ID);
 // The packet receiver on the return leg is our Solana Store PDA as bytes32.
 const SOLANA_STORE_B32 = Buffer.from(storePda().toBuffer()).toString("hex");
 
+// Our return pathway: Sui (40378 testnet, 30378 mainnet) OApp -> our Store PDA
+// on Solana (40168 devnet, 30168 mainnet). EVM returns from the same Sui sender
+// differ in destination EID and receiver.
+const ROUTE: ReturnRoute = {
+  srcEid: SUI_EID,
+  dstEid: SOLANA_EID,
+  senderB32: SUI_OAPP_SENDER_B32,
+  receiverB32: SOLANA_STORE_B32,
+};
+
 /** Is this a return packet on our pathway (Sui OApp -> our Store PDA on Solana)? */
 function isOurReturn(pkt: LzPacket): boolean {
-  return (
-    pkt.srcEid === SUI_EID && // Sui (40378 testnet, 30378 mainnet)
-    pkt.dstEid === SOLANA_EID && // Solana (40168 devnet, 30168 mainnet)
-    toBytes32Hex(pkt.sender) === SUI_OAPP_SENDER_B32 &&
-    toBytes32Hex(pkt.receiver) === SOLANA_STORE_B32
-  );
+  return isRouteReturn(pkt, ROUTE);
 }
 
 /**
@@ -588,10 +637,9 @@ async function querySuiPacketSent(limit = 15): Promise<LzPacket[]> {
 }
 
 /**
- * Paginate the relayer's PacketSent history for our-return packets with the
- * given nonces. Used for older return nonces that scrolled out of the
- * newest-window before this worker delivered them (gap heal and stranded
- * sweep). `complete` is false when an RPC error cut the search short, so a
+ * Paginate the relayer's PacketSent history (newest first) for our-return
+ * packets with the given nonces. Used by the gap heal and the stranded sweep,
+ * the safety nets behind the forward cursor. `complete` is false when an RPC error cut the search short, so a
  * missing nonce is retried instead of being treated as past the history.
  */
 async function findReturnPackets(
@@ -652,8 +700,8 @@ async function deliveredNow(nonce: bigint): Promise<boolean> {
 }
 
 /**
- * Self-heal a nonce gap. LZ requires gapless inbound order, so if this worker
- * fell behind its newest-window and an older return nonce never delivered, every
+ * Self-heal a nonce gap. LZ requires gapless inbound order, so if an older
+ * return nonce never delivered (a safety net behind the forward cursor), every
  * later nonce reverts InvalidNonce and all escrow releases stall. Each tick we
  * read the endpoint's inbound frontier; if it lags the visible tip, backfill up
  * to RETURN_HEAL_MAX_DELIVER missing packets from history and deliver them in
@@ -706,6 +754,11 @@ interface SweepState {
   sweptThrough: bigint | null;
   stranded: bigint[];
   attempts: Record<string, number>;
+  /**
+   * Packets of stranded nonces handed over by the forward cursor, so the sweep
+   * does not have to find them in the newest-first history again.
+   */
+  packets: Map<bigint, LzPacket>;
 }
 
 /**
@@ -742,10 +795,11 @@ async function scanCommitted(from: bigint, to: bigint): Promise<{ nonce: bigint;
 
 /**
  * Execute return nonces that are verified + committed but never executed and sit
- * at or below the inbound frontier (the Solana port of bosphor#495). The main
- * loop only sees the newest 15 packets, and the gap heal moves on once a nonce
- * is committed, so without this sweep such a nonce is never executed: its
- * escrow is never released and the intent is never marked executed.
+ * at or below the inbound frontier (the Solana port of bosphor#495). The gap
+ * heal moves on once a nonce is committed, and the forward cursor hands over a
+ * committed nonce whose lz_receive keeps failing, so without this sweep such a
+ * nonce is never executed: its escrow is never released and the intent is
+ * never marked executed.
  *
  * Scans RETURN_SWEEP_BATCH nonces per call from `state.sweptThrough` up to the
  * frontier, then executes up to RETURN_SWEEP_MAX_DELIVER queued nonces. Each
@@ -771,10 +825,13 @@ async function sweepStranded(state: SweepState): Promise<void> {
   console.log(
     `sweep: ${state.stranded.length} stranded return nonce(s), executing ${batch.join(",")} (inbound frontier ${inbound})`,
   );
-  const { found, complete } = await findReturnPackets(batch, SWEEP_HISTORY_PAGES);
+  const lookup = batch.filter((n) => !state.packets.has(n));
+  const { found, complete } = lookup.length
+    ? await findReturnPackets(lookup, SWEEP_HISTORY_PAGES)
+    : { found: new Map<bigint, LzPacket>(), complete: true };
   const executed = new Map<bigint, boolean>();
   for (const n of batch) {
-    const pkt = found.get(n);
+    const pkt = state.packets.get(n) ?? found.get(n);
     if (!pkt) {
       // An RPC error is not the nonce's fault: leave it queued without an attempt.
       if (!complete) continue;
@@ -794,10 +851,189 @@ async function sweepStranded(state: SweepState): Promise<void> {
   const settled = settleSweepBatch(state.stranded, executed, state.attempts, SWEEP_MAX_ATTEMPTS);
   state.stranded = settled.queue;
   state.attempts = settled.attempts;
+  for (const n of [...state.packets.keys()]) {
+    if (!state.stranded.includes(n)) state.packets.delete(n);
+  }
   for (const n of settled.abandoned) {
     console.log(`sweep: nonce ${n} still unexecuted after ${SWEEP_MAX_ATTEMPTS} sweeps; abandoning it`);
     metrics.selfHeal.inc({ kind: "stranded", result: "abandoned" });
     metrics.errors.inc({ stage: "sweep" });
+  }
+}
+
+/**
+ * Forward cursor over the relayer's PacketSentEvents (bosphor#442). See
+ * return-cursor.ts for the rules; this is the I/O around them.
+ */
+interface ForwardState {
+  /** False until a cursor is loaded or anchored; a rejected cursor resets it. */
+  anchored: boolean;
+  /** Last event moved past; null before the first one (or with no history). */
+  cursor: string | null;
+  /** Events read but not moved past yet, oldest first. */
+  pending: StreamEvent[];
+  /** Failed lz_receive attempts per verified + committed nonce the cursor waits on. */
+  attempts: Map<bigint, number>;
+  /** Highest Solana return nonce the forward walk has seen (feeds the gap heal tip). */
+  tip: bigint;
+  /** Highest Solana return nonce moved past, for the state file and logs. */
+  lastNonce: bigint | null;
+  /** Whether the last state write failed (logged once per failure streak). */
+  saveFailing: boolean;
+}
+
+function toStreamEvent(ev: SuiEvent): StreamEvent {
+  if (!ev.cursor) throw new Error("Sui event without a cursor; cannot track the return stream");
+  return { cursor: ev.cursor, packet: packetFromEvent(ev) };
+}
+
+/** Save the cursor (RUN=1 only: a dry run never moves shared state). */
+function persistCursor(fwd: ForwardState): void {
+  if (!RUN || !fwd.cursor) return;
+  const err = saveState(STATE_DIR, CURSOR_PATHWAY, {
+    eventCursor: fwd.cursor,
+    lastNonce: fwd.lastNonce?.toString(),
+    updatedAt: new Date().toISOString(),
+  } satisfies ReturnCursorState);
+  if (err && !fwd.saveFailing) {
+    console.log(`cursor: could not save to ${STATE_DIR} (${err.message}); continuing in memory`);
+    metrics.errors.inc({ stage: "cursor" });
+  }
+  fwd.saveFailing = err !== null;
+}
+
+/**
+ * Anchor a cursor when none is saved: read the relayer's history back from the
+ * newest event until the newest Solana return at or below the endpoint's
+ * inbound frontier, start right after it, and queue everything newer. If no
+ * such return is within RETURN_CURSOR_ANCHOR_PAGES, all of the history read is
+ * queued and anything older is left to the gap heal. False when the frontier
+ * could not be read (retried next tick); a Sui read error throws to the tick.
+ */
+async function anchorCursor(fwd: ForwardState): Promise<boolean> {
+  const frontier = await readInboundNonce();
+  if (frontier === null) return false;
+  const history: StreamEvent[] = [];
+  let before: string | null = null;
+  let complete = false;
+  for (let page = 0; page < CURSOR_ANCHOR_PAGES; page++) {
+    const res = await queryEventsBySender(SUI_GRAPHQL, SUI_RELAYER_ADDR, {
+      type: PACKET_SENT_EVENT,
+      limit: 50,
+      cursor: before,
+    });
+    for (const ev of res.data) history.push(toStreamEvent(ev));
+    if (anchorFromHistory(history, ROUTE, frontier).anchor) break;
+    if (!res.hasNextPage) {
+      complete = true;
+      break;
+    }
+    before = res.nextCursor;
+  }
+  const { anchor, pending } = anchorFromHistory(history, ROUTE, frontier);
+  fwd.cursor = anchor;
+  fwd.pending = pending;
+  fwd.anchored = true;
+  if (anchor) {
+    console.log(
+      `cursor: anchored at the return at or below inbound frontier ${frontier}; ${pending.length} newer event(s) queued`,
+    );
+    persistCursor(fwd);
+  } else {
+    const scope = complete ? "the whole" : `${CURSOR_ANCHOR_PAGES} pages of`;
+    console.log(
+      `cursor: no return at or below inbound frontier ${frontier} in ${scope} Sui history; ` +
+        `draining the ${pending.length} event(s) read, oldest first${complete ? "" : " (older gaps are left to the heal)"}`,
+    );
+  }
+  return true;
+}
+
+/**
+ * Handle one Solana return the forward walk reached: deliver it, then decide
+ * whether the cursor may move past it (return-cursor.ts::cursorDecision).
+ */
+async function stepReturn(pkt: LzPacket, fwd: ForwardState, sweep: SweepState): Promise<CursorStep> {
+  if (pkt.nonce > fwd.tip) fwd.tip = pkt.nonce;
+  console.log(`[return nonce ${pkt.nonce}] ${pkt.guid}`);
+  metrics.packetsSeen.inc();
+  const r = await deliver(pkt);
+  metrics.execute.inc({ result: r });
+  if (r === "sent") metrics.lastSuccess.set(Math.floor(Date.now() / 1000));
+  if (r === "skipped") metrics.errors.inc({ stage: "deliver" });
+
+  let committed = false;
+  let attempts = 0;
+  if (r === "skipped") {
+    committed = returnDeliveryState(pkt.nonce, await readNonceState(connection(), pkt.nonce)) === "committed";
+    if (committed) {
+      attempts = (fwd.attempts.get(pkt.nonce) ?? 0) + 1;
+      fwd.attempts.set(pkt.nonce, attempts);
+    }
+  }
+  const decision = cursorDecision(r, committed, attempts, CURSOR_MAX_ATTEMPTS);
+  if (decision === "block") {
+    console.log(`cursor: holding at return nonce ${pkt.nonce} (${r}); retry next tick`);
+    return "block";
+  }
+  if (decision === "handoff") {
+    console.log(
+      `cursor: return nonce ${pkt.nonce} is committed but lz_receive failed ${attempts} times; ` +
+        `handing it to the stranded sweep and moving on`,
+    );
+    metrics.errors.inc({ stage: "cursor" });
+    if (!sweep.stranded.includes(pkt.nonce)) sweep.stranded.push(pkt.nonce);
+    sweep.packets.set(pkt.nonce, pkt);
+  }
+  fwd.attempts.delete(pkt.nonce);
+  if (fwd.lastNonce === null || pkt.nonce > fwd.lastNonce) fwd.lastNonce = pkt.nonce;
+  return "pass";
+}
+
+/**
+ * Page forward from the cursor and deliver every Solana return in order, at
+ * most RETURN_CURSOR_PAGES_PER_TICK pages per tick. Stops at the first return
+ * that is not delivered; the next tick starts again at it.
+ */
+async function advanceForward(fwd: ForwardState, sweep: SweepState): Promise<void> {
+  if (!fwd.anchored && !(await anchorCursor(fwd))) return;
+  for (let page = 0; page < CURSOR_PAGES_PER_TICK; page++) {
+    let caughtUp = false;
+    if (!fwd.pending.length) {
+      let res;
+      try {
+        res = await queryEventsForward(SUI_GRAPHQL, SUI_RELAYER_ADDR, {
+          type: PACKET_SENT_EVENT,
+          limit: CURSOR_PAGE_SIZE,
+          after: fwd.cursor,
+        });
+      } catch (e) {
+        if (fwd.cursor && isCursorRejected(e)) {
+          console.log(`cursor: Sui rejected the saved cursor (${errText(e)}); re-anchoring from chain state`);
+          metrics.errors.inc({ stage: "cursor" });
+          fwd.anchored = false;
+          fwd.cursor = null;
+          return;
+        }
+        throw e;
+      }
+      if (!res.data.length) {
+        const next = cursorAfterEmptyPage(fwd.cursor, res);
+        if (next === fwd.cursor) return;
+        fwd.cursor = next;
+        persistCursor(fwd);
+        continue;
+      }
+      fwd.pending = res.data.map(toStreamEvent);
+      caughtUp = !res.hasNextPage;
+    }
+    const r = await drainEvents(fwd.pending, ROUTE, MIN_NONCE, (pkt) => stepReturn(pkt, fwd, sweep));
+    fwd.pending = fwd.pending.slice(r.passed);
+    if (r.cursor) {
+      fwd.cursor = r.cursor;
+      persistCursor(fwd);
+    }
+    if (r.blocked || caughtUp) return;
   }
 }
 
@@ -834,32 +1070,40 @@ async function runLoop(): Promise<void> {
       `worker ${worker.publicKey.toBase58()}; store ${storePda().toBase58()}; RUN=${RUN}`,
   );
   metrics.serve(METRICS_PORT);
-  const seen = new Set<string>();
   // In memory only: a restart rescans RETURN_SWEEP_LOOKBACK nonces under the
   // frontier, which is a handful of getMultipleAccountsInfo calls.
-  const sweep: SweepState = { sweptThrough: null, stranded: [], attempts: {} };
+  const sweep: SweepState = { sweptThrough: null, stranded: [], attempts: {}, packets: new Map() };
+  const saved = parseCursorState(loadState(STATE_DIR, CURSOR_PATHWAY));
+  const fwd: ForwardState = {
+    anchored: saved !== null,
+    cursor: saved,
+    pending: [],
+    attempts: new Map(),
+    tip: 0n,
+    lastNonce: null,
+    saveFailing: false,
+  };
+  console.log(
+    saved
+      ? `cursor: resuming from ${STATE_DIR}/cursor-${CURSOR_PATHWAY}.json`
+      : `cursor: none saved in ${STATE_DIR}; anchoring at the endpoint's inbound frontier`,
+  );
   // A transient RPC error is never fatal: it is logged and the tick retried,
   // backing off with jitter while the RPCs (Solana or Sui) keep answering 429.
   // A process exit would restart gap-heal from scratch and add even more load on
   // the limited RPC.
   for (let tick = 0; ; tick++) {
     try {
+      // Safety net first: heal any gap below the visible tip, so the endpoint's
+      // gapless frontier can advance and lz_receive stops reverting
+      // InvalidNonce. The tip is the newest window or the forward walk,
+      // whichever has seen further.
       const packets = await querySuiPacketSent();
-      // Heal any gap below the visible tip first, so the endpoint's gapless
-      // frontier can advance and lz_receive stops reverting InvalidNonce.
-      const tip = packets.reduce((m, p) => (p.nonce > m ? p.nonce : m), 0n);
+      const windowTip = packets.reduce((m, p) => (p.nonce > m ? p.nonce : m), 0n);
+      const tip = windowTip > fwd.tip ? windowTip : fwd.tip;
       if (tip > 0n) await healReturnGap(tip);
-      for (const pkt of packets.reverse()) {
-        if (seen.has(pkt.guid)) continue;
-        if (pkt.nonce < MIN_NONCE) continue;
-        console.log(`[return nonce ${pkt.nonce}] ${pkt.guid}`);
-        metrics.packetsSeen.inc();
-        const r = await deliver(pkt);
-        metrics.execute.inc({ result: r });
-        if (r === "sent") metrics.lastSuccess.set(Math.floor(Date.now() / 1000));
-        if (r === "skipped") metrics.errors.inc({ stage: "deliver" });
-        else seen.add(pkt.guid);
-      }
+      // Discovery: every Solana return, in order, from the forward cursor.
+      await advanceForward(fwd, sweep);
       if (tick % SWEEP_EVERY_TICKS === 0) await sweepStranded(sweep);
     } catch (e) {
       rpcRateLimits.note(e);
