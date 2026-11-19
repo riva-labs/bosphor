@@ -74,3 +74,6 @@ cloudflared/config.yml
 
 # brand asset drop (full mascot set; website tracks the subset it uses)
 bosphor_mascot/
+
+# Solana return worker state (cursor-sui_solana.json) when run from the host
+scripts/solana/data/
