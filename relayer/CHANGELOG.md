@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.18.1 (2026-11-19)
+
+### Bug Fixes
+
+- fix(relayer): move test-exclude to glob 13 so coverage globbing works
+- fix(relayer): patch vulnerable transitive dependencies
+
 ## 0.18.0 (2026-11-17)
 
 ### Features
