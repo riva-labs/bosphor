@@ -152,6 +152,26 @@ function scheduleBalanceRefresh(probe: ChainProbe, intervalMs: number): void {
   setInterval(() => void tick(), intervalMs);
 }
 
+const SOLANA_INIT_RETRY_MS = 60_000;
+/** Set when the Solana probe failed to initialise at startup; retried by main. */
+let deferredSolanaInit: (() => Promise<ChainProbe>) | null = null;
+
+/** Retry a deferred Solana probe init until it succeeds, then schedule it. Never throws. */
+function retrySolanaInit(init: () => Promise<ChainProbe>): void {
+  const attempt = async (): Promise<void> => {
+    try {
+      const probe = await init();
+      console.log('[canary] Solana probe enabled (after retry)');
+      scheduleChain(probe, probeIntervalMs(probe.chain));
+      scheduleBalanceRefresh(probe, BALANCE_REFRESH_MS);
+    } catch (err) {
+      console.error(`[canary] Solana probe init still failing: ${err}`);
+      setTimeout(() => void attempt(), SOLANA_INIT_RETRY_MS);
+    }
+  };
+  setTimeout(() => void attempt(), SOLANA_INIT_RETRY_MS);
+}
+
 async function buildProbes(): Promise<ChainProbe[]> {
   const probes: ChainProbe[] = [];
 
@@ -186,26 +206,34 @@ async function buildProbes(): Promise<ChainProbe[]> {
       process.exit(1);
     }
     const { createSolanaProbe } = await import('./probes/solana.ts');
-    probes.push(
-      await createSolanaProbe({
-        rpcUrl: process.env.SOLANA_RPC_URL,
-        programId: process.env.SOLANA_PROGRAM_ID || '7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF',
-        keypair,
-        relayerUrl: RELAYER_URL,
-        dstEid: Number(process.env.SOLANA_DST_EID) || DST_EID,
-        suiReceiver:
-          process.env.SOLANA_SUI_RECEIVER ||
-          '0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5',
-        storageEpochs: STORAGE_EPOCHS,
-        nativeFee: BigInt(process.env.SOLANA_NATIVE_FEE || '3000000'),
-        computeUnitLimit: Number(process.env.SOLANA_CU_LIMIT) || 400_000,
-        minBalanceSol: Number(process.env.SOLANA_MIN_BALANCE_SOL) || 0.05,
-        endpointId:
-          process.env.SOLANA_ENDPOINT_ID || '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6',
-        ulnId: process.env.SOLANA_ULN_ID || '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH',
-      }),
-    );
-    console.log('[canary] Solana probe enabled');
+    const solanaConfig = {
+    rpcUrl: process.env.SOLANA_RPC_URL,
+    programId: process.env.SOLANA_PROGRAM_ID || '7RCSzaG9NsK2BNMmLqQ22Zqrf6Te6Wvi5MNpknoit1AF',
+    keypair,
+    relayerUrl: RELAYER_URL,
+    dstEid: Number(process.env.SOLANA_DST_EID) || DST_EID,
+    suiReceiver:
+      process.env.SOLANA_SUI_RECEIVER ||
+      '0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5',
+    storageEpochs: STORAGE_EPOCHS,
+    nativeFee: BigInt(process.env.SOLANA_NATIVE_FEE || '3000000'),
+    computeUnitLimit: Number(process.env.SOLANA_CU_LIMIT) || 400_000,
+    minBalanceSol: Number(process.env.SOLANA_MIN_BALANCE_SOL) || 0.05,
+    endpointId:
+      process.env.SOLANA_ENDPOINT_ID || '76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6',
+    ulnId: process.env.SOLANA_ULN_ID || '7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH',
+    };
+    // Init reads LayerZero accounts over RPC. A rate-limited or down Solana RPC
+    // must not take the whole canary (EVM probe, metrics, wallet watch) down
+    // with it: retry in the background until it succeeds.
+    try {
+      probes.push(await createSolanaProbe(solanaConfig));
+      console.log('[canary] Solana probe enabled');
+    } catch (err) {
+      deferredSolanaInit = () => createSolanaProbe(solanaConfig);
+      Sentry.captureException(err);
+      console.error(`[canary] Solana probe init failed, retrying every ${SOLANA_INIT_RETRY_MS / 1000}s: ${err}`);
+    }
   }
 
   return probes;
@@ -326,6 +354,7 @@ async function main(): Promise<void> {
   for (const probe of probes) scheduleChain(probe, probeIntervalMs(probe.chain));
   // Keep wallet balances fresh between round-trips (near-live in Grafana).
   for (const probe of probes) scheduleBalanceRefresh(probe, BALANCE_REFRESH_MS);
+  if (deferredSolanaInit) retrySolanaInit(deferredSolanaInit);
   // Every service wallet on every chain (and the testnet-only top-up).
   if (walletWatcher) scheduleWalletWatch(walletWatcher, WALLET_WATCH_INTERVAL_MS);
 }
