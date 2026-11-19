@@ -17,6 +17,11 @@ route:
     - matchers: [alertname="Watchdog"]
       receiver: ntfy-heartbeat
       repeat_interval: 24h
+    # When template-based delivery itself is failing, page with a plain
+    # message that does not depend on the ntfy template.
+    - matchers: [alertname="BosphorAlertDeliveryFailing"]
+      receiver: ntfy-plain
+      repeat_interval: 1h
     - matchers: [severity="critical"]
       receiver: ntfy-critical
       repeat_interval: 1h
@@ -45,5 +50,10 @@ receivers:
   - name: ntfy-heartbeat
     webhook_configs:
       - url: http://ntfy/bosphor-alerts?template=bosphor&priority=min&tags=heartbeat
+        send_resolved: false
+        http_config: *ntfy_auth
+  - name: ntfy-plain
+    webhook_configs:
+      - url: http://ntfy/bosphor-alerts?title=Bosphor%20alert%20delivery%20is%20failing&priority=urgent&tags=rotating_light
         send_resolved: false
         http_config: *ntfy_auth

@@ -119,11 +119,11 @@ services:
   # Self-hosted push notifications (ntfy.bosphor.xyz via the cloudflared tunnel,
   # host port 3020). Private: deny-all by default, operator user + token only.
   ntfy:
-    image: binwiederhier/ntfy:latest
+    # Config and alert template are baked into the image (monitoring/ntfy/
+    # Dockerfile), never bind-mounted from the checkout: rebuild to change them.
+    build: ./monitoring/ntfy
     command: ["serve"]
     volumes:
-      - ./monitoring/ntfy/server.yml:/etc/ntfy/server.yml:ro
-      - ./monitoring/ntfy/templates:/etc/ntfy/templates:ro
       - bosphor-ntfydata:/var/lib/ntfy
     ports:
       - "127.0.0.1:3020:80"
