@@ -89,10 +89,13 @@ services:
       - RETURN_MODE=loop
       - RETURN_MIN_NONCE=2
       - SOLANA_KEYPAIR=/keypair.json
+      # Forward cursor over Sui PacketSentEvents (#442); kept across recreates.
+      - DVN_STATE_DIR=/data
       - SUI_ENDPOINT_V2=0xabf9629418d997fcc742a5ca22820241b72fb53691f010bc964eb49b4bd2263a
       - SUI_LZ_PACKAGE_ID=0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5
     volumes:
       - /home/arb/.config/solana/bosphor-devnet.json:/keypair.json:ro
+      - dvn-state:/data
     restart: unless-stopped
 
 volumes:
