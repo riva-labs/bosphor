@@ -29,7 +29,10 @@
     "typescript": "^7.0.2"
   },
   "overrides": {
-    "jayson": "^5.0.0",
+    "jayson": {
+      ".": "^5.0.0",
+      "ws": "^8.23.0"
+    },
     "@coral-xyz/anchor": {
       "toml": "^5.0.1"
     },
