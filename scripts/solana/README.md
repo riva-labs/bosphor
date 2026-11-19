@@ -40,6 +40,30 @@ Every script reads `NETWORK` (see `src/config.ts`):
 Unset `NETWORK` keeps the exact devnet behavior. With `NETWORK=mainnet` a
 missing value fails at startup instead of falling back to devnet.
 
+## Return worker event cursor
+
+`npm run solana-return` (loop mode) finds Sui -> Solana return packets by paging
+the Sui relayer's `PacketSentEvent`s forward from a saved cursor. It keeps only
+packets to the Solana EID and our Store PDA (the same Sui sender also emits
+every EVM return) and delivers them in order. The cursor never moves past a
+return that is not delivered. The gap heal and stranded sweep still run as
+safety nets.
+
+| Env | Default | Meaning |
+|---|---|---|
+| `DVN_STATE_DIR` | `./data` | Where `cursor-sui_solana.json` is saved (same layout as bosphor-dvn) |
+| `RETURN_CURSOR_PAGE_SIZE` | `50` | Sui events per forward page |
+| `RETURN_CURSOR_PAGES_PER_TICK` | `20` | Forward pages read per tick at most |
+| `RETURN_CURSOR_ANCHOR_PAGES` | `40` | History pages read back to anchor a cursor when none is saved |
+| `RETURN_CURSOR_MAX_ATTEMPTS` | `5` | Failed `lz_receive` attempts on a committed nonce before it moves to the stranded sweep |
+
+With no saved cursor (first boot, or no volume) the worker anchors at the
+newest Solana return at or below the endpoint's inbound frontier. Without a
+volume the file lives in the container's writable layer: it survives a restart
+but not a recreate, and a recreate just re-anchors. Mount a volume at
+`DVN_STATE_DIR` to keep it across recreates. Delete the file to force a
+re-anchor; delivered nonces are detected on chain and skipped.
+
 ## Confirmed addresses (devnet)
 
 | Thing | Address |

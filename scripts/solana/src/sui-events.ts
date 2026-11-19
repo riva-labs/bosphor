@@ -13,6 +13,8 @@
 export interface SuiEvent {
   type: string;
   parsedJson: Record<string, unknown>;
+  /** Opaque GraphQL position of this event, for paging forward from it. */
+  cursor?: string;
 }
 
 export interface SuiEventPage {
@@ -57,15 +59,26 @@ interface GqlEventNode {
   contents: { type: { repr: string }; json: Record<string, unknown> };
 }
 
-function toEvent(n: GqlEventNode): SuiEvent {
-  return { type: n.contents.type.repr, parsedJson: n.contents.json };
+interface GqlEventEdge {
+  cursor: string;
+  node: GqlEventNode;
+}
+
+function toEvent(n: GqlEventNode, cursor?: string): SuiEvent {
+  const ev: SuiEvent = { type: n.contents.type.repr, parsedJson: n.contents.json };
+  if (cursor) ev.cursor = cursor;
+  return ev;
+}
+
+function edgesToEvents(edges: GqlEventEdge[] | undefined): SuiEvent[] {
+  return (edges ?? []).map((e) => toEvent(e.node, e.cursor));
 }
 
 const EVENTS_QUERY = `
 query ($sender: SuiAddress!, $type: String, $last: Int!, $before: String) {
   events(last: $last, before: $before, filter: { sender: $sender, type: $type }) {
     pageInfo { hasPreviousPage startCursor }
-    nodes { contents { type { repr } json } }
+    edges { cursor node { contents { type { repr } json } } }
   }
 }`;
 
@@ -85,12 +98,53 @@ export async function queryEventsBySender(
     before: opts.cursor ?? null,
   });
   const conn = data?.events;
-  const nodes: GqlEventNode[] = conn?.nodes ?? [];
   // GraphQL returns the window oldest -> newest; JSON-RPC callers expect newest first.
   return {
-    data: nodes.map(toEvent).reverse(),
+    data: edgesToEvents(conn?.edges).reverse(),
     hasNextPage: Boolean(conn?.pageInfo?.hasPreviousPage),
     nextCursor: conn?.pageInfo?.startCursor ?? null,
+  };
+}
+
+const EVENTS_FORWARD_QUERY = `
+query ($sender: SuiAddress!, $type: String, $first: Int!, $after: String) {
+  events(first: $first, after: $after, filter: { sender: $sender, type: $type }) {
+    pageInfo { hasNextPage endCursor }
+    edges { cursor node { contents { type { repr } json } } }
+  }
+}`;
+
+export interface SuiForwardPage {
+  /** Events strictly after the requested cursor, OLDEST first, each with its cursor. */
+  data: SuiEvent[];
+  /** More events exist after this page right now. */
+  hasNextPage: boolean;
+  /** Where this page's scan ended (used only to step over an empty filtered page). */
+  endCursor: string | null;
+}
+
+/**
+ * Events emitted by `sender`'s transactions after `after` (null = from the start
+ * of the queryable history), oldest first. The forward-cursor counterpart of
+ * queryEventsBySender: paging forward from a persisted cursor sees every event
+ * exactly once, however many unrelated events land in between (bosphor#442).
+ */
+export async function queryEventsForward(
+  url: string,
+  sender: string,
+  opts: { type?: string; limit: number; after: string | null },
+): Promise<SuiForwardPage> {
+  const data = await suiGraphql(url, EVENTS_FORWARD_QUERY, {
+    sender,
+    type: opts.type ?? null,
+    first: opts.limit,
+    after: opts.after,
+  });
+  const conn = data?.events;
+  return {
+    data: edgesToEvents(conn?.edges),
+    hasNextPage: Boolean(conn?.pageInfo?.hasNextPage),
+    endCursor: conn?.pageInfo?.endCursor ?? null,
   };
 }
 
@@ -106,7 +160,7 @@ export async function transactionEvents(url: string, digest: string): Promise<Su
   const data = await suiGraphql(url, TX_EVENTS_QUERY, { digest });
   const tx = data?.transaction;
   if (!tx) throw new Error(`sui tx ${digest} not found`);
-  return ((tx.effects?.events?.nodes ?? []) as GqlEventNode[]).map(toEvent);
+  return ((tx.effects?.events?.nodes ?? []) as GqlEventNode[]).map((n) => toEvent(n));
 }
 
 /**
