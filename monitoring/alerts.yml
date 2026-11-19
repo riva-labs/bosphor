@@ -490,3 +490,30 @@ groups:
           fix: >-
             docker logs --tail 50 bosphor-pg-backup-1 shows which database and
             whether pg_dump or the R2 upload failed.
+
+      # The alert pipeline itself: Alertmanager could not deliver to ntfy.
+      # Routed to a template-free receiver so it still arrives.
+      - alert: BosphorAlertDeliveryFailing
+        expr: sum(increase(alertmanager_notifications_failed_total[15m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bosphor alert delivery to ntfy is failing"
+          fix: >-
+            docker logs --tail 20 bosphor-alertmanager-1 shows the ntfy error.
+            Template missing: rebuild ntfy (docker compose ... up -d --build
+            --no-deps ntfy). Auth: check monitoring/secrets/ntfy_token.
+
+      # A service keeps restarting. Staleness alerts suppress their first 40m
+      # of uptime, so a crash loop would otherwise never page.
+      - alert: BosphorServiceCrashLooping
+        expr: changes(process_start_time_seconds[30m]) >= 3
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} restarted {{ $value }} times in 30m"
+          fix: >-
+            docker logs --tail 50 on the container for {{ $labels.job }} shows
+            the fatal error on each start (often an RPC quota or bad config).
